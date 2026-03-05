@@ -1,0 +1,49 @@
+{
+  "project": {
+    "name": "Seahorse Agent",
+    "description": "High-Performance AI Agent — Rust Core + Python Intelligence",
+    "version": "0.1.0"
+  },
+  "languages": ["rust", "python", "toml", "yaml"],
+  "stack": {
+    "core": "Rust (Tokio, Axum, PyO3, Serde)",
+    "ai": "Python (LiteLLM, FastAPI, LangChain, Pydantic v2)",
+    "bridge": "PyO3 + maturin",
+    "memory": "HNSW (Rust native)",
+    "sandbox": "Wasmtime",
+    "observability": "OpenTelemetry + Tokio-tracing"
+  },
+  "conventions": {
+    "rust": {
+      "edition": "2021",
+      "style": "rustfmt default",
+      "lints": ["clippy::all", "clippy::pedantic"],
+      "async_runtime": "tokio",
+      "error_handling": "thiserror + anyhow",
+      "naming": "snake_case for functions/vars, PascalCase for types"
+    },
+    "python": {
+      "version": ">=3.11",
+      "style": "ruff + black",
+      "type_hints": "required (strict mypy)",
+      "async": "asyncio + anyio",
+      "naming": "snake_case for functions/vars, PascalCase for classes"
+    }
+  },
+  "hooks": {
+    "pre_task": ".claude/hooks/pre_task.sh",
+    "post_task": ".claude/hooks/post_task.sh",
+    "pre_commit": ".claude/hooks/pre_commit.sh"
+  },
+  "skills": {
+    "code-review": ".claude/skills/code-review/SKILL.md",
+    "refactor": ".claude/skills/refactor/SKILL.md",
+    "release": ".claude/skills/release/SKILL.md",
+    "testing": ".claude/skills/testing/SKILL.md",
+    "rust-core": ".claude/skills/rust-core/SKILL.md",
+    "python-ai": ".claude/skills/python-ai/SKILL.md",
+    "ffi-bridge": ".claude/skills/ffi-bridge/SKILL.md",
+    "performance": ".claude/skills/performance/SKILL.md",
+    "architecture": ".claude/skills/architecture/SKILL.md"
+  }
+}

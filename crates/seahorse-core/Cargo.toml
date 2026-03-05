@@ -1,0 +1,25 @@
+[package]
+name    = "seahorse-core"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+tokio       = { workspace = true }
+serde       = { workspace = true }
+serde_json  = { workspace = true }
+thiserror   = { workspace = true }
+anyhow      = { workspace = true }
+tracing     = { workspace = true }
+once_cell   = { workspace = true }
+bytes       = { workspace = true }
+uuid        = { workspace = true }
+hnsw_rs     = { workspace = true }
+wasmtime    = { workspace = true }
+bytemuck    = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true }
+
+[[bench]]
+name    = "memory_bench"
+harness = false

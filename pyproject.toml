@@ -1,0 +1,59 @@
+[project]
+name = "seahorse-ai"
+version = "0.1.0"
+description = "High-Performance AI Agent — Python Intelligence Layer"
+requires-python = ">=3.11"
+dependencies = [
+    "litellm>=1.35",
+    "fastapi>=0.111",
+    "uvicorn[standard]>=0.29",
+    "pydantic>=2.7",
+    "anyio>=4.3",
+    "httpx>=0.27",
+    "opentelemetry-sdk>=1.24",
+    "opentelemetry-instrumentation-fastapi>=0.44b0",
+    "maturin>=1.12.6",
+    "numpy>=2.4.2",
+]
+
+[build-system]
+requires      = ["maturin>=1.5,<2.0"]
+build-backend = "maturin"
+
+[tool.maturin]
+features      = ["pyo3/extension-module"]
+python-source = "python"
+module-name   = "seahorse_ffi._core"
+manifest-path = "crates/seahorse-ffi/Cargo.toml"
+
+[tool.uv]
+dev-dependencies = [
+    "pytest>=8",
+    "pytest-asyncio>=0.23",
+    "mypy>=1.10",
+    "ruff>=0.4",
+    "httpx>=0.27",
+]
+
+# ── ruff ──────────────────────────────────────────────────────────────────────
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "ANN", "ASYNC"]
+ignore = [
+    "ANN101",  # missing self annotation
+    "ANN102",  # missing cls annotation
+]
+
+# ── mypy ──────────────────────────────────────────────────────────────────────
+[tool.mypy]
+strict              = true
+python_version      = "3.11"
+ignore_missing_imports = true
+
+# ── pytest ────────────────────────────────────────────────────────────────────
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths    = ["python/tests"]
+addopts      = "-q --tb=short"

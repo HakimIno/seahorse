@@ -1,0 +1,25 @@
+[package]
+name    = "seahorse-ffi"
+version.workspace = true
+edition.workspace = true
+
+[lib]
+name       = "seahorse_ffi"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+seahorse-core = { path = "../seahorse-core" }
+pyo3          = { workspace = true }
+tokio         = { workspace = true }
+serde_json    = { workspace = true }
+once_cell     = { workspace = true }
+bytemuck      = { workspace = true }
+thiserror     = { workspace = true }
+anyhow        = { workspace = true }
+tracing       = { workspace = true }
+
+[features]
+extension-module = ["pyo3/extension-module"]
+
+[build-dependencies]
+pyo3-build-config = { version = "0.21.2", features = ["resolve-config"] }

@@ -1,0 +1,24 @@
+use thiserror::Error;
+
+#[derive(Debug, Error)]
+pub enum CoreError {
+    #[error("memory error: {0}")]
+    Memory(String),
+
+    #[error("sandbox error: {kind}")]
+    Sandbox { kind: String },
+
+    #[error("config error: {0}")]
+    Config(String),
+
+    #[error("channel closed")]
+    ChannelClosed,
+
+    #[error("agent not found: {id}")]
+    AgentNotFound { id: String },
+
+    #[error("io error: {0}")]
+    Io(#[from] std::io::Error),
+}
+
+pub type CoreResult<T> = Result<T, CoreError>;

@@ -1,0 +1,30 @@
+# Rust
+/target/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+/.venv/
+/dist/
+/build/
+*.egg-info/
+.wheels/
+
+# Environment / Local Config
+.env
+.pyo3_python_hash
+/dev.sh
+
+# Temporary test scripts
+python/test_*.py
+test_*.py
+
+# Node.js
+node_modules/
+package-lock.json
+npm-debug.log*
+
+# OS specific
+.DS_Store
+Thumbs.db
