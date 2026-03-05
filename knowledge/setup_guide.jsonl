@@ -1,0 +1,8 @@
+{"text": "Seahorse Agent supports three LLM providers: Anthropic Claude, OpenAI GPT-4, and any OpenRouter-compatible model.", "source": "setup_guide"}
+{"text": "To configure the LLM model, set the SEAHORSE_LLM_MODEL environment variable. Example: SEAHORSE_LLM_MODEL=openrouter/anthropic/claude-3.5-sonnet", "source": "setup_guide"}
+{"text": "The SEAHORSE_HTTP_PORT environment variable controls which port the HTTP server listens on. Default is 3001.", "source": "setup_guide"}
+{"text": "The SEAHORSE_EMBED_MODEL variable selects the embedding model for RAG. Default: openrouter/openai/text-embedding-3-small", "source": "setup_guide"}
+{"text": "The SEAHORSE_MAX_STEPS variable limits the number of ReAct reasoning steps per agent run. Default is 10.", "source": "setup_guide"}
+{"text": "To enable OpenTelemetry tracing export to Jaeger, set OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317 and run docker compose up -d.", "source": "setup_guide"}
+{"text": "The agent workspace for file operations is controlled by SEAHORSE_WORKSPACE. Default: ./workspace directory.", "source": "setup_guide"}
+{"text": "dev.sh is a convenience script that sets all required environment variables and rebuilds the binary when dependencies change.", "source": "setup_guide"}

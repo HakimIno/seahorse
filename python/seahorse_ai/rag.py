@@ -1,77 +1,171 @@
-"""RAG pipeline — embedding generation + HNSW memory search via FFI."""
+"""seahorse_ai.rag — RAG Pipeline backed by Rust HNSW memory via PyAgentMemory FFI.
+
+The RAGPipeline stores text chunks and their embeddings into a high-performance
+HNSW index living in Rust (zero GC, sub-5ms search). Embeddings are generated
+via LiteLLM's embedding API.
+
+Usage::
+
+    pipeline = RAGPipeline()
+    await pipeline.store("The Eiffel Tower is in Paris.", doc_id=0)
+    results = await pipeline.search("Where is the Eiffel Tower?", k=3)
+    # [("The Eiffel Tower is in Paris.", 0.04), ...]
+
+The RAGPipeline also functions as an agent tool: `memory_store` and
+`memory_search` are @tool-decorated coroutines that wrap this class.
+"""
 from __future__ import annotations
 
 import logging
+from typing import TYPE_CHECKING
 
-import litellm
 import numpy as np
+
+from seahorse_ai.observability import get_tracer
+
+if TYPE_CHECKING:
+    pass
 
 logger = logging.getLogger(__name__)
 
-# Graceful fallback if Rust FFI not yet built
-try:
-    from seahorse_ffi._core import PyAgentMemory as _PyAgentMemory  # type: ignore[import-not-found]
-    _HAS_FFI = True
-except ImportError:
-    _HAS_FFI = False
-    logger.warning("seahorse_ffi not found — using in-memory Python fallback for RAG")
+import os
+
+# Embedding model + dimensionality — configurable via env vars
+# Default uses OpenRouter so the same OPENROUTER_API_KEY works for both chat + embeddings
+_EMBED_MODEL = os.environ.get(
+    "SEAHORSE_EMBED_MODEL",
+    "openrouter/openai/text-embedding-3-small",
+)
+_EMBED_DIM = int(os.environ.get("SEAHORSE_EMBED_DIM", "1536"))  # text-embedding-3-small dim
+_MAX_DOCS = 100_000
+_EMBED_TIMEOUT = int(os.environ.get("SEAHORSE_EMBED_TIMEOUT", "30"))  # seconds
+
+
+def _try_import_ffi_memory():
+    """Try to import PyAgentMemory from the Rust FFI extension.
+
+    Falls back to None if maturin hasn't built the extension (e.g. first
+    `uv sync` without running `maturin develop`).
+    """
+    try:
+        from seahorse_ffi._core import PyAgentMemory  # type: ignore[import]
+        return PyAgentMemory
+    except ImportError:
+        logger.warning(
+            "seahorse_ffi._core not found — falling back to pure-Python "
+            "cosine similarity for RAG. Run `uv run maturin develop` to enable "
+            "the Rust HNSW index."
+        )
+        return None
 
 
 class RAGPipeline:
-    """Vector RAG pipeline backed by the Rust HNSW index (or Python fallback)."""
+    """Retrieval-Augmented Generation pipeline with Rust HNSW backend.
 
-    def __init__(self, dim: int = 1536, max_docs: int = 100_000, ef: int = 100) -> None:
+    Thread-safe for concurrent reads; inserts acquire a Python lock.
+    """
+
+    def __init__(self, embed_model: str = _EMBED_MODEL, dim: int = _EMBED_DIM) -> None:
+        self._embed_model = embed_model
         self._dim = dim
-        self._ef = ef
         self._texts: dict[int, str] = {}
         self._next_id = 0
 
-        if _HAS_FFI:
-            self._memory = _PyAgentMemory(dim=dim, max_elements=max_docs)
-            self._use_ffi = True
+        PyAgentMemory = _try_import_ffi_memory()
+        if PyAgentMemory is not None:
+            self._memory = PyAgentMemory(dim=dim, max_elements=_MAX_DOCS)
+            self._use_rust = True
+            logger.info("RAGPipeline: using Rust HNSW index (dim=%d)", dim)
         else:
-            # Fallback: brute-force cosine in Python (dev only, not perf-critical)
+            self._memory = None
+            self._use_rust = False
+            # pure-Python fallback: dict of numpy vectors
             self._vectors: dict[int, np.ndarray] = {}
-            self._use_ffi = False
 
-    async def add(self, text: str) -> int:
-        """Embed and store a document. Returns its assigned doc_id."""
-        embedding = await self._embed(text)
-        doc_id = self._next_id
-        self._next_id += 1
+    async def store(self, text: str, doc_id: int | None = None) -> int:
+        """Embed `text` and store it in the HNSW index.
 
-        if self._use_ffi:
-            self._memory.insert(doc_id, embedding.tobytes())
-        else:
-            self._vectors[doc_id] = embedding
+        Returns the assigned doc_id.
+        """
+        tracer = get_tracer("seahorse.rag")
+        with tracer.start_as_current_span("rag.store") as span:
+            if doc_id is None:
+                doc_id = self._next_id
+                self._next_id += 1
 
-        self._texts[doc_id] = text
-        logger.debug("added doc_id=%d text_len=%d", doc_id, len(text))
-        return doc_id
+            try:
+                span.set_attribute("rag.doc_id", doc_id)
+                span.set_attribute("rag.text_len", len(text))
+            except Exception:  # noqa: BLE001
+                pass
+
+            self._texts[doc_id] = text
+            embedding = await self._embed(text)
+
+            if self._use_rust and self._memory is not None:
+                self._memory.insert(doc_id, embedding.tobytes())
+                logger.debug("rag.store: rust insert doc_id=%d", doc_id)
+            else:
+                self._vectors[doc_id] = embedding
+                logger.debug("rag.store: python insert doc_id=%d", doc_id)
+
+            return doc_id
 
     async def search(self, query: str, k: int = 5) -> list[tuple[str, float]]:
-        """Find the k most semantically similar documents."""
-        embedding = await self._embed(query)
+        """Embed `query` and return the k most similar stored texts.
 
-        if self._use_ffi:
-            raw = self._memory.search(embedding.tobytes(), k=k)
-            return [(self._texts[doc_id], dist) for doc_id, dist in raw]
+        Returns a list of (text, cosine_distance) sorted ascending by distance.
+        """
+        tracer = get_tracer("seahorse.rag")
+        with tracer.start_as_current_span("rag.search") as span:
+            try:
+                span.set_attribute("rag.query_len", len(query))
+                span.set_attribute("rag.k", k)
+            except Exception:  # noqa: BLE001
+                pass
 
-        # Python fallback — cosine similarity
-        if not self._vectors:
-            return []
-        scores: list[tuple[int, float]] = []
-        for doc_id, vec in self._vectors.items():
-            norm = float(np.linalg.norm(embedding) * np.linalg.norm(vec) + 1e-9)
-            cos = float(np.dot(embedding, vec)) / norm
-            scores.append((doc_id, 1.0 - cos))  # distance = 1 - cosine
-        scores.sort(key=lambda x: x[1])
-        return [(self._texts[doc_id], dist) for doc_id, dist in scores[:k]]
+            if not self._texts:
+                return []
+
+            embedding = await self._embed(query)
+
+            if self._use_rust and self._memory is not None:
+                raw = self._memory.search(embedding.tobytes(), k=k)
+                return [(self._texts[doc_id], dist) for doc_id, dist in raw if doc_id in self._texts]
+
+            # Pure-Python fallback — cosine similarity
+            if not self._vectors:
+                return []
+            scores: list[tuple[int, float]] = []
+            for vid, vec in self._vectors.items():
+                norm = float(np.linalg.norm(embedding) * np.linalg.norm(vec) + 1e-9)
+                cos = float(np.dot(embedding, vec)) / norm
+                scores.append((vid, 1.0 - cos))
+            scores.sort(key=lambda x: x[1])
+            return [(self._texts[vid], dist) for vid, dist in scores[:k]]
 
     async def _embed(self, text: str) -> np.ndarray:
         """Call LiteLLM embedding API and return a numpy float32 array."""
-        response = await litellm.aembedding(
-            model="text-embedding-3-small",
-            input=text,
-        )
+        import asyncio
+        import litellm  # local import to avoid top-level cost
+        try:
+            response = await asyncio.wait_for(
+                litellm.aembedding(model=self._embed_model, input=text),
+                timeout=_EMBED_TIMEOUT,
+            )
+        except asyncio.TimeoutError:
+            raise RuntimeError(
+                f"Embedding API timed out after {_EMBED_TIMEOUT}s. "
+                f"Check SEAHORSE_EMBED_MODEL (current: {self._embed_model!r}) "
+                "and your API key."
+            )
         return np.array(response.data[0]["embedding"], dtype=np.float32)
+
+    @property
+    def size(self) -> int:
+        """Number of documents stored."""
+        return len(self._texts)
+
+    def __repr__(self) -> str:
+        backend = "Rust/HNSW" if self._use_rust else "Python/cosine"
+        return f"RAGPipeline(size={self.size}, backend={backend!r}, dim={self._dim})"

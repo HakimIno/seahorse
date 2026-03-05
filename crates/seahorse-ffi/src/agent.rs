@@ -98,12 +98,12 @@ impl PythonRunner for PyPlannerRunner {
                 .call1((&llm_config,))
                 .map_err(|e| CoreError::Config(format!("LLMClient(): {e}")))?;
 
-            // ── ToolRegistry ─────────────────────────────────────────────
+            // ── ToolRegistry (auto-loads all built-in tools) ─────────────
             let tool_registry = tools_mod
-                .getattr("SeahorseToolRegistry")
-                .map_err(|e| CoreError::Config(format!("ToolRegistry attr: {e}")))?
+                .getattr("make_default_registry")
+                .map_err(|e| CoreError::Config(format!("make_default_registry attr: {e}")))?
                 .call0()
-                .map_err(|e| CoreError::Config(format!("ToolRegistry(): {e}")))?;
+                .map_err(|e| CoreError::Config(format!("make_default_registry(): {e}")))?;
 
             // ── ReActPlanner ─────────────────────────────────────────────
             let planner_kwargs = PyDict::new_bound(py);
