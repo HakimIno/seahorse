@@ -15,19 +15,17 @@ use tracing::{debug, error, info};
 use seahorse_core::error::{CoreError, CoreResult};
 use seahorse_core::worker::PythonRunner;
 
-// ── PyPlannerRunner ───────────────────────────────────────────────────────────
-
+#[pyclass]
 pub struct PyPlannerRunner {
     pub model: String,
     pub max_steps: usize,
 }
 
+#[pymethods]
 impl PyPlannerRunner {
-    pub fn new(model: impl Into<String>, max_steps: usize) -> Self {
-        Self {
-            model: model.into(),
-            max_steps,
-        }
+    #[new]
+    pub fn new(model: String, max_steps: usize) -> Self {
+        Self { model, max_steps }
     }
 }
 
@@ -163,6 +161,12 @@ impl PythonRunner for PyPlannerRunner {
 
 // ── factory ───────────────────────────────────────────────────────────────────
 
-pub fn make_py_runner(model: &str, max_steps: usize) -> Arc<dyn PythonRunner> {
-    Arc::new(PyPlannerRunner::new(model, max_steps))
+#[pyfunction]
+#[pyo3(signature = (model="gpt-4o", max_steps=10))]
+pub fn make_py_runner(model: &str, max_steps: usize) -> PyPlannerRunner {
+    PyPlannerRunner::new(model.to_string(), max_steps)
+}
+
+pub fn make_arc_py_runner(model: &str, max_steps: usize) -> Arc<dyn PythonRunner> {
+    Arc::new(PyPlannerRunner::new(model.to_string(), max_steps))
 }

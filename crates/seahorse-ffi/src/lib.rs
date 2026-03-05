@@ -13,5 +13,7 @@ use pyo3::prelude::*;
 fn _core(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<memory::PyAgentMemory>()?;
     m.add_function(wrap_pyfunction!(memory::search_memory, m)?)?;
+    m.add_class::<agent::PyPlannerRunner>()?;
+    m.add_function(wrap_pyfunction!(agent::make_py_runner, m)?)?;
     Ok(())
 }
