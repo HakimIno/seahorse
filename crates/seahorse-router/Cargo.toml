@@ -24,6 +24,9 @@ uuid          = { workspace = true }
 bytes         = { workspace = true }
 futures-util  = { workspace = true }
 tokio-stream  = { workspace = true }
+jsonwebtoken  = "9"
+chrono        = { version = "0.4", features = ["serde"] }
+once_cell     = { workspace = true }
 
 [[bin]]
 name = "seahorse-router"

@@ -8,7 +8,10 @@ class Message(BaseModel):
     """A single LLM conversation message."""
 
     role: str
-    content: str
+    content: str | None = None
+    name: str | None = None
+    tool_calls: list[dict[str, object]] | None = None
+    tool_call_id: str | None = None
 
 
 class LLMConfig(BaseModel):
@@ -25,6 +28,7 @@ class AgentRequest(BaseModel):
     prompt: str
     agent_id: str = "default"
     config: LLMConfig = Field(default_factory=LLMConfig)
+    history: list[Message] = Field(default_factory=list)
 
 
 class AgentResponse(BaseModel):

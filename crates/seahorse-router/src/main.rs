@@ -4,13 +4,16 @@ use std::sync::Arc;
 
 use seahorse_core::{spawn_worker_loop, Config, SeahorseCore};
 use seahorse_ffi::agent::make_arc_py_runner;
-use seahorse_router::build_router;
+use seahorse_router::{auth::init_jwt, build_router};
 use tracing::info;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     // ── Telemetry: JSON logs + OTel traces → Jaeger ─────────────────────────
     telemetry::init_telemetry()?;
+
+    // ── JWT auth initialisation ──────────────────────────────────────────────
+    init_jwt()?;
 
     let config = Config::from_env()?;
     let port = config.http_port;
@@ -20,7 +23,7 @@ async fn main() -> anyhow::Result<()> {
 
     // ── Spawn worker loop ───────────────────────────────────────────────────
     let model = std::env::var("SEAHORSE_LLM_MODEL")
-        .unwrap_or_else(|_| "openrouter/anthropic/claude-3.5-sonnet".to_string());
+        .unwrap_or_else(|_| "openrouter/google/gemini-3-flash-preview".to_string());
     let max_steps = std::env::var("SEAHORSE_MAX_STEPS")
         .ok()
         .and_then(|v| v.parse().ok())
@@ -37,6 +40,15 @@ async fn main() -> anyhow::Result<()> {
     let listener = tokio::net::TcpListener::bind(&addr).await?;
 
     info!(addr = %addr, "seahorse-router listening");
+
+    tokio::spawn(async {
+        if tokio::signal::ctrl_c().await.is_ok() {
+            info!("Ctrl-C received! Forcefully shutting down...");
+            telemetry::shutdown_telemetry();
+            std::process::exit(0);
+        }
+    });
+
     axum::serve(listener, router).await?;
 
     telemetry::shutdown_telemetry();

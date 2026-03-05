@@ -24,19 +24,16 @@ pub fn init_telemetry() -> anyhow::Result<()> {
     let disable_traces = std::env::var("OTEL_DISABLE_TRACES")
         .unwrap_or_default() == "1";
 
-    // JSON log layer (always active)
-    let json_log_layer = tracing_subscriber::fmt::layer()
-        .json()
-        .with_current_span(true)
-        .with_span_list(false);
-
     let env_filter = tracing_subscriber::EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"));
 
     if disable_traces {
-        tracing_subscriber::registry()
-            .with(env_filter)
-            .with(json_log_layer)
+        tracing_subscriber::fmt()
+            .compact()
+            .with_env_filter(env_filter)
+            .with_target(true)
+            .with_thread_ids(false)
+            .with_level(true)
             .init();
         return Ok(());
     }
@@ -62,9 +59,15 @@ pub fn init_telemetry() -> anyhow::Result<()> {
     // Bridge `tracing` spans → OTel spans
     let otel_layer = tracing_opentelemetry::layer().with_tracer(tracer);
 
+    let console_log_layer = tracing_subscriber::fmt::layer()
+        .compact()
+        .with_target(true)
+        .with_thread_ids(false)
+        .with_level(true);
+
     tracing_subscriber::registry()
         .with(env_filter)
-        .with(json_log_layer)
+        .with(console_log_layer)
         .with(otel_layer)
         .init();
 

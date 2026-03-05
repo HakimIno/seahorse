@@ -56,6 +56,20 @@ class SeahorseToolRegistry:
         self._tools[spec.name] = (fn, spec)
         logger.debug("registered tool: %s", spec.name)
 
+    def to_openai_tools(self) -> list[dict[str, Any]]:
+        """Return the LiteLLM / OpenAI formatted tool definitions."""
+        return [
+            {
+                "type": "function",
+                "function": {
+                    "name": spec.name,
+                    "description": spec.description,
+                    "parameters": spec.parameters,
+                },
+            }
+            for spec in self.specs
+        ]
+
     async def call(self, name: str, args: dict[str, object]) -> str:
         """Call a tool by name with the given arguments."""
         if name not in self._tools:
