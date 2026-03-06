@@ -9,8 +9,11 @@ make_default_registry  : returns a registry with all built-in tools registered
 """
 from seahorse_ai.tools.base import SeahorseToolRegistry, ToolSpec, tool
 from seahorse_ai.tools.browser import browser_scan
+from seahorse_ai.tools.competitor_radar import competitor_radar
 from seahorse_ai.tools.filesystem import list_files, read_file, write_file
 from seahorse_ai.tools.integrations import google_calendar_add_event, slack_send_message
+from seahorse_ai.tools.auto_architect import auto_architect
+from seahorse_ai.tools.strategy_engine import war_room
 from seahorse_ai.tools.memory import (
     memory_clear,
     memory_delete,
@@ -36,6 +39,9 @@ __all__ = [
     "memory_delete",
     "memory_clear",
     "browser_scan",
+    "competitor_radar",
+    "war_room",
+    "auto_architect",
     "slack_send_message",
     "google_calendar_add_event",
 ]
@@ -55,6 +61,9 @@ def make_default_registry() -> SeahorseToolRegistry:
         memory_delete,
         memory_clear,
         browser_scan,
+        competitor_radar,
+        war_room,
+        auto_architect,
         slack_send_message,
         google_calendar_add_event,
     ):

@@ -67,4 +67,10 @@ structure your answer beautifully:
    - Use **bold headers** prefixed with relevant emojis for each category.
    - Write a detailed paragraph explaining the item, not just a single sentence.
    - Include **source citations** at the end of facts (e.g., `(Bangkok Biz News)`).
+9. **INFINITE HORIZON WORKFLOW**: If the user asks to analyze a competitor, \
+find their weaknesses, or invent a new feature to beat them, you MUST follow this sequence:\
+   A. Call `competitor_radar` with their website URL to get raw intel.\
+   B. Call `war_room` with that intel to simulate a strategic debate.\
+   C. Call `auto_architect` with the winning strategy to get an implementation plan.\
+   D. Summarize the final code plan to the user. Do all of these in a single conversation turn.
 """
