@@ -19,11 +19,26 @@ REALTIME_KEYWORDS: tuple[str, ...] = (
     "2025", "2026", "2027",
 )
 
+# ── Keywords that signal the user is referring to past context ──────────────
+MEMORY_KEYWORDS: tuple[str, ...] = (
+    # Thai
+    "ที่เคยคุย", "ก่อนหน้า", "เดิม", "ครั้งที่แล้ว", "จำได้ไหม", "ที่บอกไป",
+    # English
+    "previously", "before", "earlier", "last time", "we talked", "discussed",
+    "remember", "past", "history",
+)
+
 # ── System prompt nudge sent when agent skips tool on step 0 ─────────────────
 REALTIME_NUDGE = (
     "[SYSTEM] This question requires current information. "
     "Your training data is outdated — do NOT answer from memory. "
     "You MUST call web_search NOW and use those results in your Answer."
+)
+
+MEMORY_NUDGE = (
+    "[SYSTEM] The user is referring to a previous conversation or context. "
+    "You MUST call `memory_search` NOW to retrieve that information before answering. "
+    "Do NOT assume you remember it from your training data."
 )
 
 
@@ -46,10 +61,10 @@ IMPORTANT: Your training data predates today. For anything time-sensitive, \
 you MUST use the `web_search` tool.
 
 ## Rules (mandatory)
-1. **Time-sensitive queries**: News, prices, weather, scores, or anything happening \
+1. **CRITICAL: Check your memory FIRST** via `memory_search` if the user refers to past topics, plans, or "that" thing we discussed (e.g., "ห้นาเว็บเดิม", "แผนที่เคยคุย").
+2. **Time-sensitive queries**: News, prices, weather, scores, or anything happening \
 today/recently MUST trigger a `web_search` call immediately. **Do not apologize.**
-2. **Math or data**: Use the `python_interpreter` for accuracy.
-3. **Previously discussed topics**: Check your memory first via `memory_search`.
+3. **Math or data**: Use the `python_interpreter` for accuracy.
 4. **On tool error**: Retry with a refined query before giving up.
 5. **Memory Management**: If a user asks to "forget" a fact, use `memory_delete`. \
 If they want to wipe everything, use `memory_clear`. For `memory_delete`, use a query \

@@ -21,7 +21,13 @@ import time
 from typing import Protocol, runtime_checkable
 
 from seahorse_ai.observability import get_tracer, setup_telemetry
-from seahorse_ai.prompts import REALTIME_KEYWORDS, REALTIME_NUDGE, build_system_prompt
+from seahorse_ai.prompts import (
+    REALTIME_KEYWORDS, 
+    REALTIME_NUDGE, 
+    MEMORY_KEYWORDS, 
+    MEMORY_NUDGE,
+    build_system_prompt
+)
 from seahorse_ai.schemas import AgentRequest, AgentResponse, Message
 
 logger = logging.getLogger(__name__)
@@ -88,11 +94,16 @@ class ReActPlanner:
             if request.history:
                 messages.extend(request.history)
 
-            # 2) Check if user prompt needs a real-time nudge
+            # 2) Check if user prompt needs a real-time or memory nudge
             prompt_content = request.prompt
-            if self._needs_nudge(request.prompt):
+            if self._needs_nudge(request.prompt, REALTIME_KEYWORDS):
                 logger.info("agent.run nudging for real-time data")
                 prompt_content = f"{prompt_content}\n\n{REALTIME_NUDGE}"
+            
+            if self._needs_nudge(request.prompt, MEMORY_KEYWORDS):
+                logger.info("agent.run nudging for memory retrieval")
+                # Append if not already nudged, or add to existing nudge
+                prompt_content = f"{prompt_content}\n\n{MEMORY_NUDGE}"
 
             messages.append(Message(role="user", content=prompt_content))
 
@@ -222,8 +233,8 @@ class ReActPlanner:
 
     async def _auto_summarize_memory(self, messages: list[Message], agent_id: str | None = None) -> None:
         """Background task: Analyze the conversation, extract key facts, and store them."""
-        # Only summarize if there's enough interaction
-        if len(messages) < 4:
+        # Lowered threshold to ensure even brief interactions are captured
+        if len(messages) < 2:
             return
 
         summary_prompt = (
@@ -298,10 +309,10 @@ class ReActPlanner:
 
     # ── private helpers ───────────────────────────────────────────────────────
 
-    def _needs_nudge(self, prompt: str) -> bool:
-        """Return True if the user asks about time-sensitive keywords."""
-        text = prompt.lower()
-        return any(kw.lower() in text for kw in REALTIME_KEYWORDS)
+    def _needs_nudge(self, prompt: str, keywords: tuple[str, ...]) -> bool:
+        """Return True if the user prompt contains any of the given keywords."""
+        p = prompt.lower()
+        return any(k.lower() in p for k in keywords)
 
     async def _run_step(
         self, messages: list[Message], tools: list[dict], step: int
