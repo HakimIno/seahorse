@@ -15,7 +15,8 @@ router = APIRouter()
 
 @lru_cache(maxsize=1)
 def _get_tool_registry() -> SeahorseToolRegistry:
-    return SeahorseToolRegistry()
+    from seahorse_ai.tools import make_default_registry
+    return make_default_registry()
 
 
 @lru_cache(maxsize=1)

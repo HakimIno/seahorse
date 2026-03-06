@@ -34,9 +34,9 @@ import os
 # Default uses OpenRouter so the same OPENROUTER_API_KEY works for both chat + embeddings
 _EMBED_MODEL = os.environ.get(
     "SEAHORSE_EMBED_MODEL",
-    "openrouter/openai/text-embedding-3-small",
+    "openrouter/baai/bge-m3",
 )
-_EMBED_DIM = int(os.environ.get("SEAHORSE_EMBED_DIM", "1536"))  # text-embedding-3-small dim
+_EMBED_DIM = int(os.environ.get("SEAHORSE_EMBED_DIM", "1024"))
 _MAX_DOCS = 100_000
 _EMBED_TIMEOUT = int(os.environ.get("SEAHORSE_EMBED_TIMEOUT", "30"))  # seconds
 
@@ -131,7 +131,11 @@ class RAGPipeline:
 
             if self._use_rust and self._memory is not None:
                 raw = self._memory.search(embedding.tobytes(), k=k)
-                return [(self._texts[doc_id], dist) for doc_id, dist in raw if doc_id in self._texts]
+                return [
+                    (self._texts[doc_id], dist)
+                    for doc_id, dist in raw
+                    if doc_id in self._texts
+                ]
 
             # Pure-Python fallback — cosine similarity
             if not self._vectors:
@@ -143,6 +147,75 @@ class RAGPipeline:
                 scores.append((vid, 1.0 - cos))
             scores.sort(key=lambda x: x[1])
             return [(self._texts[vid], dist) for vid, dist in scores[:k]]
+
+    async def delete_by_text(self, query: str, threshold: float = 0.45) -> str | None:
+        """Search for a matching memory and remove it if distance < threshold.
+
+        Returns the deleted text if successful, else None.
+        """
+        tracer = get_tracer("seahorse.rag")
+        with tracer.start_as_current_span("rag.delete") as span:
+            if not self._texts:
+                return None
+
+            embedding = await self._embed(query)
+            best_id: int | None = None
+            best_dist: float = 1.0
+            deleted_text: str | None = None
+
+            if self._use_rust and self._memory is not None:
+                raw = self._memory.search(embedding.tobytes(), k=1)
+                if raw:
+                    best_id, best_dist = raw[0]
+            else:
+                for vid, vec in self._vectors.items():
+                    norm = float(np.linalg.norm(embedding) * np.linalg.norm(vec) + 1e-9)
+                    cos = float(np.dot(embedding, vec)) / norm
+                    dist = 1.0 - cos
+                    if dist < best_dist:
+                        best_dist = dist
+                        best_id = vid
+
+            logger.info(
+                "rag.delete: query=%r best_dist=%.4f threshold=%.2f",
+                query[:50],
+                best_dist,
+                threshold,
+            )
+
+            if best_id is not None and best_id in self._texts and best_dist < threshold:
+                deleted_text = self._texts.pop(best_id)
+                # We can't easily remove from HNSW index without rebuilding,
+                # but removing from self._texts prevents it from appearing in search.
+                if not self._use_rust:
+                    self._vectors.pop(best_id, None)
+                logger.info(
+                    "rag.delete: removed doc_id=%d dist=%.3f text=%r",
+                    best_id,
+                    best_dist,
+                    deleted_text[:50],
+                )
+                try:
+                    span.set_attribute("rag.deleted_id", best_id)
+                    span.set_attribute("rag.dist", best_dist)
+                except Exception:  # noqa: BLE001
+                    pass
+                return deleted_text
+
+            return None
+
+    def clear(self) -> None:
+        """Wipe all stored memories."""
+        self._texts.clear()
+        self._next_id = 0
+        if not self._use_rust:
+            self._vectors.clear()
+        else:
+            # Re-initialize the Rust memory index to truly clear it
+            PyAgentMemory = _try_import_ffi_memory()
+            if PyAgentMemory is not None:
+                self._memory = PyAgentMemory(dim=self._dim, max_elements=_MAX_DOCS)
+        logger.info("rag.clear: memory wiped")
 
     async def _embed(self, text: str) -> np.ndarray:
         """Call LiteLLM embedding API and return a numpy float32 array."""

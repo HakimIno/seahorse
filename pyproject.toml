@@ -4,7 +4,10 @@ version = "0.1.0"
 description = "High-Performance AI Agent — Python Intelligence Layer"
 requires-python = ">=3.11"
 dependencies = [
-    "litellm>=1.35",
+    "litellm>=1.63.1",
+    "playwright>=1.50.1",
+    "google-api-python-client>=2.162.0",
+    "slack-sdk>=3.34.0",
     "fastapi>=0.111",
     "uvicorn[standard]>=0.29",
     "pydantic>=2.7",

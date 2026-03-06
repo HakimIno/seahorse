@@ -8,8 +8,15 @@ tool                   : @tool decorator
 make_default_registry  : returns a registry with all built-in tools registered
 """
 from seahorse_ai.tools.base import SeahorseToolRegistry, ToolSpec, tool
+from seahorse_ai.tools.browser import browser_scan
 from seahorse_ai.tools.filesystem import list_files, read_file, write_file
-from seahorse_ai.tools.memory import memory_search, memory_store
+from seahorse_ai.tools.integrations import google_calendar_add_event, slack_send_message
+from seahorse_ai.tools.memory import (
+    memory_clear,
+    memory_delete,
+    memory_search,
+    memory_store,
+)
 from seahorse_ai.tools.python_interpreter import python_interpreter
 from seahorse_ai.tools.web_search import web_search
 
@@ -26,6 +33,11 @@ __all__ = [
     "write_file",
     "memory_store",
     "memory_search",
+    "memory_delete",
+    "memory_clear",
+    "browser_scan",
+    "slack_send_message",
+    "google_calendar_add_event",
 ]
 
 
@@ -40,6 +52,11 @@ def make_default_registry() -> SeahorseToolRegistry:
         write_file,
         memory_store,
         memory_search,
+        memory_delete,
+        memory_clear,
+        browser_scan,
+        slack_send_message,
+        google_calendar_add_event,
     ):
         registry.register(fn)
     return registry

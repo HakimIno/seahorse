@@ -63,6 +63,7 @@ class ReActPlanner:
         self._llm = llm
         self._tools = tools or self._default_tools()
         self._max_steps = max_steps
+        self._tool_errors: dict[str, int] = {}
         setup_telemetry()  # idempotent
 
     # ── public ────────────────────────────────────────────────────────────────
@@ -139,6 +140,19 @@ class ReActPlanner:
                         action_name = func_call.get("name")
                         call_id = tool_call.get("id")
                         
+                        is_error = isinstance(result, Exception) or (
+                            isinstance(result, str) and result.startswith("Error")
+                        )
+                        if is_error and action_name:
+                            self._tool_errors[action_name] = self._tool_errors.get(action_name, 0) + 1
+                            if self._tool_errors[action_name] >= 2:
+                                logger.warning("Self-correction triggered for tool: %s", action_name)
+                                result = (
+                                    f"{result}\n\n[SYSTEM: You have failed to use this tool "
+                                    "correctly 2+ times. Please STOP and re-evaluate your plan. "
+                                    "Try a different tool or approach.]"
+                                )
+
                         observation_str = (
                             str(result) if not isinstance(result, Exception) else f"Error: {result}"
                         )
@@ -163,6 +177,9 @@ class ReActPlanner:
                         "agent.total_ms": total_ms,
                         "agent.status": "done",
                     })
+                    # 3) Before returning, trigger background memory summarization
+                    asyncio.create_task(self._auto_summarize_memory(messages))
+                    
                     return AgentResponse(
                         content=content,
                         steps=step + 1,
@@ -172,11 +189,74 @@ class ReActPlanner:
             # Max steps reached
             logger.warning("agent.run max_steps agent_id=%s", request.agent_id)
             self._set_span_attrs(span, {"agent.status": "max_steps_reached"})
+            
+            # Still try to summarize what we found before failing
+            asyncio.create_task(self._auto_summarize_memory(messages))
+
             return AgentResponse(
                 content="[Agent reached the maximum number of reasoning steps]",
                 steps=self._max_steps,
                 agent_id=request.agent_id,
             )
+
+    # ── memory ────────────────────────────────────────────────────────────────
+
+    async def _auto_summarize_memory(self, messages: list[Message]) -> None:
+        """Background task: Analyze the conversation, extract key facts, and store them."""
+        # Only summarize if there's enough interaction
+        if len(messages) < 4:
+            return
+
+        summary_prompt = (
+            "You are a background memory worker. "
+            "Analyze the conversation below and extract KEY FACTS, USER PREFERENCES, "
+            "and IMPORTANT CONTEXT that should be remembered for future interactions. "
+            "CRITICAL: Each fact MUST be independent and stored on its own line. "
+            "Do NOT combine multiple unrelated facts (e.g., name and drink) into one line. "
+            "Example of GOOD atomic facts:\n"
+            "- The user's name is Kim.\n"
+            "- The user's favorite drink is Thai Tea.\n"
+            "Format as a list of independent, concise fact strings. "
+            "If no new important facts are found, return 'NONE'.\n\n"
+            "### Conversation History ###\n"
+        )
+        
+        history_text = "\n".join([f"{m.role}: {m.content}" for m in messages if m.role != "system"])
+        
+        try:
+            # We use the same LLM but with a specific instruction
+            raw_summary = await self._llm.complete([
+                Message(role="system", content=summary_prompt + history_text)
+            ])
+            
+            if "NONE" in raw_summary.upper() or len(raw_summary.strip()) < 5:
+                return
+
+            # Force splitting by lines AND common conjunctions to ensure atomic facts
+            facts: list[str] = []
+            for line in raw_summary.split("\n"):
+                line = line.strip("-* ").strip()
+                if not line or len(line) < 3:
+                    continue
+
+                # Split by common conjunctions if line seems too long or grouped
+                if (" and " in line or " และ " in line) and len(line) > 30:
+                    parts = line.replace(" และ ", " and ").split(" and ")
+                    facts.extend([p.strip(". ") for p in parts if len(p.strip()) > 3])
+                else:
+                    facts.append(line.strip(". "))
+
+            logger.info("auto_summarize_memory: extracted facts: %s", facts)
+
+            from seahorse_ai.tools.memory import memory_store
+            for fact in facts:
+                if fact:
+                    await memory_store(fact)
+                    
+            logger.info("auto_summarize_memory: stored %d facts", len(facts))
+            
+        except Exception as exc: # noqa: BLE001
+            logger.error("auto_summarize_memory failed: %s", exc)
 
     # ── private helpers ───────────────────────────────────────────────────────
 

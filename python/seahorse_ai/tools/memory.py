@@ -38,13 +38,41 @@ def set_pipeline(pipeline: RAGPipeline) -> None:
 
 
 @tool(
-    "Store a piece of text in long-term agent memory. "
-    "The text will be embedded and indexed for later retrieval. "
-    "Use this to remember facts, summaries, or anything important from the conversation."
+    "Save a specific piece of information into long-term memory for future use. "
+    "CRITICAL: Store ONLY ONE independent fact at a time. "
+    "If you have multiple facts (e.g. name AND preference), call this tool multiple times. "
+    "DO NOT combine unrelated facts into one string."
 )
 async def memory_store(text: str) -> str:
-    """Embed and store text in the HNSW memory index."""
+    """Save text into memory. Automatically splits grouped facts if detected."""
     pipeline = get_pipeline()
+
+    logger.debug("memory_store: request=%r", text)
+
+    # Force splitting by common conjunctions or newlines to ensure atomic facts
+    # We split by 'และ', 'and', newlines, and other common Thai conjunctions
+    split_markers = [" และ ", " and ", "\n", " ทั้งยัง ", " รวมถึง "]
+    
+    # Heuristic: if string is long and contains a marker, try to split
+    needs_split = any(m in text for m in split_markers) and len(text) > 25
+    
+    if needs_split:
+        # Create a combined regex pattern or just sequential replaces
+        temp_text = text
+        for m in split_markers:
+            temp_text = temp_text.replace(m, "SPLIT_TOKEN")
+        
+        parts = [p.strip() for p in temp_text.split("SPLIT_TOKEN") if len(p.strip()) > 3]
+        
+        if len(parts) > 1:
+            stored = []
+            for p in parts:
+                p = p.strip(". ")
+                doc_id = await pipeline.store(p)
+                stored.append(p)
+                logger.info("memory_store: split_stored doc_id=%d text=%r", doc_id, p)
+            return f"Stored {len(stored)} atomic facts: {', '.join(stored)}"
+
     doc_id = await pipeline.store(text)
     logger.info("memory_store: doc_id=%d text_len=%d", doc_id, len(text))
     return (
@@ -75,3 +103,34 @@ async def memory_search(query: str, k: int = 5) -> str:
 
     logger.info("memory_search: query_len=%d k=%d results=%d", len(query), k, len(results))
     return "\n".join(lines)
+
+
+@tool(
+    "Delete a specific piece of information from long-term memory. "
+    "Provide a query that describes what you want to forget. "
+    "The tool will find the closest match and remove it if it is a strong match."
+)
+async def memory_delete(query: str) -> str:
+    """Search for and delete a matching memory entry."""
+    pipeline = get_pipeline()
+
+    logger.debug("memory_delete: query=%r", query)
+
+    deleted_text = await pipeline.delete_by_text(query)
+
+    if deleted_text:
+        logger.info("memory_delete: DELETED %r", deleted_text)
+        return f"Successfully deleted from memory: {deleted_text!r}"
+
+    return f"No strong match found in memory to delete for query: {query!r}"
+
+
+@tool(
+    "Wipe ALL long-term agent memories. This action is IRREVERSIBLE. "
+    "Only use this if the user explicitly asks to clear all memory, reset, or wipe everything."
+)
+async def memory_clear() -> str:
+    """Wipe the entire memory index."""
+    pipeline = get_pipeline()
+    pipeline.clear()
+    return "All long-term memories have been permanently deleted."
