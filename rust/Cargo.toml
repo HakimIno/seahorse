@@ -1,0 +1,38 @@
+[package]
+name = "ghost_core"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "ghost_core"
+crate-type = ["rlib", "cdylib"]
+
+[dependencies]
+# Python Bridge (Using workspace version)
+pyo3 = { workspace = true, features = ["extension-module"] }
+
+# P2P Networking
+libp2p = { version = "0.53", features = ["tcp", "dns", "websocket", "noise", "yamux", "mdns", "gossipsub", "kad", "macros", "tokio"] }
+
+# Async Runtime (Using workspace version)
+tokio = { workspace = true }
+
+# Serialization (Using workspace version)
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# Logging
+log = "0.4"
+env_logger = "0.10"
+
+# MacOS System Frameworks
+objc2 = { version = "0.5", features = ["apple"] }
+objc2-app-kit = { version = "0.2", features = ["NSWorkspace", "NSRunningApplication"] }
+objc2-foundation = { version = "0.2", features = ["NSString", "NSArray", "NSDictionary"] }
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

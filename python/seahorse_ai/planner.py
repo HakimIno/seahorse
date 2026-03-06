@@ -65,6 +65,93 @@ class ReActPlanner:
         self._max_steps = max_steps
         self._tool_errors: dict[str, int] = {}
         setup_telemetry()  # idempotent
+        
+        # Initialize Ghost Node (P2P Context Awareness)
+        self._ghost = None
+        try:
+            from ghost_core import GhostNode
+            self._ghost = GhostNode()
+            self._ghost.start_background()
+            asyncio.create_task(self._proactive_loop())
+            logger.info("Ghost Node initialized and monitoring context")
+        except ImportError:
+            logger.warning("ghost_core not found — Proactive Brain disabled")
+
+    async def _proactive_loop(self) -> None:
+        """Background loop that watches for context changes and commands."""
+        last_ctx = ""
+        while True:
+            await asyncio.sleep(2)  # Faster polling for commands
+            if not self._ghost:
+                break
+                
+            # 1. Check for Commands (from UI clicks)
+            cmd = self._ghost.get_pending_command()
+            if cmd != "NONE" and not cmd.startswith("SEND:"):
+                logger.info("ProactiveBrain: RECEIVED COMMAND %s", cmd)
+                # Parse command (assuming format "EXECUTE:<JSON>")
+                if cmd.startswith("EXECUTE:"):
+                    try:
+                        data = json.loads(cmd[8:])
+                        action = data.get("action_id")
+                        goal = data.get("suggestion", "Complete the requested task")
+                        
+                        logger.info("ProactiveBrain: Executing Action %s - %s", action, goal)
+                        # We run a full agent cycle for the command
+                        # We use run() but ensure it doesn't loop forever or recursive
+                        from seahorse_ai.schemas import AgentRequest
+                        asyncio.create_task(self.run(AgentRequest(query=f"Action: {action}. Goal: {goal}")))
+                        
+                        self._ghost.publish_insight(f"🚀 Running: {goal}")
+                    except Exception as e:
+                        logger.error("ProactiveBrain command error: %s", e)
+
+            # 2. Check for Context Changes (to generate suggestions)
+            current_ctx = self._ghost.get_latest_context()
+            if current_ctx != last_ctx and "INSIGHT:" not in current_ctx:
+                last_ctx = current_ctx
+                logger.info("ProactiveBrain: context changed to %s", current_ctx)
+                
+                # Simple logic: skip unimportant apps
+                blacklist = ["finder", "system settings", "password", "login", "ghost-ui"]
+                if any(b in current_ctx.lower() for b in blacklist):
+                    continue
+
+                # Trigger reasoning
+                try:
+                    from seahorse_ai.prompts import PROACTIVE_PROMPT
+                    
+                    # Get some memories for context
+                    memories = await self._tools.call("memory_search", {"query": current_ctx, "top_k": 3})
+                    
+                    prompt = PROACTIVE_PROMPT.format(
+                        current_app=current_ctx,
+                        top_memories=memories
+                    )
+                    
+                    raw = await self._llm.complete([Message(role="system", content=prompt)])
+                    
+                    if "NONE" not in raw.upper():
+                        # Parse JSON and publish
+                        try:
+                            # Clean up potential markdown formatting in raw
+                            json_str = raw.strip()
+                            if json_str.startswith("```json"):
+                                json_str = json_str[7:-3].strip()
+                            elif json_str.startswith("```"):
+                                json_str = json_str[3:-3].strip()
+                                
+                            data = json.loads(json_str)
+                            # Tag as SUGGESTION for UI to render action card
+                            insight = f"SUGGESTION:{json_str}"
+                            self._ghost.publish_insight(insight)
+                            logger.info("ProactiveBrain: published suggestion: %s", data['suggestion'])
+                        except Exception as e:
+                            logger.error("ProactiveBrain JSON parse error: %s (Raw: %s)", e, raw)
+                            # If not JSON, just send raw insight
+                            self._ghost.publish_insight(raw[:100])
+                except Exception as e:
+                    logger.error("ProactiveBrain reasoning error: %s", e)
 
     # ── public ────────────────────────────────────────────────────────────────
 

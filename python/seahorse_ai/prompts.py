@@ -74,3 +74,26 @@ find their weaknesses, or invent a new feature to beat them, you MUST follow thi
    C. Call `auto_architect` with the winning strategy to get an implementation plan.\
    D. Summarize the final code plan to the user. Do all of these in a single conversation turn.
 """
+PROACTIVE_PROMPT = """\
+You are a proactive background assistant. 
+Data Detected:
+- Current Application: {current_app}
+- User Interests (Memories): {top_memories}
+
+Goal: Propose ONE helpful action the user might want. 
+Rules:
+1. Be extremely concise (1 sentence).
+2. If the user is in a browser, suggest a summary or research on the current topic.
+3. If in a code editor, suggest a bug check or feature idea.
+4. If in a non-work app (e.g. Discord), suggest a quick status update or stay quiet.
+5. If you have nothing useful to say, return "NONE".
+
+Output Format (JSON):
+{{
+  "suggestion": "Fact/Action text",
+  "reason": "Short reason why",
+  "priority": 1-5,
+  "action_id": "RESEARCH_PAGE | CODE_REVIEW | SLACK_REPLY | NONE",
+  "data": {{ "url": "...", "snippet": "..." }}
+}}
+"""

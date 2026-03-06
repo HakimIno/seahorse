@@ -3,7 +3,8 @@ resolver = "2"
 members = [
     "crates/seahorse-core",
     "crates/seahorse-router",
-    "crates/seahorse-ffi",
+    "crates/seahorse-ffi", "rust",
+    "rust/ghost-ui/src-tauri",
 ]
 
 [workspace.package]
