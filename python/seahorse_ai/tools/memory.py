@@ -43,21 +43,25 @@ def set_pipeline(pipeline: RAGPipeline) -> None:
     "If you have multiple facts (e.g. name AND preference), call this tool multiple times. "
     "DO NOT combine unrelated facts into one string."
 )
-async def memory_store(text: str) -> str:
-    """Save text into memory. Automatically splits grouped facts if detected."""
+async def memory_store(text: str, importance: int = 3, agent_id: str | None = None) -> str:
+    """Save text into memory. Automatically splits grouped facts and injects metadata."""
     pipeline = get_pipeline()
+    import datetime
+    
+    timestamp = datetime.datetime.now().isoformat()
+    metadata = {
+        "created_at": timestamp,
+        "importance": importance,
+        "agent_id": agent_id,
+    }
 
-    logger.debug("memory_store: request=%r", text)
+    logger.debug("memory_store: request=%r metadata=%r", text, metadata)
 
     # Force splitting by common conjunctions or newlines to ensure atomic facts
-    # We split by 'และ', 'and', newlines, and other common Thai conjunctions
     split_markers = [" และ ", " and ", "\n", " ทั้งยัง ", " รวมถึง "]
-    
-    # Heuristic: if string is long and contains a marker, try to split
     needs_split = any(m in text for m in split_markers) and len(text) > 25
     
     if needs_split:
-        # Create a combined regex pattern or just sequential replaces
         temp_text = text
         for m in split_markers:
             temp_text = temp_text.replace(m, "SPLIT_TOKEN")
@@ -68,15 +72,40 @@ async def memory_store(text: str) -> str:
             stored = []
             for p in parts:
                 p = p.strip(". ")
-                doc_id = await pipeline.store(p)
+                doc_id = await pipeline.store(p, metadata=metadata)
                 stored.append(p)
                 logger.info("memory_store: split_stored doc_id=%d text=%r", doc_id, p)
             return f"Stored {len(stored)} atomic facts: {', '.join(stored)}"
 
-    doc_id = await pipeline.store(text)
-    logger.info("memory_store: doc_id=%d text_len=%d", doc_id, len(text))
+    # 1. Search for existing similar facts to prevent duplicates or resolve conflicts
+    results = await pipeline.search(
+        text, k=1, filter_metadata={"agent_id": agent_id} if agent_id else None
+    )
+    
+    if results:
+        best = results[0]
+        best_text = best["text"]
+        best_dist = best["distance"]
+        
+        # Duplicate Check: If distance is < 0.08, it's effectively the same fact.
+        if best_dist < 0.08:
+            logger.info("memory_store: skipping duplicate (dist=%.4f) text=%r", best_dist, text)
+            return f"Memory already contains this information: {best_text!r}"
+            
+        # Conflict/Update Check: If distance is < 0.25, it's likely an update to the same topic.
+        if best_dist < 0.25:
+            # Delete the old fact before storing the new one.
+            # We use a very low threshold on delete_by_text because we have the exact text.
+            await pipeline.delete_by_text(best_text, threshold=0.1)
+            doc_id = await pipeline.store(text, metadata=metadata)
+            logger.info("memory_store: conflict resolved. Updated %r -> %r", best_text, text)
+            return f"Updated existing memory: {best_text!r} is now {text!r}"
+
+    # 2. Default: Store as a new fact
+    doc_id = await pipeline.store(text, metadata=metadata)
+    logger.info("memory_store: stored new doc_id=%d text_len=%d", doc_id, len(text))
     return (
-        f"Stored in memory (doc_id={doc_id}). "
+        f"Stored in long-term memory (doc_id={doc_id}). "
         f"Memory now contains {pipeline.size} document(s)."
     )
 
@@ -86,20 +115,34 @@ async def memory_store(text: str) -> str:
     "Returns the top-k most semantically similar stored texts. "
     "Use this before answering questions that may have been discussed before."
 )
-async def memory_search(query: str, k: int = 5) -> str:
-    """Search the HNSW memory index and return the top-k matching texts."""
+async def memory_search(query: str, k: int = 10, agent_id: str | None = None) -> str:
+    """Search the HNSW memory index and return up to k matching texts."""
     pipeline = get_pipeline()
     if pipeline.size == 0:
         return "Memory is empty. Nothing has been stored yet."
 
-    results = await pipeline.search(query, k=k)
+    # In the future, we can use agent_id for multi-user isolation
+    filter_metadata = {"agent_id": agent_id} if agent_id else None
+    results = await pipeline.search(query, k=k, filter_metadata=filter_metadata)
+    
     if not results:
         return f"No relevant memories found for: {query!r}"
 
+    # Prioritize by importance (descending) and similarity (ascending distance)
+    results.sort(
+        key=lambda x: (x["metadata"].get("importance", 3), 1 - x["distance"]), 
+        reverse=True
+    )
+
     lines = [f"Memory search results for: {query!r}\n"]
-    for i, (text, dist) in enumerate(results, 1):
+    for i, res in enumerate(results, 1):
+        text = res["text"]
+        dist = res["distance"]
+        meta = res["metadata"]
+        importance = meta.get("importance", 3)
         similarity = f"{(1 - dist) * 100:.1f}%"
-        lines.append(f"{i}. [{similarity} match] {text}")
+        date_str = meta.get("created_at", "unknown")[:16].replace("T", " ")
+        lines.append(f"{i}. [Imp:{importance}] [{similarity} match] (Saved: {date_str}) {text}")
 
     logger.info("memory_search: query_len=%d k=%d results=%d", len(query), k, len(results))
     return "\n".join(lines)
@@ -116,11 +159,11 @@ async def memory_delete(query: str) -> str:
 
     logger.debug("memory_delete: query=%r", query)
 
-    deleted_text = await pipeline.delete_by_text(query)
+    deleted_entry = await pipeline.delete_by_text(query)
 
-    if deleted_text:
-        logger.info("memory_delete: DELETED %r", deleted_text)
-        return f"Successfully deleted from memory: {deleted_text!r}"
+    if deleted_entry:
+        logger.info("memory_delete: DELETED %r", deleted_entry["text"])
+        return f"Successfully deleted from memory: {deleted_entry['text']!r}"
 
     return f"No strong match found in memory to delete for query: {query!r}"
 

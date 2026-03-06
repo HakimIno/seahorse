@@ -17,7 +17,8 @@ The RAGPipeline also functions as an agent tool: `memory_store` and
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
+import os
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
@@ -27,8 +28,6 @@ if TYPE_CHECKING:
     pass
 
 logger = logging.getLogger(__name__)
-
-import os
 
 # Embedding model + dimensionality — configurable via env vars
 # Default uses OpenRouter so the same OPENROUTER_API_KEY works for both chat + embeddings
@@ -41,7 +40,7 @@ _MAX_DOCS = 100_000
 _EMBED_TIMEOUT = int(os.environ.get("SEAHORSE_EMBED_TIMEOUT", "30"))  # seconds
 
 
-def _try_import_ffi_memory():
+def _try_import_ffi_memory() -> type | None:
     """Try to import PyAgentMemory from the Rust FFI extension.
 
     Falls back to None if maturin hasn't built the extension (e.g. first
@@ -68,7 +67,7 @@ class RAGPipeline:
     def __init__(self, embed_model: str = _EMBED_MODEL, dim: int = _EMBED_DIM) -> None:
         self._embed_model = embed_model
         self._dim = dim
-        self._texts: dict[int, str] = {}
+        self._texts: dict[int, dict] = {}  # doc_id -> {"text": str, "metadata": dict}
         self._next_id = 0
 
         PyAgentMemory = _try_import_ffi_memory()
@@ -82,8 +81,10 @@ class RAGPipeline:
             # pure-Python fallback: dict of numpy vectors
             self._vectors: dict[int, np.ndarray] = {}
 
-    async def store(self, text: str, doc_id: int | None = None) -> int:
-        """Embed `text` and store it in the HNSW index.
+    async def store(
+        self, text: str, doc_id: int | None = None, metadata: dict | None = None
+    ) -> int:
+        """Embed `text` and store it in the HNSW index along with metadata.
 
         Returns the assigned doc_id.
         """
@@ -99,7 +100,10 @@ class RAGPipeline:
             except Exception:  # noqa: BLE001
                 pass
 
-            self._texts[doc_id] = text
+            self._texts[doc_id] = {
+                "text": text,
+                "metadata": metadata or {},
+            }
             embedding = await self._embed(text)
 
             if self._use_rust and self._memory is not None:
@@ -111,10 +115,15 @@ class RAGPipeline:
 
             return doc_id
 
-    async def search(self, query: str, k: int = 5) -> list[tuple[str, float]]:
-        """Embed `query` and return the k most similar stored texts.
+    async def search(
+        self, query: str, k: int = 5, filter_metadata: dict | None = None
+    ) -> list[dict]:
+        """Embed `query` and return the k most similar stored texts with metadata.
 
-        Returns a list of (text, cosine_distance) sorted ascending by distance.
+        If `filter_metadata` is provided, only matches containing these keys/values
+        are returned.
+
+        Returns a list of dicts: [{"text": str, "metadata": dict, "distance": float}, ...]
         """
         tracer = get_tracer("seahorse.rag")
         with tracer.start_as_current_span("rag.search") as span:
@@ -130,12 +139,29 @@ class RAGPipeline:
             embedding = await self._embed(query)
 
             if self._use_rust and self._memory is not None:
-                raw = self._memory.search(embedding.tobytes(), k=k)
-                return [
-                    (self._texts[doc_id], dist)
-                    for doc_id, dist in raw
-                    if doc_id in self._texts
-                ]
+                raw = self._memory.search(embedding.tobytes(), k=k * 2 if filter_metadata else k)
+                results = []
+                for i, (doc_id, dist) in enumerate(raw):
+                    if i == 0:
+                        logger.info("rag.search: best_dist=%.4f query=%r", dist, query[:50])
+                    
+                    if doc_id in self._texts:
+                        entry = self._texts[doc_id]
+                        # Apply metadata filtering if requested
+                        if filter_metadata:
+                            matches = all(
+                                entry["metadata"].get(k) == v 
+                                for k, v in filter_metadata.items()
+                            )
+                            if not matches:
+                                continue
+                        
+                        results.append({
+                            "text": entry["text"],
+                            "metadata": entry["metadata"],
+                            "distance": dist,
+                        })
+                return results[:k]
 
             # Pure-Python fallback — cosine similarity
             if not self._vectors:
@@ -145,13 +171,29 @@ class RAGPipeline:
                 norm = float(np.linalg.norm(embedding) * np.linalg.norm(vec) + 1e-9)
                 cos = float(np.dot(embedding, vec)) / norm
                 scores.append((vid, 1.0 - cos))
+            
             scores.sort(key=lambda x: x[1])
-            return [(self._texts[vid], dist) for vid, dist in scores[:k]]
+            results = []
+            for vid, dist in scores:
+                entry = self._texts[vid]
+                if filter_metadata:
+                    matches = all(
+                        entry["metadata"].get(k) == v 
+                        for k, v in filter_metadata.items()
+                    )
+                    if not matches:
+                        continue
+                results.append({
+                    "text": entry["text"],
+                    "metadata": entry["metadata"],
+                    "distance": dist,
+                })
+            return results[:k]
 
-    async def delete_by_text(self, query: str, threshold: float = 0.45) -> str | None:
+    async def delete_by_text(self, query: str, threshold: float = 0.45) -> dict | None:
         """Search for a matching memory and remove it if distance < threshold.
 
-        Returns the deleted text if successful, else None.
+        Returns the deleted entry (dict with text and metadata) if successful, else None.
         """
         tracer = get_tracer("seahorse.rag")
         with tracer.start_as_current_span("rag.delete") as span:
@@ -161,7 +203,7 @@ class RAGPipeline:
             embedding = await self._embed(query)
             best_id: int | None = None
             best_dist: float = 1.0
-            deleted_text: str | None = None
+            deleted_entry: dict | None = None
 
             if self._use_rust and self._memory is not None:
                 raw = self._memory.search(embedding.tobytes(), k=1)
@@ -184,23 +226,22 @@ class RAGPipeline:
             )
 
             if best_id is not None and best_id in self._texts and best_dist < threshold:
-                deleted_text = self._texts.pop(best_id)
-                # We can't easily remove from HNSW index without rebuilding,
-                # but removing from self._texts prevents it from appearing in search.
+                deleted_entry = self._texts.pop(best_id)
                 if not self._use_rust:
                     self._vectors.pop(best_id, None)
+                
                 logger.info(
                     "rag.delete: removed doc_id=%d dist=%.3f text=%r",
                     best_id,
                     best_dist,
-                    deleted_text[:50],
+                    deleted_entry["text"][:50],
                 )
                 try:
                     span.set_attribute("rag.deleted_id", best_id)
                     span.set_attribute("rag.dist", best_dist)
                 except Exception:  # noqa: BLE001
                     pass
-                return deleted_text
+                return deleted_entry
 
             return None
 
@@ -220,13 +261,14 @@ class RAGPipeline:
     async def _embed(self, text: str) -> np.ndarray:
         """Call LiteLLM embedding API and return a numpy float32 array."""
         import asyncio
+
         import litellm  # local import to avoid top-level cost
         try:
             response = await asyncio.wait_for(
                 litellm.aembedding(model=self._embed_model, input=text),
                 timeout=_EMBED_TIMEOUT,
             )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             raise RuntimeError(
                 f"Embedding API timed out after {_EMBED_TIMEOUT}s. "
                 f"Check SEAHORSE_EMBED_MODEL (current: {self._embed_model!r}) "

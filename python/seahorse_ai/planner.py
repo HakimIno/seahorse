@@ -127,7 +127,12 @@ class ReActPlanner:
 
                         tasks.append(
                             self._execute_action(
-                                action_name, action_args_str, step, tracer, call_id
+                                action_name, 
+                                action_args_str, 
+                                step, 
+                                tracer, 
+                                call_id, 
+                                agent_id=request.agent_id
                             )
                         )
                     
@@ -144,9 +149,11 @@ class ReActPlanner:
                             isinstance(result, str) and result.startswith("Error")
                         )
                         if is_error and action_name:
-                            self._tool_errors[action_name] = self._tool_errors.get(action_name, 0) + 1
+                            self._tool_errors[action_name] = (
+                                self._tool_errors.get(action_name, 0) + 1
+                            )
                             if self._tool_errors[action_name] >= 2:
-                                logger.warning("Self-correction triggered for tool: %s", action_name)
+                                logger.warning("Self-correction triggered: %s", action_name)
                                 result = (
                                     f"{result}\n\n[SYSTEM: You have failed to use this tool "
                                     "correctly 2+ times. Please STOP and re-evaluate your plan. "
@@ -178,7 +185,9 @@ class ReActPlanner:
                         "agent.status": "done",
                     })
                     # 3) Before returning, trigger background memory summarization
-                    asyncio.create_task(self._auto_summarize_memory(messages))
+                    asyncio.create_task(
+                        self._auto_summarize_memory(messages, agent_id=request.agent_id)
+                    )
                     
                     return AgentResponse(
                         content=content,
@@ -191,7 +200,9 @@ class ReActPlanner:
             self._set_span_attrs(span, {"agent.status": "max_steps_reached"})
             
             # Still try to summarize what we found before failing
-            asyncio.create_task(self._auto_summarize_memory(messages))
+            asyncio.create_task(
+                self._auto_summarize_memory(messages, agent_id=request.agent_id)
+            )
 
             return AgentResponse(
                 content="[Agent reached the maximum number of reasoning steps]",
@@ -201,7 +212,7 @@ class ReActPlanner:
 
     # ── memory ────────────────────────────────────────────────────────────────
 
-    async def _auto_summarize_memory(self, messages: list[Message]) -> None:
+    async def _auto_summarize_memory(self, messages: list[Message], agent_id: str | None = None) -> None:
         """Background task: Analyze the conversation, extract key facts, and store them."""
         # Only summarize if there's enough interaction
         if len(messages) < 4:
@@ -211,20 +222,24 @@ class ReActPlanner:
             "You are a background memory worker. "
             "Analyze the conversation below and extract KEY FACTS, USER PREFERENCES, "
             "and IMPORTANT CONTEXT that should be remembered for future interactions. "
-            "CRITICAL: Each fact MUST be independent and stored on its own line. "
-            "Do NOT combine multiple unrelated facts (e.g., name and drink) into one line. "
-            "Example of GOOD atomic facts:\n"
-            "- The user's name is Kim.\n"
-            "- The user's favorite drink is Thai Tea.\n"
-            "Format as a list of independent, concise fact strings. "
-            "If no new important facts are found, return 'NONE'.\n\n"
+            "CRITICAL: Each fact MUST be independent. "
+            "For each fact, assign an 'importance' level from 1 to 5: "
+            "5 = Critical/Permanent (e.g. name, birthday), "
+            "3 = Standard preference (e.g. food, hobbies), "
+            "1 = Contextual/Temporary (e.g. today's plan). "
+            "Format each fact as: [importance] Fact text. "
+            "Example:\n"
+            "- [5] The user's name is Kim.\n"
+            "- [3] The user likes Thai Tea.\n"
+            "If no new facts are found, return 'NONE'.\n\n"
             "### Conversation History ###\n"
         )
         
-        history_text = "\n".join([f"{m.role}: {m.content}" for m in messages if m.role != "system"])
+        history_text = "\n".join(
+            [f"{m.role}: {m.content}" for m in messages if m.role != "system"]
+        )
         
         try:
-            # We use the same LLM but with a specific instruction
             raw_summary = await self._llm.complete([
                 Message(role="system", content=summary_prompt + history_text)
             ])
@@ -232,28 +247,43 @@ class ReActPlanner:
             if "NONE" in raw_summary.upper() or len(raw_summary.strip()) < 5:
                 return
 
-            # Force splitting by lines AND common conjunctions to ensure atomic facts
-            facts: list[str] = []
+            # Parse lines like "[3] Fact text"
             for line in raw_summary.split("\n"):
                 line = line.strip("-* ").strip()
-                if not line or len(line) < 3:
+                if not line or len(line) < 5:
                     continue
 
-                # Split by common conjunctions if line seems too long or grouped
-                if (" and " in line or " และ " in line) and len(line) > 30:
-                    parts = line.replace(" และ ", " and ").split(" and ")
-                    facts.extend([p.strip(". ") for p in parts if len(p.strip()) > 3])
+                importance = 3  # Default
+                fact_text = line
+                
+                # Check for [N] pattern
+                if line.startswith("[") and "]" in line[:5]:
+                    try:
+                        imp_str = line[1:line.index("]")]
+                        importance = int(imp_str)
+                        fact_text = line[line.index("]") + 1:].strip()
+                    except (ValueError, IndexError):
+                        pass
+
+                # Force splitting by common conjunctions
+                split_markers = [" และ ", " and ", " ทั้งยัง ", " รวมถึง "]
+                if any(m in fact_text for m in split_markers) and len(fact_text) > 30:
+                    temp = fact_text
+                    for m in split_markers:
+                        temp = temp.replace(m, "SPLIT_TOKEN")
+                    parts = [p.strip() for p in temp.split("SPLIT_TOKEN") if len(p.strip()) > 3]
+                    for p in parts:
+                        await self._tools.call(
+                            "memory_store", 
+                            {"text": p, "importance": importance, "agent_id": agent_id}
+                        )
                 else:
-                    facts.append(line.strip(". "))
-
-            logger.info("auto_summarize_memory: extracted facts: %s", facts)
-
-            from seahorse_ai.tools.memory import memory_store
-            for fact in facts:
-                if fact:
-                    await memory_store(fact)
+                    await self._tools.call(
+                        "memory_store", 
+                        {"text": fact_text, "importance": importance, "agent_id": agent_id}
+                    )
                     
-            logger.info("auto_summarize_memory: stored %d facts", len(facts))
+            logger.info("auto_summarize_memory: processed background facts")
             
         except Exception as exc: # noqa: BLE001
             logger.error("auto_summarize_memory failed: %s", exc)
@@ -280,6 +310,7 @@ class ReActPlanner:
         step: int,
         tracer: object,
         call_id: str | None = None,
+        agent_id: str | None = None,
     ) -> str:
         """Parse arguments, call tool, return Observation string."""
         if not tool_name:
@@ -297,6 +328,10 @@ class ReActPlanner:
                     "tool.step": step,
                     "tool.args": args_str[:200],
                 })
+                # We do this by checking if the registry can inject it or just adding it to args.
+                if agent_id and tool_name in ["memory_store", "memory_search", "memory_delete"]:
+                    args["agent_id"] = agent_id
+
                 result = await self._tools.call(tool_name, args)
                 self._set_span_attrs(tool_span, {"tool.result_len": len(result)})
 
