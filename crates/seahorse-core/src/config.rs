@@ -15,6 +15,10 @@ pub struct Config {
     pub embedding_dim: usize,
     /// Port for the HTTP server
     pub http_port: u16,
+    /// Wasmtime fuel limit for tool execution (default 10^7)
+    pub wasm_fuel_limit: u64,
+    /// Wasmtime memory limit in MB (default 64MB)
+    pub wasm_memory_limit: usize,
 }
 
 impl Config {
@@ -27,8 +31,17 @@ impl Config {
             hnsw_max_elements: env_usize("SEAHORSE_HNSW_MAX_ELEMENTS", 100_000),
             embedding_dim: env_usize("SEAHORSE_EMBEDDING_DIM", 1536),
             http_port: env_u16("SEAHORSE_HTTP_PORT", 8080)?,
+            wasm_fuel_limit: env_u64("SEAHORSE_WASM_FUEL_LIMIT", 10_000_000),
+            wasm_memory_limit: env_usize("SEAHORSE_WASM_MEMORY_LIMIT", 64),
         })
     }
+}
+
+fn env_u64(key: &str, default: u64) -> u64 {
+    std::env::var(key)
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(default)
 }
 
 fn env_usize(key: &str, default: usize) -> usize {

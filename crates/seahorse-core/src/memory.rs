@@ -4,6 +4,9 @@ use hnsw_rs::prelude::*;
 use tracing::{debug, instrument};
 
 
+use std::path::Path;
+use hnsw_rs::hnswio::HnswIo;
+
 /// Wraps a Rust-native HNSW index for agent memory.
 /// Zero GC pauses, sub-5ms search at 100k documents.
 pub struct AgentMemory {
@@ -63,6 +66,49 @@ impl AgentMemory {
 
     pub fn dim(&self) -> usize {
         self.dim
+    }
+
+    /// Save the HNSW index to a directory.
+    #[instrument(skip(self, path))]
+    pub fn save(&self, path: &str) -> anyhow::Result<()> {
+        let p = Path::new(path);
+        let parent = p.parent().unwrap_or(p);
+        let basename = p
+            .file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or("seahorse_memory");
+
+        self.index
+            .file_dump(parent, basename)
+            .map_err(|e| anyhow::anyhow!("HNSW save failed: {e}"))?;
+        debug!(path, "memory saved");
+        Ok(())
+    }
+
+    /// Load the HNSW index from a directory.
+    #[instrument(skip(path))]
+    pub fn load(path: &str, dim: usize) -> anyhow::Result<Self> {
+        let p = Path::new(path);
+        let parent = p.parent().unwrap_or(p);
+        let basename = p
+            .file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or("seahorse_memory");
+
+        let loader = HnswIo::new(parent, basename);
+        let index: Hnsw<'_, f32, DistCosine> = loader
+            .load_hnsw_with_dist(DistCosine)
+            .map_err(|e| anyhow::anyhow!("HNSW load failed: {e}"))?;
+
+        // SAFETY: The Hnsw index returned by load_hnsw_with_dist (without mmap) 
+        // owns its data. The lifetime bound to the loader in hnsw-rs is 
+        // conservative. We cast to 'static to allow storage in Arc.
+        let index_static: Hnsw<'static, f32, DistCosine> = unsafe { std::mem::transmute(index) };
+
+        Ok(Self {
+            index: Arc::new(index_static),
+            dim,
+        })
     }
 }
 

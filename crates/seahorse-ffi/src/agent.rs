@@ -157,6 +157,14 @@ impl PythonRunner for PyPlannerRunner {
             Ok(content)
         })
     }
+
+    fn health_check(&self) -> CoreResult<()> {
+        Python::with_gil(|py| {
+            py.run_bound("1 + 1", None, None)
+                .map_err(|e| CoreError::Config(format!("Python health check failed: {e}")))?;
+            Ok(())
+        })
+    }
 }
 
 // ── factory ───────────────────────────────────────────────────────────────────

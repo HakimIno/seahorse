@@ -12,6 +12,7 @@ pub mod config;
 pub mod error;
 pub mod memory;
 pub mod scheduler;
+pub mod wasm;
 pub mod worker;
 
 pub use config::Config;

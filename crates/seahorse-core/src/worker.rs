@@ -11,10 +11,12 @@
 //!         │
 //!   task.response_tx.blocking_send(token)
 
-use std::sync::Arc;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
+use std::time::Instant;
 
 use tokio::sync::mpsc;
-use tracing::{error, info, instrument, warn};
+use tracing::{error, info, warn};
 
 use crate::error::CoreResult;
 use crate::scheduler::AgentTask;
@@ -39,6 +41,64 @@ pub trait PythonRunner: Send + Sync + 'static {
         prompt: &str,
         token_tx: mpsc::Sender<String>,
     ) -> CoreResult<String>;
+
+    /// Check if the Python interpreter/runner is responsive.
+    fn health_check(&self) -> CoreResult<()>;
+}
+
+// ── Supervisor ────────────────────────────────────────────────────────────────
+
+struct HeartbeatSupervisor {
+    active_tasks: Arc<Mutex<HashMap<String, Instant>>>,
+    runner: Arc<dyn PythonRunner>,
+}
+
+impl HeartbeatSupervisor {
+    fn new(runner: Arc<dyn PythonRunner>) -> Self {
+        Self {
+            active_tasks: Arc::new(Mutex::new(HashMap::new())),
+            runner,
+        }
+    }
+
+    fn start(&self) {
+        let active_tasks = self.active_tasks.clone();
+        let runner = self.runner.clone();
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(std::time::Duration::from_secs(30));
+            loop {
+                interval.tick().await;
+
+                // 1. Health check
+                if let Err(e) = runner.health_check() {
+                    error!(err = %e, "Supervisor: Python health check failed!");
+                }
+
+                // 2. Identify stale tasks
+                let now = Instant::now();
+                let stale: Vec<String> = {
+                    let guard = active_tasks.lock().unwrap();
+                    guard
+                        .iter()
+                        .filter(|(_, &start)| now.duration_since(start).as_secs() > 300)
+                        .map(|(id, _): (&String, &Instant)| id.clone())
+                        .collect()
+                };
+
+                for id in stale {
+                    warn!(task_id = %id, "Supervisor: task is stalling (> 5 mins)");
+                }
+            }
+        });
+    }
+
+    fn track(&self, id: String) {
+        self.active_tasks.lock().unwrap().insert(id, Instant::now());
+    }
+
+    fn untrack(&self, id: &str) {
+        self.active_tasks.lock().unwrap().remove(id);
+    }
 }
 
 // ── Worker loop ───────────────────────────────────────────────────────────────
@@ -51,19 +111,27 @@ pub fn spawn_worker_loop(
     mut task_rx: mpsc::Receiver<AgentTask>,
     runner: Arc<dyn PythonRunner>,
 ) -> tokio::task::JoinHandle<()> {
+    let supervisor = Arc::new(HeartbeatSupervisor::new(runner.clone()));
+    supervisor.start();
+
     tokio::spawn(async move {
         info!("worker loop started");
         while let Some(task) = task_rx.recv().await {
             let runner = runner.clone();
+            let supervisor = supervisor.clone();
             let task_id = task.id.clone();
 
             info!(task_id = %task_id, "worker picked up task");
+            supervisor.track(task_id.clone());
 
             tokio::task::spawn_blocking(move || {
                 // Clone the sender before calling into Python
                 let token_tx = task.response_tx.clone();
 
-                match runner.run(&task.id, &task.prompt, token_tx) {
+                let result = runner.run(&task.id, &task.prompt, token_tx);
+                supervisor.untrack(&task_id);
+
+                match result {
                     Ok(full_response) => {
                         info!(
                             task_id = %task_id,
@@ -72,14 +140,14 @@ pub fn spawn_worker_loop(
                         );
                         // Send the full final response as the last token
                         if let Err(e) = task.response_tx.blocking_send(full_response) {
-                            warn!(task_id = %task_id, err = %e, "response channel closed early");
+                            warn!(task_id = %task_id, err = %e, "channel closed early");
                         }
                     }
                     Err(e) => {
                         error!(task_id = %task_id, err = %e, "task failed");
-                        let _ = task.response_tx.blocking_send(
-                            format!("[ERROR] Agent task failed: {e}")
-                        );
+                        let _ = task.response_tx.blocking_send(format!(
+                            "[ERROR] Agent task failed: {e}"
+                        ));
                     }
                 }
             });
@@ -106,6 +174,10 @@ mod tests {
         ) -> CoreResult<String> {
             Ok(format!("Echo: {prompt}"))
         }
+
+        fn health_check(&self) -> CoreResult<()> {
+            Ok(())
+        }
     }
 
     struct FailingPythonRunner;
@@ -118,6 +190,10 @@ mod tests {
             _token_tx: mpsc::Sender<String>,
         ) -> CoreResult<String> {
             Err(CoreError::ChannelClosed)
+        }
+
+        fn health_check(&self) -> CoreResult<()> {
+            Ok(())
         }
     }
 

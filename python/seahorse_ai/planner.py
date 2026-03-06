@@ -33,7 +33,7 @@ logger = logging.getLogger(__name__)
 class LLMBackend(Protocol):
     """Any object that can complete a list of messages."""
 
-    async def complete(self, messages: list[Message]) -> str: ...
+    async def complete(self, messages: list[Message], tools: list[dict] | None = None) -> str | dict[str, object]: ...
 
 
 @runtime_checkable
@@ -105,15 +105,23 @@ class ReActPlanner:
             openai_tools = getattr(self._tools, "to_openai_tools", lambda: [])()
 
             for step in range(self._max_steps):
-                response_msg, step_ms = await self._run_step(messages, openai_tools, step)
+                response_data, step_ms = await self._run_step(messages, openai_tools, step)
                 
-                # Append the assistant's raw message
-                messages.append(Message(**response_msg))
+                # Normalize response to a Message object
+                if isinstance(response_data, str):
+                    response_msg = Message(role="assistant", content=response_data)
+                else:
+                    # It's a dict (expected for tool calls)
+                    if "role" not in response_data:
+                        response_data["role"] = "assistant"
+                    response_msg = Message(**response_data)
+                
+                messages.append(response_msg)
 
-                logger.debug("step=%d ms=%d preview=%r", step, step_ms, str(response_msg)[:100])
+                logger.debug("step=%d ms=%d preview=%r", step, step_ms, str(response_msg.content)[:100])
 
-                tool_calls = response_msg.get("tool_calls")
-                content = response_msg.get("content")
+                tool_calls = response_msg.tool_calls
+                content = response_msg.content
 
                 # 1. Action: call tools natively (in parallel)
                 if tool_calls:

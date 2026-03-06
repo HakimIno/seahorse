@@ -111,7 +111,7 @@ pub fn init_jwt() -> anyhow::Result<()> {
 ///
 /// Use it as a handler parameter to require auth on specific routes:
 ///
-/// ```rust
+/// ```rust,ignore
 /// async fn my_handler(auth: AuthenticatedUser, ...) -> impl IntoResponse { ... }
 /// ```
 ///

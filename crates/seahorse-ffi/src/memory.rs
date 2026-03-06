@@ -5,15 +5,17 @@ use seahorse_core::AgentMemory;
 
 /// Python-accessible wrapper around the Rust HNSW vector memory.
 ///
-/// Usage::
+/// Usage:
 ///
-///     from seahorse_ffi._core import PyAgentMemory
-///     import numpy as np
+/// ```python
+/// from seahorse_ffi._core import PyAgentMemory
+/// import numpy as np
 ///
-///     mem = PyAgentMemory(dim=384, max_elements=100_000)
-///     vec = np.random.rand(384).astype(np.float32)
-///     mem.insert(0, vec.tobytes())
-///     results = mem.search(vec.tobytes(), k=5)  # [(id, dist), ...]
+/// mem = PyAgentMemory(dim=384, max_elements=100_000)
+/// vec = np.random.rand(384).astype(np.float32)
+/// mem.insert(0, vec.tobytes())
+/// results = mem.search(vec.tobytes(), k=5)  # [(id, dist), ...]
+/// ```
 #[pyclass(name = "PyAgentMemory")]
 pub struct PyAgentMemory {
     inner: Arc<AgentMemory>,
@@ -73,6 +75,22 @@ impl PyAgentMemory {
     #[getter]
     pub fn dim(&self) -> usize {
         self.inner.dim()
+    }
+
+    /// Save the HNSW index to a directory.
+    pub fn save(&self, py: Python<'_>, path: &str) -> PyResult<()> {
+        py.allow_threads(|| self.inner.save(path))
+            .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!("{e}")))
+    }
+
+    /// Load a HNSW index from a directory.
+    #[staticmethod]
+    pub fn load(path: &str, dim: usize) -> PyResult<Self> {
+        let inner = AgentMemory::load(path, dim)
+            .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!("{e}")))?;
+        Ok(Self {
+            inner: Arc::new(inner),
+        })
     }
 
     pub fn __repr__(&self) -> String {
