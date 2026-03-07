@@ -76,3 +76,35 @@ async def google_calendar_add_event(
     except Exception as exc:
         logger.error("Google Calendar integration failed: %s", exc)
         return f"Error: {exc}"
+
+# ── Discord ───────────────────────────────────────────────────────────────────
+
+@tool(
+    "Send a message to a Discord channel. "
+    "Requires DISCORD_BOT_TOKEN in environment. "
+    "Input: channel_id (string), text (message content)."
+)
+async def discord_send_message(channel_id: str, text: str) -> str:
+    """Send a message to a Discord channel."""
+    token = os.environ.get("DISCORD_BOT_TOKEN")
+    if not token:
+        return "Error: DISCORD_BOT_TOKEN not found in environment."
+
+    try:
+        import discord
+        intents = discord.Intents.default()
+        client = discord.Client(intents=intents)
+
+        # Since discord.py is usually used in a persistent loop, we use a 
+        # temporary connection for this one-off tool call.
+        # Note: For high frequency, a persistent client in the registry is better.
+        async with client:
+            await client.login(token)
+            channel = await client.fetch_channel(int(channel_id))
+            if channel and hasattr(channel, "send"):
+                await channel.send(text) # type: ignore
+                return f"Successfully sent Discord message to channel {channel_id}."
+            return f"Error: Channel {channel_id} not found or not a text channel."
+    except Exception as exc:
+        logger.error("Discord integration failed: %s", exc)
+        return f"Error: {exc}"

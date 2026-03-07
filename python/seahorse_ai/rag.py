@@ -189,6 +189,11 @@ class RAGPipeline:
             # Default fallback could be a cheap LLM call if no dedicated reranker
             rerank_model = os.environ.get("SEAHORSE_RERANK_MODEL", "cohere/rerank-v3.0")
             
+            # Skip if no Cohere key is provided (default reranker)
+            if "cohere" in rerank_model.lower() and not os.environ.get("COHERE_API_KEY"):
+                logger.debug("rag.rerank: skipping (COHERE_API_KEY not set)")
+                return results
+
             logger.info("rag.rerank: using %s for %d docs", rerank_model, len(documents))
             response = await litellm.arerank(
                 model=rerank_model,

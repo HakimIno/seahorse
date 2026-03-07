@@ -259,9 +259,15 @@ class ReActPlanner:
         )
         
         try:
-            raw_summary = await self._llm.complete([
+            response_data = await self._llm.complete([
                 Message(role="system", content=summary_prompt + history_text)
             ])
+            
+            # Normalize response to a string if it's a dict (expected from LLMClient)
+            if isinstance(response_data, dict):
+                raw_summary = str(response_data.get("content", ""))
+            else:
+                raw_summary = str(response_data)
             
             if "NONE" in raw_summary.upper() or len(raw_summary.strip()) < 5:
                 return
