@@ -28,3 +28,7 @@ npm-debug.log*
 # OS specific
 .DS_Store
 Thumbs.db
+
+# Database and Workspace scratch files
+workspace/*.db
+workspace/hello.txt
