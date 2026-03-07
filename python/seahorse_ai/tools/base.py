@@ -42,6 +42,22 @@ def tool(description: str) -> Callable[[F], F]:
     return decorator
 
 
+class ToolError(Exception):
+    """Base class for tool-related errors."""
+    def __init__(self, message: str, is_system_error: bool = False) -> None:
+        super().__init__(message)
+        self.is_system_error = is_system_error
+
+class ToolInputError(ToolError):
+    """Error caused by invalid model inputs/arguments."""
+    def __init__(self, message: str) -> None:
+        super().__init__(message, is_system_error=False)
+
+class ToolSystemError(ToolError):
+    """Error caused by internal code bugs or environment issues."""
+    def __init__(self, message: str) -> None:
+        super().__init__(message, is_system_error=True)
+
 class SeahorseToolRegistry:
     """Registry that stores tools and dispatches calls by name."""
 
@@ -80,9 +96,17 @@ class SeahorseToolRegistry:
             if inspect.isawaitable(result):
                 result = await result
             return str(result)
+        except TypeError as exc:
+            # TypeErrors are usually internal code bugs (like the slice error)
+            # OR missing required arguments (which should be caught by schema, but just in case)
+            logger.error("tool '%s' system error: %s", name, exc)
+            return f"SYSTEM_CRASH: Internal error in {name}. {exc}"
         except Exception as exc:  # noqa: BLE001
-            logger.error("tool '%s' raised: %s", name, exc)
-            return f"Error calling {name}: {exc}"
+            # Check if it looks like a system error
+            is_system = isinstance(exc, (RuntimeError, NameError, AttributeError, ImportError))
+            prefix = "SYSTEM_CRASH:" if is_system else "Error:"
+            logger.error("tool '%s' raised %s: %s", name, type(exc).__name__, exc)
+            return f"{prefix} calling {name}: {exc}"
 
     @property
     def specs(self) -> list[ToolSpec]:

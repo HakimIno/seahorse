@@ -65,7 +65,7 @@ def _search_ddg_lite(query: str, max_results: int = 5) -> list[dict[str, str]]:
             html = response.read().decode("utf-8")
             parser = _DDGLiteParser()
             parser.feed(html)
-            # Ensure max_results is an integer to avoid slice index errors (e.g. if passed as string)
+            # Ensure max_results is an integer to avoid slice index errors
             max_results_int = int(max_results)
             return parser.results[:max_results_int]
     except Exception as exc:  # noqa: BLE001
@@ -74,10 +74,12 @@ def _search_ddg_lite(query: str, max_results: int = 5) -> list[dict[str, str]]:
 
 
 @tool(
-    "Search the web for up-to-date information. Returns top search results with titles and snippets."
+    "Search the web for up-to-date information. Returns top search results."
 )
 async def web_search(query: str, max_results: int = 5) -> str:
     """Perform a web search and return formatted results."""
+    # Cast early to prevent logging and indexing errors
+    max_results = int(max_results)
     logger.info("web_search: query=%r max_results=%d", query, max_results)
     
     # Run synchronous network call in executor to avoid blocking async loop
@@ -99,4 +101,10 @@ async def web_search(query: str, max_results: int = 5) -> str:
         href = r.get("href", "")
         lines.append(f"{i}. **{title}**\n   {body}\n   URL: {href}\n")
 
-    return "\n".join(lines)
+    results_str = "\n".join(lines)
+    results_str += (
+        "\n\n[SYSTEM: If the headlines and snippets above give you enough information "
+        "to answer the user's question, YOU MUST STOP and ANSWER now. "
+        "Do NOT call browser_scan to waste time/money if the summary is sufficient.]"
+    )
+    return results_str

@@ -26,7 +26,7 @@ _ALLOWED_IMPORTS = {
     "datetime", "calendar", "time",
     "collections", "itertools", "functools",
     "random", "hashlib", "base64", "uuid",
-    "typing", "dataclasses", "enum", "abc",
+    "typing", "dataclasses", "enum", "abc", "_io",
 }
 
 _SANDBOX_HEADER = textwrap.dedent(f"""\

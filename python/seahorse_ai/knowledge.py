@@ -26,6 +26,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import typing
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -50,7 +51,7 @@ class KnowledgeBase:
 
     # ── add_docs ──────────────────────────────────────────────────────────────
 
-    def add_docs(self, docs: list[str]) -> "KnowledgeBase":
+    def add_docs(self, docs: list[str]) -> KnowledgeBase:
         """Append a list of raw text strings to the knowledge base."""
         self._docs.extend(docs)
         return self
@@ -67,128 +68,149 @@ class KnowledgeBase:
 
         Returns the number of documents indexed.
         """
-        # Collect all docs
-        all_docs = list(self._docs)
-        if self._source and self._source.is_dir():
-            all_docs.extend(self._load_dir(self._source))
-
-        if not all_docs:
-            logger.warning("KnowledgeBase.load_into: no documents found")
-            return 0
-
-        logger.info("KnowledgeBase: indexing %d chunks …", len(all_docs))
+        logger.info("KnowledgeBase: starting memory-efficient indexing …")
         indexed = 0
-        for i, doc in enumerate(all_docs):
+
+        # Stream documents from memory list
+        for doc in self._docs:
             if not doc.strip():
                 continue
             await pipeline.store(doc)  # type: ignore[attr-defined]
             indexed += 1
-            if verbose and (i + 1) % 10 == 0:
-                logger.info(
-                    "KnowledgeBase: indexed %d/%d …", indexed, len(all_docs)
-                )
 
-        logger.info("KnowledgeBase: done — %d chunks indexed", indexed)
+        # Stream documents from directory
+        if self._source and self._source.is_dir():
+            for doc in self._stream_dir(self._source):
+                if not doc.strip():
+                    continue
+                await pipeline.store(doc)  # type: ignore[attr-defined]
+                indexed += 1
+                if verbose and indexed % 50 == 0:
+                    logger.info("KnowledgeBase: indexed %d chunks …", indexed)
+
+        logger.info("KnowledgeBase: done — %d total chunks indexed", indexed)
         return indexed
 
-    # ── internal loaders ─────────────────────────────────────────────────────
+    # ── internal streaming loaders ───────────────────────────────────────────
 
-    def _load_dir(self, directory: Path) -> list[str]:
-        docs: list[str] = []
+    def _stream_dir(self, directory: Path) -> typing.Iterator[str]:
+        """Yield chunks from all supported files in the directory."""
         files = sorted(directory.glob("**/*"))
         for path in files:
             if path.suffix == ".jsonl":
-                docs.extend(self._load_jsonl(path))
+                yield from self._stream_jsonl(path)
             elif path.suffix == ".md":
-                docs.extend(self._load_markdown(path))
+                yield from self._stream_markdown(path)
             elif path.suffix == ".txt":
-                docs.extend(self._load_text(path))
-        logger.info(
-            "KnowledgeBase: loaded %d chunks from %s", len(docs), directory
-        )
-        return docs
+                yield from self._stream_text(path)
 
-    def _load_jsonl(self, path: Path) -> list[str]:
-        docs: list[str] = []
+    def _stream_jsonl(self, path: Path) -> typing.Iterator[str]:
+        """Yield chunks from a JSONL file."""
         try:
-            for line_no, line in enumerate(path.read_text("utf-8").splitlines(), 1):
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    obj = json.loads(line)
-                    text = obj.get("text") or obj.get("content") or str(obj)
-                    if text:
-                        docs.extend(_chunk(text))
-                except json.JSONDecodeError:
-                    logger.warning(
-                        "KnowledgeBase: skipping bad JSON at %s:%d", path, line_no
-                    )
+            with path.open("r", encoding="utf-8") as f:
+                for line_no, line in enumerate(f, 1):
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        obj = json.loads(line)
+                        text = obj.get("text") or obj.get("content") or str(obj)
+                        if text:
+                            yield from _chunk(text)
+                    except json.JSONDecodeError:
+                        logger.warning(
+                            "KnowledgeBase: skipping bad JSON at %s:%d", path, line_no
+                        )
         except OSError as exc:
             logger.error("KnowledgeBase: cannot read %s: %s", path, exc)
-        return docs
 
-    def _load_markdown(self, path: Path) -> list[str]:
-        """Split markdown on level-2 headings (## ...)."""
-        docs: list[str] = []
+    def _stream_markdown(self, path: Path) -> typing.Iterator[str]:
+        """Split markdown on level-2 headings (## ...) and yield chunks."""
         try:
-            text = path.read_text("utf-8")
-            # Split on ## headings, keeping the heading line with its content
-            sections: list[str] = []
-            current: list[str] = []
-            for line in text.splitlines():
-                if line.startswith("## ") and current:
-                    sections.append("\n".join(current).strip())
-                    current = [line]
-                else:
-                    current.append(line)
-            if current:
-                sections.append("\n".join(current).strip())
-
-            for section in sections:
-                if section.strip():
-                    docs.extend(_chunk(section))
+            with path.open("r", encoding="utf-8") as f:
+                current: list[str] = []
+                for line in f:
+                    if line.startswith("## ") and current:
+                        section = "\n".join(current).strip()
+                        if section:
+                            yield from _chunk(section)
+                        current = [line]
+                    else:
+                        current.append(line)
+                if current:
+                    section = "\n".join(current).strip()
+                    if section:
+                        yield from _chunk(section)
         except OSError as exc:
             logger.error("KnowledgeBase: cannot read %s: %s", path, exc)
-        return docs
 
-    def _load_text(self, path: Path) -> list[str]:
-        """Split plain text on blank lines (paragraph-based)."""
-        docs: list[str] = []
+    def _stream_text(self, path: Path) -> typing.Iterator[str]:
+        """Read plain text in memory-efficient chunks and split into paragraphs."""
         try:
-            text = path.read_text("utf-8")
-            paragraphs = [p.strip() for p in text.split("\n\n") if p.strip()]
-            for para in paragraphs:
-                docs.extend(_chunk(para))
+            with path.open("r", encoding="utf-8") as f:
+                # Read file in 128KB chunks to find paragraph breaks
+                buffer = ""
+                chunk_size = 128 * 1024
+                while True:
+                    chunk_data = f.read(chunk_size)
+                    if not chunk_data:
+                        break
+                    
+                    buffer += chunk_data
+                    paragraphs = buffer.split("\n\n")
+                    
+                    # Keep the last partial paragraph in the buffer
+                    buffer = paragraphs.pop()
+                    
+                    for para in paragraphs:
+                        if para.strip():
+                            yield from _chunk(para.strip())
+                
+                # Yield the final paragraph
+                if buffer.strip():
+                    yield from _chunk(buffer.strip())
         except OSError as exc:
             logger.error("KnowledgeBase: cannot read %s: %s", path, exc)
-        return docs
 
 
 # ── helpers ──────────────────────────────────────────────────────────────────
 
-def _chunk(text: str, max_chars: int = _CHUNK_MAX_CHARS) -> list[str]:
+def _chunk(text: str, max_chars: int = _CHUNK_MAX_CHARS) -> typing.Iterator[str]:
     """Split text into chunks of at most `max_chars` characters.
 
-    Simple sliding split on sentence boundaries ('. ').
+    Efficiently splits on sentence boundaries, or falls back to word/char splits
+    if sentences are too long.
     """
     if len(text) <= max_chars:
-        return [text]
+        yield text
+        return
 
-    # Try to split on sentence boundaries first
+    # Try splitting on sentence boundaries
     sentences = text.replace("\n", " ").split(". ")
-    chunks: list[str] = []
-    current = ""
+    current = []
+    current_len = 0
+    
     for sent in sentences:
-        candidate = (current + ". " + sent).strip() if current else sent
-        if len(candidate) <= max_chars:
-            current = candidate
+        sent_with_sep = sent + ". "
+        if current_len + len(sent_with_sep) <= max_chars:
+            current.append(sent_with_sep)
+            current_len += len(sent_with_sep)
         else:
             if current:
-                chunks.append(current.strip())
-            current = sent
+                yield "".join(current).strip()
+            
+            # If a single sentence is longer than max_chars, split it by characters
+            if len(sent_with_sep) > max_chars:
+                # Avoid infinite recursion or massive memory spikes
+                inner_text = sent_with_sep
+                while len(inner_text) > max_chars:
+                    yield inner_text[:max_chars].strip()
+                    inner_text = inner_text[max_chars:]
+                current = [inner_text]
+                current_len = len(inner_text)
+            else:
+                current = [sent_with_sep]
+                current_len = len(sent_with_sep)
 
     if current:
-        chunks.append(current.strip())
-
-    return chunks if chunks else [text[:max_chars]]
+        yield "".join(current).strip()

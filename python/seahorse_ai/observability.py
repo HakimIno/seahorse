@@ -51,7 +51,8 @@ def setup_telemetry() -> None:
         from opentelemetry.sdk.trace.export import BatchSpanProcessor
 
         resource = Resource.create({"service.name": _SERVICE_NAME})
-        exporter = OTLPSpanExporter(endpoint=_OTLP_ENDPOINT, insecure=True)
+        # Use a short timeout to prevent hanging if collector is missing
+        exporter = OTLPSpanExporter(endpoint=_OTLP_ENDPOINT, insecure=True, timeout=2)
         provider = TracerProvider(resource=resource)
         provider.add_span_processor(BatchSpanProcessor(exporter))
         trace.set_tracer_provider(provider)
@@ -61,8 +62,11 @@ def setup_telemetry() -> None:
             _SERVICE_NAME,
             _OTLP_ENDPOINT,
         )
-    except ImportError as exc:
-        logger.warning("opentelemetry packages not found, tracing disabled: %s", exc)
+    except Exception as exc:
+        # If gRPC or OTel packages fail, silence the spam
+        logging.getLogger("opentelemetry").setLevel(logging.ERROR)
+        logger.warning("Tracing disabled: %s", exc)
+        _tracer_provider = "DISABLED"
 
 
 def get_tracer(name: str = "seahorse") -> Any:
@@ -91,14 +95,21 @@ def span(name: str, **attrs: Any) -> Generator[Any, None, None]:
     tracer = get_tracer()
     try:
         from opentelemetry import trace
-        with tracer.start_as_current_span(name) as s:
+        # Use a more explicit span management to avoid Context mismatch during async cancel
+        s = tracer.start_span(name)
+        token = trace.context.attach(trace.set_span_in_context(s))
+        try:
             for k, v in attrs.items():
-                try:
-                    s.set_attribute(k, v)
-                except Exception:  # noqa: BLE001
-                    pass
+                s.set_attribute(k, v)
             yield s
-    except ImportError:
+        finally:
+            s.end()
+            try:
+                trace.context.detach(token)
+            except ValueError:
+                # Silently ignore token mismatch during cancellation
+                pass
+    except (ImportError, Exception):
         yield None
 
 

@@ -22,11 +22,13 @@ from typing import Protocol, runtime_checkable
 
 from seahorse_ai.observability import get_tracer, setup_telemetry
 from seahorse_ai.prompts import (
-    REALTIME_KEYWORDS, 
-    REALTIME_NUDGE, 
-    MEMORY_KEYWORDS, 
+    MEMORY_KEYWORDS,
     MEMORY_NUDGE,
-    build_system_prompt
+    REALTIME_KEYWORDS,
+    REALTIME_NUDGE,
+    STRATEGY_GENERATION_PROMPT,
+    STRATEGY_NUDGE,
+    build_system_prompt,
 )
 from seahorse_ai.schemas import AgentRequest, AgentResponse, Message
 
@@ -35,11 +37,12 @@ logger = logging.getLogger(__name__)
 
 # ── Protocols ─────────────────────────────────────────────────────────────────
 
-@runtime_checkable
 class LLMBackend(Protocol):
-    """Any object that can complete a list of messages."""
+    """Any object that can complete a list of messages with tier support."""
 
-    async def complete(self, messages: list[Message], tools: list[dict] | None = None) -> str | dict[str, object]: ...
+    async def complete(
+        self, messages: list[Message], tools: list[dict] | None = None, tier: str = "worker"
+    ) -> str | dict[str, object]: ...
 
 
 @runtime_checkable
@@ -64,12 +67,16 @@ class ReActPlanner:
         self,
         llm: LLMBackend,
         tools: ToolRegistry | None = None,
-        max_steps: int = 10,
+        max_steps: int = 15,
+        default_tier: str = "worker"
     ) -> None:
         self._llm = llm
         self._tools = tools or self._default_tools()
         self._max_steps = max_steps
+        self._default_tier = default_tier
         self._tool_errors: dict[str, int] = {}
+        self._consecutive_errors = 0
+        self._total_obs_chars = 0
         setup_telemetry()  # idempotent
 
     # ── public ────────────────────────────────────────────────────────────────
@@ -112,11 +119,39 @@ class ReActPlanner:
                 request.agent_id, self._max_steps, len(request.prompt),
             )
 
+            current_tier = getattr(
+                self._llm, "classify_intent", lambda p: self._default_tier
+            )(request.prompt)
+            if current_tier == "strategist":
+                # Strategist is for final summaries, use Thinker for the intermediate steps
+                current_tier = "thinker"
+
             # Pre-compute the OpenAI tool definitions
-            openai_tools = getattr(self._tools, "to_openai_tools", lambda: [])()
+            openai_tools = getattr(
+                self._tools, "to_openai_tools", lambda: []
+            )()
+
+            # 2. Generate Strategy Plan for complex intents
+            if current_tier in ("thinker", "strategist"):
+                strategy_plan = await self._generate_strategy_plan(request.prompt)
+                messages.insert(1, Message(
+                    role="system", 
+                    content=f"{strategy_plan}\n\n{STRATEGY_NUDGE}"
+                ))
 
             for step in range(self._max_steps):
-                response_data, step_ms = await self._run_step(messages, openai_tools, step)
+                # Escalation logic:
+                # - If worker: stay on worker unless it's taking too long (step >= 3)
+                # - If thinker/strategist: use thinker for reasoning steps
+                if current_tier == "worker":
+                    tier = "thinker" if step >= 3 else "worker"
+                else:
+                    tier = "thinker"
+                
+                # Normalize response to a Message object
+                response_data, step_ms = await self._run_step(
+                    messages, openai_tools, step, tier=tier
+                )
                 
                 # Normalize response to a Message object
                 if isinstance(response_data, str):
@@ -125,7 +160,9 @@ class ReActPlanner:
                     # It's a dict (expected for tool calls)
                     if "role" not in response_data:
                         response_data["role"] = "assistant"
-                    response_msg = Message(**response_data)
+                    response_msg = Message(
+                        **response_data  # type: ignore[arg-type]
+                    )
                 
                 messages.append(response_msg)
 
@@ -158,40 +195,92 @@ class ReActPlanner:
                     # Execute all tools concurrently
                     results = await asyncio.gather(*tasks, return_exceptions=True)
                     
+                    found_system_crash = False
                     # Append observations
                     for tool_call, result in zip(tool_calls, results, strict=False):
                         func_call = tool_call.get("function", {})
                         action_name = func_call.get("name")
                         call_id = tool_call.get("id")
                         
-                        is_error = isinstance(result, Exception) or (
-                            isinstance(result, str) and result.startswith("Error")
+                        observation_str = (
+                            str(result) if not isinstance(result, Exception) else f"Error: {result}"
                         )
+                        self._total_obs_chars += len(observation_str)
+
+                        is_error = isinstance(result, Exception) or (
+                            isinstance(result, str) and (
+                                result.startswith("Error") or result.startswith("SYSTEM_CRASH")
+                            )
+                        )
+                        
+                        if is_error:
+                            self._consecutive_errors += 1
+                            if "SYSTEM_CRASH" in observation_str:
+                                found_system_crash = True
+                        else:
+                            # We don't reset here because multiple tools can run. 
+                            # We reset if we get content later or if any tool succeeds? 
+                            # Actually, let's reset if AT LEAST one tool succeeds in this batch.
+                            self._consecutive_errors = 0
+
                         if is_error and action_name:
                             self._tool_errors[action_name] = (
                                 self._tool_errors.get(action_name, 0) + 1
                             )
                             if self._tool_errors[action_name] >= 2:
                                 logger.warning("Self-correction triggered: %s", action_name)
-                                result = (
-                                    f"{result}\n\n[SYSTEM: You have failed to use this tool "
-                                    "correctly 2+ times. Please STOP and re-evaluate your plan. "
-                                    "Try a different tool or approach.]"
+                                observation_str = (
+                                    f"{observation_str}\n\n[SYSTEM: You have failed to use "
+                                    "this tool correctly 2+ times. Please STOP and re-evaluate "
+                                    "your plan. Try a different tool or approach.]"
                                 )
 
-                        observation_str = (
-                            str(result) if not isinstance(result, Exception) else f"Error: {result}"
-                        )
-                        
                         messages.append(Message(
                             role="tool", 
                             content=observation_str,
                             tool_call_id=call_id,
                             name=action_name,
                         ))
+                    
+                    if found_system_crash:
+                        logger.error("agent.run terminating due to SYSTEM_CRASH")
+                        return AgentResponse(
+                            content="[TERMINATED] An internal technical error occurred in a tool. "
+                                    "Please report this bug.",
+                            steps=step + 1,
+                            agent_id=request.agent_id,
+                        )
+                    
+                    if self._consecutive_errors >= 3:
+                        logger.error("agent.run terminating due to too many consecutive errors")
+                        return AgentResponse(
+                            content="[TERMINATED] Too many consecutive tool errors. "
+                                    "I am stopping to prevent wasting tokens.",
+                            steps=step + 1,
+                            agent_id=request.agent_id,
+                        )
+
+                    # Token Burn Guard: Monitor context size
+                    if self._total_obs_chars > 30000:
+                        logger.warning("Token Burn Guard: context size > 30k. Nudging synthesis.")
+                        messages.append(Message(
+                            role="user",
+                            content="[SYSTEM: You have gathered 30,000+ characters of data. "
+                                    "This is enough. Please STOP researching and synthesize "
+                                    "your final answer now.]"
+                        ))
+                    
+                    if self._total_obs_chars > 50000:
+                        logger.error("Token Burn Guard: hard limit reached (50k). Terminating.")
+                        return AgentResponse(
+                            content="[TERMINATED] Information limit reached (50k chars). "
+                                    "To prevent excessive costs, I am summarizing now.",
+                            steps=step + 1,
+                            agent_id=request.agent_id,
+                        )
+
                     continue
 
-                # 2. Terminal: Answer found (no tool_calls, only content)
                 if content:
                     total_ms = int((time.monotonic() - wall_start) * 1000)
                     logger.info(
@@ -208,6 +297,25 @@ class ReActPlanner:
                         self._auto_summarize_memory(messages, agent_id=request.agent_id)
                     )
                     
+                    # Final synthesis tier
+                    final_tier = getattr(
+                        self._llm, "classify_intent", lambda p: "strategist"
+                    )(request.prompt)
+                    if final_tier == "strategist":
+                        logger.info("Synthesizing final response with strategist model")
+                        synth_msgs = messages + [Message(role="assistant", content=content)]
+                        synth_msgs.append(Message(
+                            role="user",
+                            content="สรุปคำตอบให้เป็นภาษากลยุทธ์ทางธุรกิจที่น่าสนใจ"
+                        ))
+                        response_data = await self._llm.complete(
+                            synth_msgs, tier="strategist"
+                        )
+                        if isinstance(response_data, dict):
+                            content = str(response_data.get("content", content))
+                        else:
+                            content = str(response_data)
+
                     return AgentResponse(
                         content=content,
                         steps=step + 1,
@@ -320,12 +428,28 @@ class ReActPlanner:
         p = prompt.lower()
         return any(k.lower() in p for k in keywords)
 
+    async def _generate_strategy_plan(self, prompt: str) -> str:
+        """Call high-tier model to create a master plan before execution."""
+        messages = [
+            Message(role="system", content=STRATEGY_GENERATION_PROMPT),
+            Message(role="user", content=prompt),
+        ]
+        try:
+            # Use 'thinker' tier for strategy generation
+            # ReActPlanner uses self._llm (LLMBackend) which has a 'complete' method
+            plan = await self._llm.complete(messages, tier="thinker")
+            logger.info("Strategy Plan generated.")
+            return str(plan)
+        except Exception as exc:
+            logger.error("Failed to generate strategy plan: %s", exc)
+            return "[STRATEGY PLAN] Proceed with standard ReAct loop."
+
     async def _run_step(
-        self, messages: list[Message], tools: list[dict], step: int
+        self, messages: list[Message], tools: list[dict], step: int, tier: str = "worker"
     ) -> tuple[dict, int]:
         """Call the LLM and return (response_message_dict, elapsed_ms)."""
         t0 = time.monotonic()
-        response_msg = await self._llm.complete(messages, tools=tools)  # type: ignore[call-arg]
+        response_msg = await self._llm.complete(messages, tools=tools, tier=tier)  # type: ignore[call-arg]
         return response_msg, int((time.monotonic() - t0) * 1000)
 
     async def _execute_action(
@@ -363,6 +487,9 @@ class ReActPlanner:
             logger.info("tool.result step=%d tool=%s len=%d", step, tool_name, len(result))
             return result
 
+        except GeneratorExit:
+            # Task was cancelled, just re-raise
+            raise
         except Exception as exc:  # noqa: BLE001
             logger.error("tool.error step=%d action=%s error=%s", step, tool_name, exc)
             return f"Error executing {tool_name}: {exc}"

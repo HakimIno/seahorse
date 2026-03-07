@@ -3,9 +3,12 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 
+import logging
 import litellm
 
 from seahorse_ai.schemas import LLMConfig, Message
+
+logger = logging.getLogger(__name__)
 
 
 class LLMClient:
@@ -15,7 +18,19 @@ class LLMClient:
         self._config = config
 
     async def complete(self, messages: list[Message], tools: list[dict] | None = None) -> dict:
-        """Run a completion and return the full response message dict."""
+        """Run a completion and return the full response message dict with retry logic."""
+        return await self._complete_with_retry(messages, tools=tools)
+
+    async def _complete_with_retry(
+        self, 
+        messages: list[Message], 
+        tools: list[dict] | None = None, 
+        retries: int = 3, 
+        backoff: float = 1.0
+    ) -> dict:
+        """Internal helper for exponential backoff retries on transient errors."""
+        import asyncio
+
         kwargs = {
             "model": self._config.model,
             "messages": [m.model_dump(exclude_none=True) for m in messages],
@@ -25,11 +40,24 @@ class LLMClient:
         if tools:
             kwargs["tools"] = tools
 
-        response = await litellm.acompletion(**kwargs)
-        message = response.choices[0].message  # type: ignore[union-attr]
-        
-        # Convert Litellm Message back to a dict
-        return message.model_dump(exclude_none=True)
+        try:
+            response = await litellm.acompletion(**kwargs)
+            message = response.choices[0].message
+            return message.model_dump(exclude_none=True)
+        except (litellm.ServiceUnavailableError, litellm.Timeout, litellm.RateLimitError) as exc:
+            if retries > 0:
+                logger.warning(
+                    "LLM transient error: %s. Retrying in %.1fs... (%d left)",
+                    exc, backoff, retries
+                )
+                await asyncio.sleep(backoff)
+                return await self._complete_with_retry(
+                    messages, tools=tools, retries=retries - 1, backoff=backoff * 2
+                )
+            raise
+        except Exception as exc:
+            logger.error("LLM non-retryable error: %s", exc)
+            raise
 
     async def stream(self, messages: list[Message]) -> AsyncIterator[str]:
         """Stream tokens as they are generated."""

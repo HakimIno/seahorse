@@ -117,6 +117,7 @@ async def memory_store(text: str, importance: int = 3, agent_id: str | None = No
 )
 async def memory_search(query: str, k: int = 10, agent_id: str | None = None) -> str:
     """Search the HNSW memory index and return up to k matching texts."""
+    k = int(k)
     pipeline = get_pipeline()
     if pipeline.size == 0:
         return "Memory is empty. Nothing has been stored yet."

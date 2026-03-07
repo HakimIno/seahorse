@@ -7,13 +7,13 @@ ToolSpec               : tool metadata model
 tool                   : @tool decorator
 make_default_registry  : returns a registry with all built-in tools registered
 """
+from seahorse_ai.tools.auto_architect import auto_architect
 from seahorse_ai.tools.base import SeahorseToolRegistry, ToolSpec, tool
 from seahorse_ai.tools.browser import browser_scan
 from seahorse_ai.tools.competitor_radar import competitor_radar
+from seahorse_ai.tools.db import database_query, database_schema
 from seahorse_ai.tools.filesystem import list_files, read_file, write_file
 from seahorse_ai.tools.integrations import google_calendar_add_event, slack_send_message
-from seahorse_ai.tools.auto_architect import auto_architect
-from seahorse_ai.tools.strategy_engine import war_room
 from seahorse_ai.tools.memory import (
     memory_clear,
     memory_delete,
@@ -21,6 +21,7 @@ from seahorse_ai.tools.memory import (
     memory_store,
 )
 from seahorse_ai.tools.python_interpreter import python_interpreter
+from seahorse_ai.tools.strategy_engine import war_room
 from seahorse_ai.tools.web_search import web_search
 
 __all__ = [
@@ -44,6 +45,8 @@ __all__ = [
     "auto_architect",
     "slack_send_message",
     "google_calendar_add_event",
+    "database_query",
+    "database_schema",
 ]
 
 
@@ -66,6 +69,8 @@ def make_default_registry() -> SeahorseToolRegistry:
         auto_architect,
         slack_send_message,
         google_calendar_add_event,
+        database_query,
+        database_schema,
     ):
         registry.register(fn)
     return registry

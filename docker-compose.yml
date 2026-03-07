@@ -1,32 +1,15 @@
-version: "3.9"
-
 services:
-  # Jaeger all-in-one: UI on :16686, OTLP gRPC on :4317, OTLP HTTP on :4318
-  jaeger:
-    image: jaegertracing/all-in-one:1.57
-    container_name: seahorse-jaeger
-    restart: unless-stopped
-    ports:
-      - "16686:16686" # Jaeger UI
-      - "4317:4317" # OTLP gRPC (Python + Rust both send here)
-      - "4318:4318" # OTLP HTTP (optional)
-      - "14268:14268" # Jaeger native thrift/http (optional)
+  postgres:
+    image: postgres:16-alpine
+    container_name: seahorse-postgres
     environment:
-      - COLLECTOR_OTLP_ENABLED=true
-    healthcheck:
-      test:
-        [
-          "CMD",
-          "wget",
-          "--quiet",
-          "--tries=1",
-          "--spider",
-          "http://localhost:16686",
-        ]
-      interval: 10s
-      timeout: 5s
-      retries: 5
+      POSTGRES_DB: seahorse_enterprise
+      POSTGRES_USER: seahorse_user
+      POSTGRES_PASSWORD: seahorse_password
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
 
-networks:
-  default:
-    name: seahorse-net
+volumes:
+  postgres_data:

@@ -8,9 +8,9 @@ pub mod memory;
 
 use pyo3::prelude::*;
 
-/// The seahorse_ffi._core Python extension module.
+/// The seahorse_ffi extension module.
 #[pymodule]
-fn _core(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
+fn seahorse_ffi(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<memory::PyAgentMemory>()?;
     m.add_function(wrap_pyfunction!(memory::search_memory, m)?)?;
     m.add_class::<agent::PyPlannerRunner>()?;

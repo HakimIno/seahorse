@@ -24,6 +24,7 @@ dependencies = [
     "opentelemetry-semantic-conventions>=0.61b0",
     "pyjwt>=2.11.0",
     "discord.py>=2.3.2",
+    "psycopg2-binary>=2.9.11",
 ]
 
 [build-system]

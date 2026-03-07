@@ -38,26 +38,21 @@ impl PyAgentMemory {
         }
     }
 
-    /// Insert an embedding.
-    ///
-    /// Args:
-    ///     doc_id: Unique document identifier.
-    ///     embedding: Raw bytes of a float32 array (use ``np.array(..., dtype=np.float32).tobytes()``).
-    pub fn insert(&self, py: Python<'_>, doc_id: usize, embedding: &[u8]) {
+    /// Insert an embedding with text and metadata.
+    pub fn insert(
+        &self,
+        py: Python<'_>,
+        doc_id: usize,
+        embedding: &[u8],
+        text: String,
+        metadata_json: String,
+    ) {
         let emb: &[f32] = bytemuck::cast_slice(embedding);
         // Release GIL during HNSW insert
-        py.allow_threads(|| self.inner.insert(doc_id, emb));
+        py.allow_threads(|| self.inner.insert(doc_id, emb, text, metadata_json));
     }
 
-    /// Search for the k nearest neighbours.
-    ///
-    /// Args:
-    ///     query: Raw bytes of a float32 query vector.
-    ///     k: Number of neighbours to return.
-    ///     ef: Search quality (higher = better recall, slower). Default 100.
-    ///
-    /// Returns:
-    ///     List of ``(doc_id, distance)`` tuples sorted by distance ascending.
+    /// Search and return (doc_id, distance, text, metadata_json).
     #[pyo3(signature = (query, k, ef = 100))]
     pub fn search(
         &self,
@@ -65,10 +60,14 @@ impl PyAgentMemory {
         query: &[u8],
         k: usize,
         ef: usize,
-    ) -> Vec<(usize, f32)> {
+    ) -> Vec<(usize, f32, String, String)> {
         let q: &[f32] = bytemuck::cast_slice(query);
-        // Release GIL during HNSW search
         py.allow_threads(|| self.inner.search(q, k, ef))
+    }
+
+    /// Remove a document (Soft Delete).
+    pub fn remove(&self, py: Python<'_>, doc_id: usize) -> Option<(String, String)> {
+        py.allow_threads(|| self.inner.remove(doc_id))
     }
 
     /// The embedding dimension of this index.
@@ -109,7 +108,7 @@ pub fn search_memory(
     query_bytes: &[u8],
     k: usize,
     ef: usize,
-) -> PyResult<Vec<(usize, f32)>> {
+) -> PyResult<Vec<(usize, f32, String, String)>> {
     let q: &[f32] = bytemuck::cast_slice(query_bytes);
     let results = py.allow_threads(|| memory.inner.search(q, k, ef));
     Ok(results)

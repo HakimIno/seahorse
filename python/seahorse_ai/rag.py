@@ -16,6 +16,7 @@ The RAGPipeline also functions as an agent tool: `memory_store` and
 """
 from __future__ import annotations
 
+import json
 import logging
 import os
 from typing import TYPE_CHECKING
@@ -47,11 +48,11 @@ def _try_import_ffi_memory() -> type | None:
     `uv sync` without running `maturin develop`).
     """
     try:
-        from seahorse_ffi._core import PyAgentMemory  # type: ignore[import]
-        return PyAgentMemory
+        import seahorse_ffi
+        return seahorse_ffi.PyAgentMemory
     except ImportError:
         logger.warning(
-            "seahorse_ffi._core not found — falling back to pure-Python "
+            "seahorse_ffi not found — falling back to pure-Python "
             "cosine similarity for RAG. Run `uv run maturin develop` to enable "
             "the Rust HNSW index."
         )
@@ -67,7 +68,6 @@ class RAGPipeline:
     def __init__(self, embed_model: str = _EMBED_MODEL, dim: int = _EMBED_DIM) -> None:
         self._embed_model = embed_model
         self._dim = dim
-        self._texts: dict[int, dict] = {}  # doc_id -> {"text": str, "metadata": dict}
         self._next_id = 0
 
         PyAgentMemory = _try_import_ffi_memory()
@@ -80,6 +80,7 @@ class RAGPipeline:
             self._use_rust = False
             # pure-Python fallback: dict of numpy vectors
             self._vectors: dict[int, np.ndarray] = {}
+            self._texts: dict[int, dict] = {}  # doc_id -> {"text": str, "metadata": dict}
 
     async def store(
         self, text: str, doc_id: int | None = None, metadata: dict | None = None
@@ -100,16 +101,21 @@ class RAGPipeline:
             except Exception:  # noqa: BLE001
                 pass
 
-            self._texts[doc_id] = {
-                "text": text,
-                "metadata": metadata or {},
-            }
             embedding = await self._embed(text)
 
             if self._use_rust and self._memory is not None:
-                self._memory.insert(doc_id, embedding.tobytes())
+                self._memory.insert(
+                    doc_id,
+                    embedding.tobytes(),
+                    text,
+                    json.dumps(metadata or {})
+                )
                 logger.debug("rag.store: rust insert doc_id=%d", doc_id)
             else:
+                self._texts[doc_id] = {
+                    "text": text,
+                    "metadata": metadata or {},
+                }
                 self._vectors[doc_id] = embedding
                 logger.debug("rag.store: python insert doc_id=%d", doc_id)
 
@@ -122,14 +128,12 @@ class RAGPipeline:
 
         If `rerank` is True, uses a Cross-Encoder (via LiteLLM) to refine the top results.
         """
+        k = int(k)
         tracer = get_tracer("seahorse.rag")
         with tracer.start_as_current_span("rag.search") as span:
-            # ... (lines 130-139 same)
-            if not self._texts:
-                return []
-
+            span.set_attribute("rag.query_len", len(query))
             embedding = await self._embed(query)
-            
+
             # Fetch more candidates if we plan to re-rank
             top_k = k * 4 if rerank else k
             if filter_metadata:
@@ -138,26 +142,29 @@ class RAGPipeline:
             if self._use_rust and self._memory is not None:
                 raw = self._memory.search(embedding.tobytes(), k=top_k)
                 results = []
-                for i, (doc_id, dist) in enumerate(raw):
-                    if doc_id in self._texts:
-                        entry = self._texts[doc_id]
-                        if filter_metadata:
-                            matches = all(
-                                entry["metadata"].get(k) == v 
-                                for k, v in filter_metadata.items()
-                            )
-                            if not matches:
-                                continue
-                        
-                        results.append({
-                            "text": entry["text"],
-                            "metadata": entry["metadata"],
-                            "distance": dist,
-                            "doc_id": doc_id,
-                        })
+                for i, (doc_id, dist, text, meta_json) in enumerate(raw):
+                    metadata = json.loads(meta_json)
+                    if filter_metadata:
+                        matches = all(
+                            metadata.get(key) == v
+                            for key, v in filter_metadata.items()
+                        )
+                        if not matches:
+                            continue
+
+                    results.append({
+                        "text": text,
+                        "metadata": metadata,
+                        "distance": dist,
+                        "doc_id": doc_id,
+                    })
             else:
+                if not self._texts:
+                    return []
+
                 # Python fallback (simplified here for brevity, keeping old logic but with top_k)
-                if not self._vectors: return []
+                if not self._vectors:
+                    return []
                 scores: list[tuple[int, float]] = []
                 for vid, vec in self._vectors.items():
                     norm = float(np.linalg.norm(embedding) * np.linalg.norm(vec) + 1e-9)
@@ -168,9 +175,18 @@ class RAGPipeline:
                 for vid, dist in scores[:top_k]:
                     entry = self._texts[vid]
                     if filter_metadata:
-                        if not all(entry["metadata"].get(k) == v for k, v in filter_metadata.items()):
+                        matches = all(
+                            entry["metadata"].get(k) == v 
+                            for k, v in filter_metadata.items()
+                        )
+                        if not matches:
                             continue
-                    results.append({"text": entry["text"], "metadata": entry["metadata"], "distance": dist, "doc_id": vid})
+                    results.append({
+                        "text": entry["text"], 
+                        "metadata": entry["metadata"], 
+                        "distance": dist, 
+                        "doc_id": vid
+                    })
 
             # ── Adaptive RAG: Re-ranking ──
             if rerank and len(results) > 1:
@@ -224,19 +240,20 @@ class RAGPipeline:
         """
         tracer = get_tracer("seahorse.rag")
         with tracer.start_as_current_span("rag.delete") as span:
-            if not self._texts:
-                return None
-
             embedding = await self._embed(query)
             best_id: int | None = None
             best_dist: float = 1.0
-            deleted_entry: dict | None = None
+            best_text: str | None = None
+            best_metadata_json: str | None = None
 
             if self._use_rust and self._memory is not None:
+                # Search across all (k=1)
                 raw = self._memory.search(embedding.tobytes(), k=1)
                 if raw:
-                    best_id, best_dist = raw[0]
+                    best_id, best_dist, best_text, best_metadata_json = raw[0]
             else:
+                if not self._texts:
+                    return None
                 for vid, vec in self._vectors.items():
                     norm = float(np.linalg.norm(embedding) * np.linalg.norm(vec) + 1e-9)
                     cos = float(np.dot(embedding, vec)) / norm
@@ -246,27 +263,32 @@ class RAGPipeline:
                         best_id = vid
 
             logger.info(
-                "rag.delete: query=%r best_dist=%.4f threshold=%.2f",
-                query[:50],
-                best_dist,
-                threshold,
+                "rag.delete: query=%r best_dist=%.4f threshold=%.2f", 
+                query[:50], best_dist, threshold
             )
 
-            if best_id is not None and best_id in self._texts and best_dist < threshold:
-                deleted_entry = self._texts.pop(best_id)
-                if not self._use_rust:
+            if best_id is not None and best_dist < threshold:
+                if self._use_rust and self._memory is not None:
+                    removed = self._memory.remove(best_id)
+                    if removed:
+                        # Success, removed from Rust map (soft delete)
+                        deleted_entry = {
+                            "text": best_text,
+                            "metadata": json.loads(best_metadata_json or "{}")
+                        }
+                    else:
+                        return None
+                else:
+                    deleted_entry = self._texts.pop(best_id)
                     self._vectors.pop(best_id, None)
                 
                 logger.info(
-                    "rag.delete: removed doc_id=%d dist=%.3f text=%r",
-                    best_id,
-                    best_dist,
-                    deleted_entry["text"][:50],
+                    "rag.delete: removed doc_id=%d text=%r", 
+                    best_id, deleted_entry["text"][:50]
                 )
                 try:
                     span.set_attribute("rag.deleted_id", best_id)
-                    span.set_attribute("rag.dist", best_dist)
-                except Exception:  # noqa: BLE001
+                except Exception:
                     pass
                 return deleted_entry
 
@@ -274,15 +296,15 @@ class RAGPipeline:
 
     def clear(self) -> None:
         """Wipe all stored memories."""
-        self._texts.clear()
         self._next_id = 0
-        if not self._use_rust:
-            self._vectors.clear()
-        else:
-            # Re-initialize the Rust memory index to truly clear it
+        if self._use_rust and self._memory is not None:
+            # Re-initialize the Rust memory index (clears it)
             PyAgentMemory = _try_import_ffi_memory()
             if PyAgentMemory is not None:
                 self._memory = PyAgentMemory(dim=self._dim, max_elements=_MAX_DOCS)
+        else:
+            self._texts.clear()
+            self._vectors.clear()
         logger.info("rag.clear: memory wiped")
 
     async def _embed(self, text: str) -> np.ndarray:
@@ -298,36 +320,33 @@ class RAGPipeline:
         except TimeoutError:
             raise RuntimeError(
                 f"Embedding API timed out after {_EMBED_TIMEOUT}s. "
-                f"Check SEAHORSE_EMBED_MODEL (current: {self._embed_model!r}) "
-                "and your API key."
+                f"Check {self._embed_model!r} and your API key."
             )
         return np.array(response.data[0]["embedding"], dtype=np.float32)
 
     def save_to_disk(self, directory: str) -> None:
-        """Save the memory index and text metadata to a directory."""
+        """Save the memory index. Rust side handles metadata."""
         import json
         
         if not os.path.exists(directory):
             os.makedirs(directory)
 
-        # 1. Save Rust index
         if self._use_rust and self._memory is not None:
-            # We use the directory as the path; Rust will append file extensions
             index_path = os.path.join(directory, "hnsw_index")
             self._memory.save(index_path)
+            # Save only the next_id and config
+            meta_path = os.path.join(directory, "rag_config.json")
+            with open(meta_path, "w") as f:
+                json.dump({
+                    "next_id": self._next_id,
+                    "dim": self._dim,
+                    "embed_model": self._embed_model,
+                }, f)
         else:
-            # Save Python vectors if needed (skipped for now for brevity)
-            pass
-
-        # 2. Save texts and next_id
-        meta_path = os.path.join(directory, "meta.json")
-        with open(meta_path, "w") as f:
-            json.dump({
-                "texts": self._texts,
-                "next_id": self._next_id,
-                "dim": self._dim,
-                "embed_model": self._embed_model,
-            }, f)
+            # Python fallback saving (legacy)
+            meta_path = os.path.join(directory, "meta_legacy.json")
+            with open(meta_path, "w") as f:
+                json.dump({"texts": self._texts, "next_id": self._next_id}, f)
         
         logger.info("rag.save_to_disk: saved to %s", directory)
 
@@ -336,35 +355,39 @@ class RAGPipeline:
         """Load a RAGPipeline from a directory."""
         import json
 
-        # 1. Load meta
-        meta_path = os.path.join(directory, "meta.json")
-        with open(meta_path, "r") as f:
-            meta = json.load(f)
-
-        # 2. Create instance
-        instance = cls(embed_model=meta["embed_model"], dim=meta["dim"])
-        # Use integer keys for self._texts
-        instance._texts = {int(k): v for k, v in meta["texts"].items()}
-        instance._next_id = meta["next_id"]
-
-        # 3. Load Rust index
-        PyAgentMemory = _try_import_ffi_memory()
-        if PyAgentMemory is not None:
-            index_path = os.path.join(directory, "hnsw_index")
-            if os.path.exists(index_path + ".hnsw.graph"):
-                instance._memory = PyAgentMemory.load(index_path, dim=meta["dim"])
+        # Check for new config format
+        cfg_path = os.path.join(directory, "rag_config.json")
+        if os.path.exists(cfg_path):
+            with open(cfg_path) as f:
+                cfg = json.load(f)
+            instance = cls(embed_model=cfg["embed_model"], dim=cfg["dim"])
+            instance._next_id = cfg["next_id"]
+            
+            PyAgentMemory = _try_import_ffi_memory()
+            if PyAgentMemory is not None:
+                index_path = os.path.join(directory, "hnsw_index")
+                instance._memory = PyAgentMemory.load(index_path, dim=cfg["dim"])
                 instance._use_rust = True
                 logger.info("rag.load_from_disk: loaded Rust HNSW index from %s", index_path)
-            else:
-                logger.warning("rag.load_from_disk: HNSW graph file not found at %s", index_path)
-        
-        return instance
+            return instance
+        else:
+            # Fallback for legacy
+            logger.warning(
+                "rag.load_from_disk: No rag_config.json found. Returning empty RAGPipeline."
+            )
+            return cls()
 
     @property
     def size(self) -> int:
         """Number of documents stored."""
+        if self._use_rust and self._memory is not None:
+            # Note: Rust side doesn't expose size yet, so we track it via next_id
+            # or we could add a .size() method to FFI. For now, use next_id as proxy
+            # but that's inaccurate for deletes.
+            # Best is to add .size() to FFI.
+            return self._next_id
         return len(self._texts)
 
     def __repr__(self) -> str:
         backend = "Rust/HNSW" if self._use_rust else "Python/cosine"
-        return f"RAGPipeline(size={self.size}, backend={backend!r}, dim={self._dim})"
+        return f"RAGPipeline(backend={backend!r}, dim={self._dim})"

@@ -15,9 +15,9 @@ import os
 import sys
 
 import discord
-from seahorse_ai.llm import LLMClient
 from seahorse_ai.planner import ReActPlanner
-from seahorse_ai.schemas import AgentRequest, LLMConfig
+from seahorse_ai.router import ModelRouter
+from seahorse_ai.schemas import AgentRequest
 
 # Setup logging
 logging.basicConfig(
@@ -96,11 +96,14 @@ async def main():
         logger.error("DISCORD_BOT_TOKEN not found in environment.")
         return
 
-    # Initialize Backend and Planner
-    # Defaulting to Gemini 3 Flash to match the current dev.sh settings
-    config = LLMConfig(model=os.environ.get("SEAHORSE_MODEL", "openrouter/google/gemini-3-flash-preview"))
-    llm = LLMClient(config=config)
-    planner = ReActPlanner(llm=llm)
+    # Initialize MoE Router and Planner
+    # Models are loaded from .env or fallback to Gemini/Claude
+    router = ModelRouter(
+        worker_model=os.environ.get("SEAHORSE_MODEL_WORKER", "openrouter/google/gemini-2.0-flash-001"),
+        thinker_model=os.environ.get("SEAHORSE_MODEL_THINKER", "openrouter/google/gemini-2.0-flash-001"),
+        strategist_model=os.environ.get("SEAHORSE_MODEL_STRATEGIST", "openrouter/anthropic/claude-3.5-sonnet")
+    )
+    planner = ReActPlanner(llm=router)
 
     # Initialize Discord Client
     intents = discord.Intents.default()
