@@ -68,12 +68,16 @@ class ReActPlanner:
         llm: LLMBackend,
         tools: ToolRegistry | None = None,
         max_steps: int = 15,
-        default_tier: str = "worker"
+        default_tier: str = "worker",
+        step_timeout_seconds: int = 30,
+        global_timeout_seconds: int = 120,
     ) -> None:
         self._llm = llm
         self._tools = tools or self._default_tools()
         self._max_steps = max_steps
         self._default_tier = default_tier
+        self._step_timeout_seconds = step_timeout_seconds
+        self._global_timeout_seconds = global_timeout_seconds
         self._tool_errors: dict[str, int] = {}
         self._consecutive_errors = 0
         self._total_obs_chars = 0
@@ -140,6 +144,16 @@ class ReActPlanner:
                 ))
 
             for step in range(self._max_steps):
+                # Check global timeout
+                if time.monotonic() - wall_start > self._global_timeout_seconds:
+                    logger.error("agent.run terminating due to global timeout (%ds)", self._global_timeout_seconds)
+                    return AgentResponse(
+                        content="[TERMINATED] The agent took too long to complete the task. "
+                                "I am stopping to prevent wasting resources.",
+                        steps=step,
+                        agent_id=request.agent_id,
+                    )
+
                 # Escalation logic:
                 # - If worker: stay on worker unless it's taking too long (step >= 3)
                 # - If thinker/strategist: use thinker for reasoning steps
@@ -149,9 +163,32 @@ class ReActPlanner:
                     tier = "thinker"
                 
                 # Normalize response to a Message object
-                response_data, step_ms = await self._run_step(
-                    messages, openai_tools, step, tier=tier
-                )
+                try:
+                    # Enforce per-step timeout
+                    response_data, step_ms = await asyncio.wait_for(
+                        self._run_step(messages, openai_tools, step, tier=tier),
+                        timeout=self._step_timeout_seconds
+                    )
+                except asyncio.TimeoutError:
+                    logger.error("agent.run step=%d timed out after %ds", step, self._step_timeout_seconds)
+                    messages.append(Message(
+                        role="user",
+                        content=f"[SYSTEM: Your previous step took too long (> {self._step_timeout_seconds}s) and timed out. "
+                                "Please provide a shorter, faster response or take a different action.]"
+                    ))
+                    self._consecutive_errors += 1
+                    if self._consecutive_errors >= 3:
+                        logger.error("agent.run terminating due to multiple step timeouts")
+                        return AgentResponse(
+                            content="[TERMINATED] Multiple steps timed out. "
+                                    "I am stopping to prevent wasting resources.",
+                            steps=step + 1,
+                            agent_id=request.agent_id,
+                        )
+                    continue
+                except Exception as exc:
+                    logger.error("agent.run step=%d failed: %s", step, exc)
+                    raise
                 
                 # Normalize response to a Message object
                 if isinstance(response_data, str):

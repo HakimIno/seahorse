@@ -70,10 +70,19 @@ impl PyAgentMemory {
         py.allow_threads(|| self.inner.remove(doc_id))
     }
 
-    /// The embedding dimension of this index.
     #[getter]
     pub fn dim(&self) -> usize {
         self.inner.dim()
+    }
+
+    #[getter]
+    pub fn size(&self) -> usize {
+        self.inner.len()
+    }
+
+    /// The number of elements inside the index.
+    pub fn count(&self) -> usize {
+        self.inner.len()
     }
 
     /// Save the HNSW index to a directory.

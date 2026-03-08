@@ -3,7 +3,7 @@ mod telemetry;
 use std::sync::Arc;
 
 use seahorse_core::{spawn_worker_loop, Config, SeahorseCore};
-use seahorse_ffi::agent::make_arc_py_runner;
+use seahorse_ffi::graph_runner::make_arc_py_graph_runner;
 use seahorse_router::{auth::init_jwt, build_router};
 use tracing::info;
 
@@ -24,15 +24,11 @@ async fn main() -> anyhow::Result<()> {
     // ── Spawn worker loop ───────────────────────────────────────────────────
     let model = std::env::var("SEAHORSE_LLM_MODEL")
         .unwrap_or_else(|_| "openrouter/google/gemini-3-flash-preview".to_string());
-    let max_steps = std::env::var("SEAHORSE_MAX_STEPS")
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(10_usize);
 
-    let runner = make_arc_py_runner(&model, max_steps);
+    let runner = make_arc_py_graph_runner(&model);
     let _worker_handle = spawn_worker_loop(task_rx, runner);
 
-    info!(model = %model, max_steps, "worker loop spawned");
+    info!(model = %model, "Graph worker loop spawned");
 
     // ── HTTP server ─────────────────────────────────────────────────────────
     let router = build_router(core);

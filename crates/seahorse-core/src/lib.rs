@@ -10,6 +10,7 @@
 
 pub mod config;
 pub mod error;
+pub mod graph;
 pub mod memory;
 pub mod scheduler;
 pub mod wasm;

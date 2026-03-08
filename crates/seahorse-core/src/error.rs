@@ -19,6 +19,9 @@ pub enum CoreError {
 
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),
+
+    #[error("graph execution error: {0}")]
+    Graph(String),
 }
 
 pub type CoreResult<T> = Result<T, CoreError>;

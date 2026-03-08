@@ -14,6 +14,7 @@ from seahorse_ai.tools.competitor_radar import competitor_radar
 from seahorse_ai.tools.db import database_query, database_schema
 from seahorse_ai.tools.filesystem import list_files, read_file, write_file
 from seahorse_ai.tools.integrations import google_calendar_add_event, slack_send_message
+from seahorse_ai.tools.mcp_client import load_mcp_tools
 from seahorse_ai.tools.memory import (
     memory_clear,
     memory_delete,
@@ -29,6 +30,7 @@ __all__ = [
     "ToolSpec",
     "tool",
     "make_default_registry",
+    "load_mcp_tools",
     # individual tools (for custom registries)
     "web_search",
     "python_interpreter",

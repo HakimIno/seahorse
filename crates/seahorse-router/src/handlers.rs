@@ -105,5 +105,5 @@ pub struct MemorySearchRequest {
 
 #[derive(Debug, Serialize)]
 pub struct MemorySearchResponse {
-    pub results: Vec<(usize, f32)>,
+    pub results: Vec<(usize, f32, String, String)>,
 }

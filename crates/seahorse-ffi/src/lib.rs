@@ -4,6 +4,7 @@
 #![allow(clippy::must_use_candidate)]
 
 pub mod agent;
+pub mod graph_runner;
 pub mod memory;
 
 use pyo3::prelude::*;

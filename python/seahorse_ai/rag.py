@@ -381,11 +381,7 @@ class RAGPipeline:
     def size(self) -> int:
         """Number of documents stored."""
         if self._use_rust and self._memory is not None:
-            # Note: Rust side doesn't expose size yet, so we track it via next_id
-            # or we could add a .size() method to FFI. For now, use next_id as proxy
-            # but that's inaccurate for deletes.
-            # Best is to add .size() to FFI.
-            return self._next_id
+            return self._memory.size
         return len(self._texts)
 
     def __repr__(self) -> str:
