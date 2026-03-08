@@ -8,10 +8,10 @@ import os
 # If any of these appear in the user's prompt, the agent MUST call web_search.
 REALTIME_KEYWORDS: tuple[str, ...] = (
     # Thai
-    "ข่าว", "วันนี้", "ราคา", "อากาศ", "หุ้น", "ล่าสุด", "ตอนนี้", "บิทคอยน์",
+    "ข่าว", "วันนี้", "ราคาหุ้น", "อากาศ", "ล่าสุด", "ตอนนี้", "บิทคอยน์",
     "คริปโต", "ดัชนี", "ทองคำ", "น้ำมัน", "ค่าเงิน",
     # English
-    "news", "today", "latest", "current", "price", "weather", "stock",
+    "news", "today", "latest", "current", "stock price", "weather", "stock",
     "score", "crypto", "bitcoin", "recent", "tonight", "yesterday",
     "2025", "2026", "2027",
 )
@@ -20,9 +20,10 @@ REALTIME_KEYWORDS: tuple[str, ...] = (
 MEMORY_KEYWORDS: tuple[str, ...] = (
     # Thai
     "ที่เคยคุย", "ก่อนหน้า", "เดิม", "ครั้งที่แล้ว", "จำได้ไหม", "ที่บอกไป",
+    "ราคา", "แก้ไข", "เปลี่ยน", "update",
     # English
     "previously", "before", "earlier", "last time", "we talked", "discussed",
-    "remember", "past", "history",
+    "remember", "past", "history", "change", "edit", "price",
 )
 
 # ── System prompt nudge sent when agent skips tool on step 0 ─────────────────
@@ -98,9 +99,9 @@ you MUST use the `web_search` tool.
 answer a general question (like "What's the news today?"), **DO NOT** use \
 `browser_scan`. Only use `browser_scan` for deep technical research or \
 if snippets are missing critical numbers/details.
-3. **Time-sensitive queries**: News, prices, weather, scores, or anything \
-happening today/recently MUST trigger a `web_search` call immediately. \
-**Do not apologize.**
+3. **Time-sensitive queries**: News, weather, scores, or anything happening today/recently \
+MUST trigger a `web_search` call immediately. Note: For product prices, check your internal \
+memory FIRST before searching the web to see if it's a private/customer-specific price.
 4. **Math or data**: Use the `python_interpreter` for accuracy.
 5. **Snippet-First Principle**: If `web_search` returns headlines and \
 snippets, prioritize answering immediately. **DO NOT** use `browser_scan` \

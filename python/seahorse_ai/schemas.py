@@ -37,3 +37,7 @@ class AgentResponse(BaseModel):
     content: str
     steps: int
     agent_id: str = "default"
+    # Monitoring fields — useful for dashboards and observability
+    elapsed_ms: int = 0
+    terminated: bool = False
+    termination_reason: str = ""

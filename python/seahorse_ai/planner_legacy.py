@@ -22,13 +22,12 @@ from typing import Protocol, runtime_checkable
 
 from seahorse_ai.observability import get_tracer, setup_telemetry
 from seahorse_ai.prompts import (
-    MEMORY_KEYWORDS,
     MEMORY_NUDGE,
-    REALTIME_KEYWORDS,
     REALTIME_NUDGE,
     STRATEGY_GENERATION_PROMPT,
     STRATEGY_NUDGE,
     build_system_prompt,
+    classify_intent,
 )
 from seahorse_ai.schemas import AgentRequest, AgentResponse, Message
 
@@ -105,15 +104,16 @@ class ReActPlanner:
             if request.history:
                 messages.extend(request.history)
 
-            # 2) Check if user prompt needs a real-time or memory nudge
-            prompt_content = request.prompt
-            if self._needs_nudge(request.prompt, REALTIME_KEYWORDS):
-                logger.info("agent.run nudging for real-time data")
-                prompt_content = f"{prompt_content}\n\n{REALTIME_NUDGE}"
+            # 2) Classify intent with two-tier system (keyword → LLM fallback)
+            intent = await classify_intent(request.prompt, self._llm)
             
-            if self._needs_nudge(request.prompt, MEMORY_KEYWORDS):
-                logger.info("agent.run nudging for memory retrieval")
-                # Append if not already nudged, or add to existing nudge
+            # Apply nudge based on refined intent
+            prompt_content = request.prompt
+            if intent == "PUBLIC_REALTIME":
+                logger.info("agent.run nudging for real-time data (intent=%s)", intent)
+                prompt_content = f"{prompt_content}\n\n{REALTIME_NUDGE}"
+            elif intent in ("PRIVATE_MEMORY", "DATABASE"):
+                logger.info("agent.run nudging for memory retrieval (intent=%s)", intent)
                 prompt_content = f"{prompt_content}\n\n{MEMORY_NUDGE}"
 
             messages.append(Message(role="user", content=prompt_content))

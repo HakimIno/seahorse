@@ -52,7 +52,9 @@ async def main(source: Path) -> int:
     results = await pipeline.search("What is Seahorse?", k=2)
     if results:
         logger.info("Test search results:")
-        for text, dist in results:
+        for res in results:
+            text = res["text"] if isinstance(res, dict) else res[0]
+            dist = res["distance"] if isinstance(res, dict) else res[1]
             logger.info("  [%.1f%% match] %s …", (1 - dist) * 100, text[:80])
     else:
         logger.warning("No results returned from test search.")
