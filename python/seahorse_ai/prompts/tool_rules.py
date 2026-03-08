@@ -1,36 +1,41 @@
-"""seahorse_ai.prompts.tool_rules — Clear, non-conflicting tool selection rules.
-
-Each tool has exactly one primary trigger and one fallback.
-Rules are ordered by specificity (most specific first).
-"""
+"""seahorse_ai.prompts.tool_rules — Clear, non-conflicting tool selection rules."""
 from __future__ import annotations
 
 TOOL_RULES = """\
-## Tool Selection Rules (follow in order)
+## Tool Selection Rules (follow strictly in order)
 
-### Memory & Internal Data
-- If the user mentions something they told you before → `memory_search` FIRST.
-- If the user asks to update/change a value they previously shared → `memory_search` + `memory_store`.
-- If `memory_search` returns empty → inform user and optionally fall back to `web_search`.
+### 1. Memory & Internal Data
+- ANY product name with a code/letter (e.g. "Package A", "Plan B", "Service X") \
+→ treat as INTERNAL → `memory_search` FIRST.
+- If `memory_search` returns a result → answer IMMEDIATELY. Do NOT also run `web_search`.
+- If `memory_search` returns empty for an internal product \
+→ tell user "ไม่มีข้อมูล [product] ในระบบ" and ask them to provide it.
+  NEVER fall back to `web_search` for internal product names.
+- If user wants to update/change a value → `memory_search` first to find old value, \
+then `memory_store` the new one.
 
-### Real-time Public Data
-- Stock market, commodity prices (gold/oil), cryptocurrency → `web_search` IMMEDIATELY.
-- News, weather, live scores → `web_search` IMMEDIATELY.
-- Do NOT check memory first for public market data.
+### 2. Real-time Public Data
+- Public market prices (gold/oil/crypto), stock tickers, news, weather, sports \
+→ `web_search` IMMEDIATELY.
+- Do NOT check memory first for public commodity prices.
+- Do NOT use `web_search` for anything that looks like an internal product or service name.
 
-### Database / Corporate Data
-- ANY question about company sales, orders, customers → `database_schema` FIRST, then `database_query`.
+### 3. Ambiguity Rule — ALWAYS ASK BEFORE ACTING
+- If the user's request could apply to MULTIPLE stored items (e.g. "เปลี่ยนราคาเป็น X" \
+without specifying which product) → ASK the user to clarify FIRST.
+- Format the clarifying question as a numbered list of options based on memory results:
+  "คุณหมายถึง Package ไหนครับ?\n1. Package A\n2. Package B"
+- Do NOT guess. Do NOT pick the first one. Always clarify.
+
+### 4. Database / Corporate Data
+- Questions about company sales, orders, customers → `database_schema` FIRST, \
+then `database_query`.
 - Never guess table or column names. Always inspect schema first.
 
-### Calculations
-- Any math, statistics, or data transformation → `python_interpreter`.
+### 5. Calculations
+- Any math, statistics, aggregation → `python_interpreter`.
 
-### Web Research
-- Product comparisons, technical docs, general research → `web_search` then synthesize.
-- Use `browser_scan` ONLY when web_search snippets are incomplete for a specific URL.
-
-### Disambiguation Rule (CRITICAL)
-- The word "ราคา" (price) alone is ambiguous:
-  - If it's a product the user mentioned before → PRIVATE_MEMORY path (memory_search first)
-  - If it's a public commodity (gold, stocks, crypto) → PUBLIC_REALTIME path (web_search)
+### 6. No Double-searching
+- If you already have the answer from `memory_search` → stop. Do not run `web_search` \
+to "verify" it. Trust the stored data.
 """

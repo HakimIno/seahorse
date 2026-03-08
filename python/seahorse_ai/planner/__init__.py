@@ -31,13 +31,16 @@ from typing import Protocol, runtime_checkable
 from seahorse_ai.observability import get_tracer, setup_telemetry
 from seahorse_ai.planner.circuit_breaker import CircuitBreaker
 from seahorse_ai.planner.executor import ExecutorConfig, ReActExecutor
+from seahorse_ai.planner.fast_path import (
+    FastPathRouter,
+    classify_structured_intent,
+)
 from seahorse_ai.planner.memory_recorder import MemoryRecorder
 from seahorse_ai.planner.strategy import StrategyPlanner
 from seahorse_ai.prompts import (
     MEMORY_NUDGE,
     REALTIME_NUDGE,
     build_system_prompt,
-    classify_intent,
 )
 from seahorse_ai.schemas import AgentRequest, AgentResponse, Message
 
@@ -88,6 +91,7 @@ class ReActPlanner:
         self._circuit_breaker = CircuitBreaker()
         self._strategy = StrategyPlanner(llm)
         self._memory = MemoryRecorder(llm, self._tools)
+        self._fast_path = FastPathRouter(self._tools, llm_backend=self._llm)
         self._cfg = ExecutorConfig(
             max_steps=max_steps,
             step_timeout_seconds=step_timeout_seconds,
@@ -111,14 +115,44 @@ class ReActPlanner:
             # Fresh circuit breaker per request
             self._circuit_breaker = CircuitBreaker()
 
-            # 1. Build system messages
-            messages: list[Message] = [Message(role="system", content=build_system_prompt())]
+            # ── 1. Structured Intent (1 LLM call → intent+action+entity) ──
+            try:
+                si = await asyncio.wait_for(
+                    classify_structured_intent(
+                        request.prompt, self._llm, request.history,
+                    ),
+                    timeout=15.0  # Reduced timeout for fast worker
+                )
+            except asyncio.TimeoutError:
+                logger.warning("agent.run intent classification timed out — falling back to GENERAL")
+                from seahorse_ai.planner.fast_path import StructuredIntent
+                si = StructuredIntent(intent="GENERAL", action="CHAT")
+            intent = si.raw_category or si.intent
+            logger.info(
+                "agent.run intent=%s action=%s entity=%r agent_id=%s",
+                si.intent, si.action, si.entity, request.agent_id,
+            )
+
+            # ── 2. Fast Path — bypass ReAct if action is simple ────────────
+            fast = await self._fast_path.try_route(si, request.agent_id)
+            if fast is not None:
+                _set_span(span, {
+                    "agent.fast_path": True,
+                    "agent.action": si.action,
+                    "agent.intent": intent,
+                })
+                logger.info(
+                    "agent.run FAST_PATH action=%s agent_id=%s",
+                    si.action, request.agent_id,
+                )
+                return fast  # Done! 1 LLM call total ⚡
+
+            # ── 3. Build system messages (full ReAct path) ─────────────────
+            messages: list[Message] = [
+                Message(role="system", content=build_system_prompt()),
+            ]
             if request.history:
                 messages.extend(request.history)
-
-            # 2. Classify intent (two-tier: keyword → LLM fallback)
-            intent = await classify_intent(request.prompt, self._llm)
-            logger.info("agent.run intent=%s agent_id=%s", intent, request.agent_id)
 
             prompt_content = request.prompt
             if intent == "PUBLIC_REALTIME":
@@ -127,34 +161,40 @@ class ReActPlanner:
                 prompt_content = f"{prompt_content}\n\n{MEMORY_NUDGE}"
             messages.append(Message(role="user", content=prompt_content))
 
-            # 3. Strategy plan (cached) for complex intents
-            current_tier = _classify_tier(self._llm, request.prompt, self._default_tier)
-            if current_tier in ("thinker", "strategist"):
+            # 4. Strategy plan (cached) for complex intents
+            # Only use strategy for complex reasoning tasks to save latency
+            current_tier = _classify_tier(
+                self._llm, request.prompt, self._default_tier,
+            )
+            if current_tier == "strategist" and intent not in ("GENERAL", "GREET"):
                 plan = await self._strategy.plan(request.prompt)
                 messages.insert(1, Message(
                     role="system",
                     content=f"{plan}\n\n[SYSTEM] Follow the plan above before answering.",
                 ))
-                logger.info("agent.run strategy_cache_size=%d", self._strategy.cache_size)
 
-            # 4. Build OpenAI tool definitions
+            # 5. Build OpenAI tool definitions
             openai_tools = getattr(self._tools, "to_openai_tools", lambda: [])()
 
-            # 5. Execute ReAct loop
+            # 6. Execute ReAct loop
             executor = ReActExecutor(
                 llm=self._llm,
                 tools=self._tools,
                 circuit_breaker=self._circuit_breaker,
                 config=self._cfg,
             )
-            result = await executor.run(messages, openai_tools, agent_id=request.agent_id)
+            result = await executor.run(
+                messages, openai_tools, agent_id=request.agent_id,
+            )
 
-            # 6. Optional: final synthesis with strategist tier
+            # 7. Optional: final synthesis with strategist tier
             content = result.content
             if not result.terminated and current_tier == "strategist":
-                content = await self._synthesize(messages, content, request.prompt)
+                content = await self._synthesize(
+                    messages, content, request.prompt,
+                )
 
-            # 7. Background memory (rate-limited, non-blocking)
+            # 8. Background memory (rate-limited, non-blocking)
             asyncio.create_task(
                 self._memory.record(messages, agent_id=request.agent_id)
             )
@@ -164,6 +204,7 @@ class ReActPlanner:
                 "agent.total_ms": result.total_ms,
                 "agent.status": "terminated" if result.terminated else "done",
                 "agent.intent": intent,
+                "agent.action": si.action,
                 "strategy.cache_size": self._strategy.cache_size,
             })
 

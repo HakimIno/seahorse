@@ -63,9 +63,10 @@ def setup_telemetry() -> None:
             _OTLP_ENDPOINT,
         )
     except Exception as exc:
-        # If gRPC or OTel packages fail, silence the spam
-        logging.getLogger("opentelemetry").setLevel(logging.ERROR)
-        logger.warning("Tracing disabled: %s", exc)
+        # If gRPC or OTel packages fail, or collector is missing, silence the spam
+        logging.getLogger("opentelemetry").setLevel(logging.CRITICAL)
+        logging.getLogger("opentelemetry.exporter.otlp.proto.grpc.exporter").setLevel(logging.CRITICAL)
+        logger.warning("Tracing disabled (Collector unreachable or OTel error): %s", exc)
         _tracer_provider = "DISABLED"
 
 

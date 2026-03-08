@@ -32,3 +32,9 @@ Thumbs.db
 # Database and Workspace scratch files
 workspace/*.db
 workspace/hello.txt
+
+# Qdrant Database Storage (Phase 1)
+qdrant_data/
+
+# Compiled Rust/PyO3 Binaries
+python/seahorse_ffi/seahorse_ffi.abi3.so

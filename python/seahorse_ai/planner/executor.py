@@ -30,8 +30,8 @@ logger = logging.getLogger(__name__)
 class ExecutorConfig:
     """Configuration for the ReAct execution loop."""
     max_steps: int = 15
-    step_timeout_seconds: int = 30
-    global_timeout_seconds: int = 120
+    step_timeout_seconds: int = 60
+    global_timeout_seconds: int = 300
     token_burn_warn_chars: int = 30_000
     token_burn_hard_chars: int = 50_000
 

@@ -1,36 +1,34 @@
-"""seahorse_ai.prompts.confidence — Confidence calibration and anti-hallucination guards.
-
-These rules teach the agent to express appropriate uncertainty
-instead of confidently fabricating answers.
-"""
+"""seahorse_ai.prompts.confidence — Confidence calibration and anti-hallucination guards."""
 from __future__ import annotations
 
 CONFIDENCE_RULES = """\
 ## Confidence & Honesty Rules
 
-**When memory is empty:**
-→ Say: "I don't have this stored in memory yet." Then optionally offer to search the web.
+**When memory has a result → answer immediately:**
+→ Do NOT also run web_search to "double-check". Trust the stored data.
 
-**When web search finds no clear answer:**
-→ Say: "I couldn't find reliable information on this topic." Do NOT fabricate.
+**When memory is empty for an internal product (Package X, Plan Y, etc.):**
+→ Say: "ไม่มีข้อมูล [product] ในระบบครับ คุณต้องการแจ้งราคาให้ฉันบันทึกไว้ไหม?"
+→ Do NOT search the web for an internal product name. Web results will be irrelevant.
 
-**When database has no matching data:**
-→ Say: "The database doesn't contain records matching your query." Show the schema you found.
+**When the request is ambiguous (missing subject):**
+→ Ask a clarifying question with numbered options before taking any action.
+→ Format: "คุณหมายถึง [X] ไหนครับ?\n1. [option A]\n2. [option B]"
 
-**When data is ambiguous:**
-→ Present ALL interpretations, label them clearly, and ask the user to confirm.
+**When web search finds no relevant answer:**
+→ Say: "ไม่พบข้อมูลที่ชัดเจนจากการค้นหา" — do NOT fabricate.
 
 **NEVER:**
+- Run web_search after memory already returned a result.
 - Invent prices, statistics, or dates not found in tool results.
-- Mix data from different years into one statement.
-- Say "approximately X" without an actual number to approximate from.
-- Claim memory contains information you didn't actually search for.
+- Mix internal product data with public web results.
+- Pick the "most likely" item when an ambiguous update request arrives — always ask.
 """
 
 SELF_CHECK_PROMPT = """\
-## Pre-Answer Checklist (verify before responding)
-- [ ] Every factual claim is backed by an actual tool result (not training knowledge).
-- [ ] If I used memory, I cite when it was saved: (Saved: YYYY-MM-DD HH:MM).
-- [ ] If I couldn't find the data, I told the user clearly — I did NOT fabricate.
-- [ ] I did NOT search the web for private/internal data that should come from memory.
+## Pre-Answer Checklist
+- [ ] If memory returned a result — did I answer from it WITHOUT also running web_search?
+- [ ] If the request was ambiguous — did I ask for clarification BEFORE acting?
+- [ ] If memory was empty for an internal product — did I ask the user instead of web_search?
+- [ ] Every factual claim is backed by an actual tool result, not my training data.
 """

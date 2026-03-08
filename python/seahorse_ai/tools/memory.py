@@ -1,40 +1,64 @@
-"""seahorse_ai.tools.memory — Agent memory tools backed by the Rust HNSW RAGPipeline.
+"""seahorse_ai.tools.memory — Agent memory tools backed by the vector store.
 
-These tools give the agent a persistent long-term memory:
-- memory_store  → embed text and save it in the HNSW index
-- memory_search → embed a query and retrieve the k most similar stored texts
+Supports two backends (set via env var SEAHORSE_VECTOR_DB):
+  - "qdrant" → QdrantRAGPipeline (persistent, recommended for production)
+  - "hnsw"   → RAGPipeline with Rust HNSW (in-memory, default/fallback)
 
-A single shared RAGPipeline instance is used per process.  Call
-`set_pipeline(pipeline)` before serving requests to inject a custom one
-(e.g. pre-loaded with documents).
+Tools:
+  - memory_store  → embed text and save it in the vector index
+  - memory_search → embed a query and retrieve the k most similar stored texts
+  - memory_delete → remove a specific memory entry  
 """
 from __future__ import annotations
 
 import logging
+import os
 
-from seahorse_ai.rag import RAGPipeline
 from seahorse_ai.tools.base import tool
 
 logger = logging.getLogger(__name__)
 
 # Module-level singleton: shared by all agent runs in the same process
-_pipeline: RAGPipeline | None = None
+_pipeline = None
 
 
-def get_pipeline() -> RAGPipeline:
-    """Return (or lazily create) the shared RAGPipeline."""
+def get_pipeline() -> object:
+    """Return (or lazily create) the shared vector pipeline.
+
+    Auto-selects backend from SEAHORSE_VECTOR_DB env var:
+    - "qdrant" → QdrantRAGPipeline (persistent)
+    - anything else → in-memory Rust HNSW (default)
+    """
     global _pipeline  # noqa: PLW0603
     if _pipeline is None:
-        _pipeline = RAGPipeline()
-        logger.info("RAGPipeline created: %r", _pipeline)
+        backend = os.environ.get("SEAHORSE_VECTOR_DB", "hnsw").lower()
+        if backend == "qdrant":
+            try:
+                from seahorse_ai.rag_qdrant import QdrantRAGPipeline
+                url = os.environ.get("QDRANT_URL", "http://localhost:6333")
+                collection = os.environ.get("QDRANT_COLLECTION", "seahorse_memory")
+                _pipeline = QdrantRAGPipeline(url=url, collection=collection)
+                logger.info("memory: using Qdrant backend url=%s", url)
+            except Exception as exc:
+                logger.error(
+                    "memory: Qdrant unavailable (%s) — falling back to HNSW", exc
+                )
+                from seahorse_ai.rag import RAGPipeline
+                _pipeline = RAGPipeline()
+        else:
+            from seahorse_ai.rag import RAGPipeline
+            _pipeline = RAGPipeline()
+            logger.info("memory: using in-memory HNSW backend")
     return _pipeline
 
 
-def set_pipeline(pipeline: RAGPipeline) -> None:
-    """Inject a pre-configured RAGPipeline (e.g. in tests or with pre-loaded docs)."""
+def set_pipeline(pipeline: object) -> None:
+    """Inject a pre-configured pipeline (e.g. in tests or with pre-loaded docs)."""
     global _pipeline  # noqa: PLW0603
     _pipeline = pipeline
-    logger.info("RAGPipeline replaced: %r", pipeline)
+    logger.info("memory: pipeline replaced with %r", pipeline)
+
+
 
 
 @tool(
@@ -92,10 +116,11 @@ async def memory_store(text: str, importance: int = 3, agent_id: str | None = No
             logger.info("memory_store: skipping duplicate (dist=%.4f) text=%r", best_dist, text)
             return f"Memory already contains this information: {best_text!r}"
             
-        # Conflict/Update Check: If distance is < 0.25, it's likely an update to the same topic.
-        if best_dist < 0.25:
-            # Delete the old fact before storing the new one.
-            # We use a very low threshold on delete_by_text because we have the exact text.
+        # Conflict/Update Check: distance < 0.12 = same topic, updated value.
+        # NOTE: 0.25 was too aggressive — "Packet A ราคา 1200" and
+        # "Packet B ราคา 5000" had dist ~0.2 (both contain "ราคา")
+        # but are DIFFERENT products. Keep threshold tight.
+        if best_dist < 0.12:
             await pipeline.delete_by_text(best_text, threshold=0.1)
             doc_id = await pipeline.store(text, metadata=metadata)
             logger.info("memory_store: conflict resolved. Updated %r -> %r", best_text, text)

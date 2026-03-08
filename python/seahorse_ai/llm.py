@@ -32,28 +32,30 @@ class LLMClient:
         self._config = config
 
     async def complete(
-        self, messages: list[Message], tools: list[dict] | None = None
+        self, messages: list[Message], tools: list[dict] | None = None, tier: str = "worker"
     ) -> dict:
         """Run a completion and return the full response message dict with retry logic."""
-        return await self._complete_with_retry(messages, tools=tools)
+        return await self._complete_with_retry(messages, tools=tools, tier=tier)
 
     async def stream(
-        self, messages: list[Message], retries: int = 2
+        self, messages: list[Message], retries: int = 2, tier: str = "worker"
     ) -> AsyncIterator[str]:
-        """Stream tokens as they are generated, with exponential backoff on errors.
-
-        Yields each text delta as it arrives. Retries up to `retries` times on
-        transient errors (ServiceUnavailable, Timeout, RateLimit).
-        """
+        """Stream tokens as they are generated, with exponential backoff on errors."""
+        model = (
+            self._config.thinker_model
+            if tier in ("thinker", "strategist")
+            else self._config.model
+        )
         backoff = 1.0
         for attempt in range(retries + 1):
             try:
                 response = await litellm.acompletion(
-                    model=self._config.model,
+                    model=model,
                     messages=[m.model_dump(exclude_none=True) for m in messages],
                     temperature=self._config.temperature,
                     max_tokens=self._config.max_tokens,
                     stream=True,
+                    timeout=45.0,
                 )
                 async for chunk in response:  # type: ignore[union-attr]
                     delta = chunk.choices[0].delta.content
@@ -85,13 +87,20 @@ class LLMClient:
         tools: list[dict] | None = None,
         retries: int = 3,
         backoff: float = 1.0,
+        tier: str = "worker",
     ) -> dict:
         """Internal completion with exponential backoff retries on transient errors."""
+        model = (
+            self._config.thinker_model
+            if tier in ("thinker", "strategist")
+            else self._config.model
+        )
         kwargs: dict = {
-            "model": self._config.model,
+            "model": model,
             "messages": [m.model_dump(exclude_none=True) for m in messages],
             "temperature": self._config.temperature,
             "max_tokens": self._config.max_tokens,
+            "timeout": 45.0,
         }
         if tools:
             kwargs["tools"] = tools
