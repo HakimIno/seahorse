@@ -27,6 +27,9 @@ dependencies = [
     "psycopg2-binary>=2.9.11",
     "mcp>=1.26.0",
     "qdrant-client>=1.17.0",
+    "faker>=40.8.0",
+    "matplotlib>=3.10.8",
+    "pandas>=3.0.1",
 ]
 
 [build-system]

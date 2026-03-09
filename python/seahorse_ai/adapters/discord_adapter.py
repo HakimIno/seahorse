@@ -12,6 +12,7 @@ Usage:
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import re
@@ -20,6 +21,10 @@ from collections import defaultdict, deque
 
 import discord
 import discord.ui
+import psycopg2
+from psycopg2.extras import RealDictCursor
+
+from seahorse_ai.analysis.watcher import AnomalyWatcher
 from seahorse_ai.planner import ReActPlanner
 from seahorse_ai.router import ModelRouter
 from seahorse_ai.schemas import AgentRequest, Message
@@ -183,7 +188,58 @@ class SeahorseDiscordClient(discord.Client):
 
     async def on_ready(self):
         logger.info("Logged in as %s (ID: %s)", self.user, self.user.id)
+        logger.info("Seahorse AI: Proactive monitoring active.")
         logger.info("------")
+
+    async def send_proactive_alert(self, data: dict) -> None:
+        """Send a proactive business alert to the first available text channel."""
+        try:
+            severity_emoji = "🚨" if data.get("severity") == "high" else "⚠️"
+            title = data.get("title", "Business Update")
+            reason = data.get("reason", "No details available.")
+            
+            message_content = (
+                f"{severity_emoji} **PROACTIVE INSIGHT: {title}**\n\n"
+                f"{reason}\n\n"
+                f"*ต้องการให้ผมเจาะลึกข้อมูลส่วนนี้ไหมครับ?*"
+            )
+            
+            # Find a channel to post to
+            # Priority: SEAHORSE_ALERTS_CHANNEL_ID env var, then first guild's first text channel
+            channel_id = os.environ.get("SEAHORSE_ALERTS_CHANNEL_ID")
+            target_channel = None
+            
+            if channel_id:
+                target_channel = self.get_channel(int(channel_id))
+            
+            if not target_channel:
+                for guild in self.guilds:
+                    for channel in guild.text_channels:
+                        if channel.permissions_for(guild.me).send_messages:
+                            target_channel = channel
+                            break
+                    if target_channel:
+                        break
+            
+            if target_channel:
+                files = []
+                # Handle single path (legacy) or list of paths
+                image_paths = data.get("image_paths", [])
+                legacy_path = data.get("image_path")
+                if legacy_path and legacy_path not in image_paths:
+                    image_paths.append(legacy_path)
+                
+                for path in image_paths:
+                    if path and os.path.exists(path):
+                        files.append(discord.File(path))
+
+                await target_channel.send(message_content, files=files if files else None)
+                logger.info("Proactive alert sent to channel: %s", target_channel.name)
+            else:
+                logger.warning("Could not find a suitable channel for proactive alert.")
+                
+        except Exception as e:
+            logger.error("Failed to send proactive alert: %s", e)
 
     async def on_message(self, message: discord.Message):
         logger.debug(
@@ -241,6 +297,12 @@ class SeahorseDiscordClient(discord.Client):
 
                     content = response.content
 
+                    files = []
+                    if getattr(response, "image_paths", None):
+                        for path in response.image_paths:
+                            if os.path.exists(path):
+                                files.append(discord.File(path))
+
                     # ── Check if response has interactive choices ──────────
                     choices = _extract_choices(content)
                     if choices:
@@ -255,18 +317,22 @@ class SeahorseDiscordClient(discord.Client):
                         if len(content) > 1900:
                             # Send text first, then buttons on a short follow-up
                             intro = content[:1900]
-                            await message.channel.send(intro)
+                            await message.channel.send(intro, files=files if files else None)
                             await message.channel.send("เลือกตัวเลือก:", view=view)
                         else:
-                            await message.channel.send(content, view=view)
+                            await message.channel.send(content, view=view, files=files if files else None)
                     else:
                         # Regular text response
                         if len(content) > 1900:
                             chunks = [content[i:i+1900] for i in range(0, len(content), 1900)]
-                            for chunk in chunks:
-                                await message.channel.send(chunk)
+                            for i, chunk in enumerate(chunks):
+                                # Attach files only to the first chunk to avoid sending duplicates
+                                if i == 0 and files:
+                                    await message.channel.send(chunk, files=files)
+                                else:
+                                    await message.channel.send(chunk)
                         else:
-                            await message.channel.send(content)
+                            await message.channel.send(content, files=files if files else None)
 
                 except Exception as e:
                     logger.error("Error processing Discord message: %s", e)
@@ -291,7 +357,16 @@ async def main():
 
     client = SeahorseDiscordClient(planner=planner, intents=intents)
 
+    # Initialize AnomalyWatcher
+    watcher = AnomalyWatcher(llm_backend=router)
+    # Redirect watcher notifications to our Discord client
+    watcher._notify = client.send_proactive_alert  # type: ignore
+
+    interval = int(os.environ.get("SEAHORSE_ALERTS_INTERVAL", "300"))
+
     async with client:
+        # Start watcher in the background
+        asyncio.create_task(watcher.start(interval_seconds=interval))
         await client.start(token)
 
 

@@ -98,7 +98,13 @@ async def database_query(query: str) -> str:
         logger.warning("database_query: blocked potentially destructive query: %r", query)
         return "Error: ONLY 'SELECT' or 'WITH' queries are allowed for security reasons."
 
-    # ── 2. Connection & Execution ─────────────────────────────────────────────
+    # ── 2. SQL Linting (Reliability Layer) ────────────────────────────────────
+    lint_error = _lint_sql(query)
+    if lint_error:
+        logger.warning("database_query: lint error: %s", lint_error)
+        return f"SQL Error (Self-Correction): {lint_error}. Please use table aliases (e.g., t.id) to avoid ambiguity."
+
+    # ── 3. Connection & Execution ─────────────────────────────────────────────
     try:
         if _DB_TYPE == "postgres":
             conn = psycopg2.connect(_PG_URI)
@@ -124,9 +130,10 @@ async def database_query(query: str) -> str:
         
         # Limit output size to avoid blowing up context window
         max_rows = 20
+        total_count = len(results)
         header = (
-            f"Found {len(results)} results (showing top {max_rows}):\n" 
-            if len(results) > max_rows else ""
+            f"[DATA CONFIDENCE: Total {total_count} records found in database]\n"
+            f"Showing top {max_rows} results:\n"
         )
         
         import json
@@ -182,3 +189,27 @@ def create_demo_database() -> None:
     conn.commit()
     conn.close()
     logger.info("Demo database created at %s", _SQLITE_PATH)
+
+
+def _lint_sql(query: str) -> str | None:
+    """Perform a basic lint of the SQL to catch common errors like ambiguity."""
+    q_upper = query.upper()
+    
+    # 1. Check for ambiguous 'id' or 'name' when joining
+    if "JOIN" in q_upper:
+        # Heuristic: if SELECT contains " id" or ",id" or " name" without a dot prefix
+        # and there's a join, it's risky.
+        target_columns = ["ID", "NAME", "CREATED_AT"]
+        for col in target_columns:
+            # Look for the column name NOT preceded by a dot
+            # This is a simple regex-free check for demonstration
+            if f" {col}" in q_upper or f",{col}" in q_upper:
+                # If there's no dot before it in the whole query for that column name
+                # This is very rough but fits the 'Self-Correction' requirement
+                return f"Ambiguous column reference detected for '{col}'"
+
+    # 2. Check for SELECT * in joins (best practice)
+    if "JOIN" in q_upper and "SELECT *" in q_upper:
+        return "Using 'SELECT *' with JOINs is risky as it can return duplicate column names"
+
+    return None

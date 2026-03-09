@@ -42,8 +42,9 @@ class ExecutorResult:
     content: str
     steps: int
     terminated: bool = False
-    termination_reason: str = ""
+    termination_reason: str | None = None
     total_ms: int = field(default=0)
+    image_paths: list[str] | None = None
 
 
 class ReActExecutor:
@@ -79,6 +80,7 @@ class ReActExecutor:
 
         wall_start = time.monotonic()
         self._total_obs_chars = 0
+        image_paths = []
 
         for step in range(self._cfg.max_steps):
             # Global timeout guard
@@ -151,6 +153,9 @@ class ReActExecutor:
                     tool_name = func.get("name")
                     call_id = tool_call.get("id")
 
+                    if tool_name == "generate_business_chart" and not isinstance(result, Exception):
+                        image_paths.append(str(result))
+
                     is_error = isinstance(result, Exception) or (
                         isinstance(result, str) and result.startswith(("Error", "SYSTEM_CRASH"))
                     )
@@ -219,6 +224,7 @@ class ReActExecutor:
                     content=content,
                     steps=step + 1,
                     total_ms=total_ms,
+                    image_paths=image_paths if image_paths else None
                 )
 
         # Max steps reached

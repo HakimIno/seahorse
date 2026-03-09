@@ -37,6 +37,7 @@ from seahorse_ai.planner.fast_path import (
 )
 from seahorse_ai.planner.memory_recorder import MemoryRecorder
 from seahorse_ai.planner.strategy import StrategyPlanner
+from seahorse_ai.tools.viz import generate_business_chart
 from seahorse_ai.prompts import (
     MEMORY_NUDGE,
     REALTIME_NUDGE,
@@ -124,26 +125,35 @@ class ReActPlanner:
                     timeout=15.0  # Reduced timeout for fast worker
                 )
             except asyncio.TimeoutError:
-                logger.warning("agent.run intent classification timed out — falling back to GENERAL")
+                logger.warning(
+                    "agent.run intent classification timed out — falling back to GENERAL"
+                )
                 from seahorse_ai.planner.fast_path import StructuredIntent
                 si = StructuredIntent(intent="GENERAL", action="CHAT")
             intent = si.raw_category or si.intent
             logger.info(
                 "agent.run intent=%s action=%s entity=%r agent_id=%s",
-                si.intent, si.action, si.entity, request.agent_id,
+                si.intent,
+                si.action,
+                si.entity,
+                request.agent_id,
             )
 
             # ── 2. Fast Path — bypass ReAct if action is simple ────────────
             fast = await self._fast_path.try_route(si, request.agent_id)
             if fast is not None:
-                _set_span(span, {
-                    "agent.fast_path": True,
-                    "agent.action": si.action,
-                    "agent.intent": intent,
-                })
+                _set_span(
+                    span,
+                    {
+                        "agent.fast_path": True,
+                        "agent.action": si.action,
+                        "agent.intent": intent,
+                    },
+                )
                 logger.info(
                     "agent.run FAST_PATH action=%s agent_id=%s",
-                    si.action, request.agent_id,
+                    si.action,
+                    request.agent_id,
                 )
                 return fast  # Done! 1 LLM call total ⚡
 
@@ -187,9 +197,10 @@ class ReActPlanner:
                 messages, openai_tools, agent_id=request.agent_id,
             )
 
-            # 7. Optional: final synthesis with strategist tier
+            # 7. Final synthesis with strategist tier for complex or data-heavy results
             content = result.content
-            if not result.terminated and current_tier == "strategist":
+            is_data_intent = intent in ("DATABASE", "PRIVATE_MEMORY", "PUBLIC_REALTIME")
+            if not result.terminated and (current_tier == "strategist" or is_data_intent):
                 content = await self._synthesize(
                     messages, content, request.prompt,
                 )
@@ -215,6 +226,7 @@ class ReActPlanner:
                 elapsed_ms=result.total_ms,
                 terminated=result.terminated,
                 termination_reason=result.termination_reason,
+                image_paths=result.image_paths,
             )
 
     # ── Private helpers ────────────────────────────────────────────────────────
@@ -227,10 +239,19 @@ class ReActPlanner:
             logger.info("agent.run synthesizing with strategist model")
             synth_msgs = messages + [
                 Message(role="assistant", content=content),
-                Message(role="user", content="สรุปคำตอบให้เป็นภาษากลยุทธ์ทางธุรกิจที่น่าสนใจ"),
+                Message(role="user", content=(
+                    "ช่วยสรุปข้อมูลนี้ให้เป็นภาษานักกลยุทธ์ธุรกิจที่น่าสนใจ "
+                    "จัดรูปแบบให้ง่ายต่อการอ่าน (ใช้ **ตัวหนา** และ Bullet points) "
+                    "ใช้ภาษาทางการแบบมืออาชีพ (Professional Tone) "
+                    "จำกัดการใช้ Emoji ไม่เกิน 2-3 ตัวต่อข้อความ "
+                    "หลีกเลี่ยงการใช้ Markdown Table ที่ดูยาวยืด "
+                    "วิเคราะห์ Insight ที่สำคัญที่สุดออกมา 2-3 ข้อ และให้คำแนะนำเชิงรุก (Proactive) ต่อท้ายด้วย"
+                )),
             ]
             result = await self._llm.complete(synth_msgs, tier="strategist")
-            return str(result.get("content", content) if isinstance(result, dict) else result)
+            if isinstance(result, dict):
+                return str(result.get("content", content))
+            return str(result)
         except Exception as exc:  # noqa: BLE001
             logger.error("agent.run synthesis failed: %s", exc)
             return content
