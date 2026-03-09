@@ -153,7 +153,7 @@ class ReActExecutor:
                     tool_name = func.get("name")
                     call_id = tool_call.get("id")
 
-                    if tool_name == "generate_business_chart" and not isinstance(result, Exception):
+                    if tool_name == "create_custom_chart" and not isinstance(result, Exception):
                         image_paths.append(str(result))
 
                     is_error = isinstance(result, Exception) or (

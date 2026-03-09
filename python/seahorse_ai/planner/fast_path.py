@@ -32,21 +32,10 @@ class StructuredIntent:
     raw_category: str = ""             # Legacy category for compatibility
 
 
-# Actions that can bypass ReAct loop entirely
-_FAST_ACTIONS = frozenset({"STORE", "QUERY", "GREET"})
+# Actions that bypass ReAct tools but still generate natural responses
+_FAST_ACTIONS = frozenset({"STORE", "QUERY", "GREET", "CHAT"})
 
-# Greeting responses (no LLM needed)
-_GREETINGS = [
-    "สวัสดีครับ! มีอะไรให้ช่วยไหมครับ? 😊",
-    "สวัสดีครับ! ผมพร้อมช่วยเหลือครับ",
-]
-
-# Simple chat responses (for testing or very basic interaction)
-_CHAT_FALLBACKS = [
-    "เข้าใจแล้วครับ มีอะไรให้ผมช่วยเพิ่มเติมไหม?",
-    "รับทราบครับ ผมพร้อมช่วยหาข้อมูลหรือช่วยงานอื่นๆ นะครับ",
-]
-
+# (Removed hardcoded _GREETINGS and _CHAT_FALLBACKS arrays)
 
 STRUCTURED_INTENT_PROMPT = """\
 Analyze the user query and return ONLY valid JSON (no markdown, no explanation).
@@ -58,17 +47,19 @@ Fields:
 - "needs_clarification": true if the request is ambiguous
 
 Rules:
-- "จำไว้ว่า X" / "save X" / "remember X" → {{"intent":"PRIVATE_MEMORY","action":"STORE","entity":"X"}}
-- "X ราคาเท่าไหร่" / "what is X price"
+- "Save X" / "Remember X" → {{"intent":"PRIVATE_MEMORY","action":"STORE","entity":"X"}}
+- "How much is X"
   → {{"intent":"PRIVATE_MEMORY","action":"QUERY","entity":"X price"}}
-- "เปลี่ยนราคา X เป็น Y"
+- "Change X price to Y"
   → {{"intent":"PRIVATE_MEMORY","action":"UPDATE","entity":"X price Y"}}
-- "เปลี่ยนเป็น Y" (no subject) → {{"action":"CLARIFY","needs_clarification":true}}
-- "ราคาทองวันนี้" / "gold price" → {{"intent":"PUBLIC_REALTIME","action":"SEARCH_WEB","entity":"gold price today"}}
-- "ข่าวล่าสุด" → {{"intent":"PUBLIC_REALTIME","action":"SEARCH_WEB","entity":"latest news"}}
-- "Hi" / "สวัสดี" → {{"intent":"GENERAL","action":"GREET"}}
+- "Change to Y" (no subject) → {{"action":"CLARIFY","needs_clarification":true}}
+- "Gold price today" → {{"intent":"PUBLIC_REALTIME","action":"SEARCH_WEB","entity":"gold price today"}}
+- "Latest news" → {{"intent":"PUBLIC_REALTIME","action":"SEARCH_WEB","entity":"latest news"}}
+- "Hi" / "Hello" → {{"intent":"GENERAL","action":"GREET"}}
 - General questions / coding → {{"intent":"GENERAL","action":"CHAT"}}
-- Database queries / "เชื่อมต่อฐานข้อมูลอะไร" / "schema" → {{"intent":"DATABASE","action":"SQL","entity":"current connection status"}}
+- Database queries / "schema" → {{"intent":"DATABASE","action":"SQL","entity":"current connection status"}}
+- "Draw a chart", "Create a dashboard", "วิเคราะห์เป็นกราฟ" → {{"intent":"DATABASE","action":"VISUALIZE","entity":"chart request"}}
+
 
 Conversation history (if any):
 {history_summary}
@@ -91,7 +82,7 @@ async def classify_structured_intent(
 
     q_lower = query.lower().strip()
 
-    # Tier 0: Greeting fast-path (0 LLM calls)
+    # Tier 0: Greeting fast-path (0 LLM calls for classification)
     if _is_greeting(q_lower):
         return StructuredIntent(
             intent="GENERAL", action="GREET",
@@ -160,16 +151,18 @@ async def classify_structured_intent(
         from seahorse_ai.prompts.intent import (
             MEMORY_KEYWORDS, REALTIME_KEYWORDS,
         )
-        if any(k.lower() in q_lower for k in MEMORY_KEYWORDS):
-            return StructuredIntent(
-                intent="PRIVATE_MEMORY", action="QUERY",
-                raw_category="PRIVATE_MEMORY",
-            )
-        if any(k.lower() in q_lower for k in REALTIME_KEYWORDS):
-            return StructuredIntent(
-                intent="PUBLIC_REALTIME", action="SEARCH_WEB",
-                raw_category="PUBLIC_REALTIME",
-            )
+        for kw in MEMORY_KEYWORDS:
+            if kw.lower() in q_lower:
+                return StructuredIntent(
+                    intent="PRIVATE_MEMORY", action="QUERY",
+                    raw_category="PRIVATE_MEMORY",
+                )
+        for kw in REALTIME_KEYWORDS:
+            if kw.lower() in q_lower:
+                return StructuredIntent(
+                    intent="PUBLIC_REALTIME", action="SEARCH_WEB",
+                    raw_category="PUBLIC_REALTIME",
+                )
         # Default to CHAT (slow path) for everything else, including mocks
         return StructuredIntent(intent="GENERAL", action="CHAT", raw_category="GENERAL")
 
@@ -181,18 +174,20 @@ async def classify_structured_intent(
 class FastPathRouter:
     """Execute simple actions directly — bypass the ReAct loop.
 
-    Handles STORE, QUERY, and GREET without any additional LLM calls.
-    Complex actions (SEARCH_WEB, SQL, CHAT, CLARIFY, UPDATE) fall through.
+    Handles STORE, QUERY, GREET, and CHAT without the slow ReAct executor overhead.
+    Complex actions (SEARCH_WEB, SQL, CLARIFY, UPDATE) fall through.
     """
 
     def __init__(self, tools: object, llm_backend: object = None) -> None:
         self._tools = tools
-        self._llm = llm_backend  # Used by Phase 2 MemoryExtractor
+        self._llm = llm_backend
 
     async def try_route(
         self,
         si: StructuredIntent,
         agent_id: str,
+        prompt: str,
+        history: list[Message] | None = None,
     ) -> AgentResponse | None:
         """Try to handle via fast path. Returns None if ReAct loop needed."""
         if si.needs_clarification:
@@ -201,8 +196,12 @@ class FastPathRouter:
         if si.action not in _FAST_ACTIONS:
             return None  # Complex → ReAct loop
 
-        if si.action == "GREET":
-            return self._handle_greet()
+        import time
+        start_t = time.perf_counter()
+
+        if si.action in ("GREET", "CHAT"):
+            # Use the fast, free LLM tier to generate a natural conversational response
+            return await self._handle_conversational(prompt, history, start_t)
 
         if si.action == "STORE" and si.entity:
             return await self._handle_store(si.entity, agent_id)
@@ -210,25 +209,39 @@ class FastPathRouter:
         if si.action == "QUERY" and si.entity:
             return await self._handle_query(si.entity, agent_id)
 
-        if si.action == "CHAT":
-            return self._handle_chat()
-
         return None
 
-    def _handle_greet(self) -> AgentResponse:
-        import random
-        return AgentResponse(
-            content=random.choice(_GREETINGS),
-            steps=0,
-            elapsed_ms=0,
-        )
+    async def _handle_conversational(self, prompt: str, history: list[Message] | None, start_t: float) -> AgentResponse:
+        """Process greetings and simple chat queries fully via the fast model."""
+        import time
+        from seahorse_ai.schemas import Message
+        
+        msgs = [
+            Message(
+                role="system", 
+                content=(
+                    "You are Seahorse AI, an intelligent business agent. "
+                    "You can summarize data, query databases, and remember context. "
+                    "Answer politely, concisely, and naturally in the user's language."
+                )
+            )
+        ]
+        if history:
+            msgs.extend(history)
+        msgs.append(Message(role="user", content=prompt))
+        
+        try:
+            # Use the worker tier (gemini-3-flash) which is fast and essentially free
+            res = await self._llm.complete(msgs, tier="worker")
+            content = str(res.get("content", res) if isinstance(res, dict) else res)
+        except Exception as e:
+            logger.error(f"Fast chat fallback error: {e}")
+            content = "Sorry, I encountered an issue processing that."
 
-    def _handle_chat(self) -> AgentResponse:
-        import random
         return AgentResponse(
-            content=random.choice(_CHAT_FALLBACKS),
-            steps=0,
-            elapsed_ms=0,
+            content=content,
+            steps=1,
+            elapsed_ms=int((time.perf_counter() - start_t) * 1000),
         )
 
     async def _handle_store(

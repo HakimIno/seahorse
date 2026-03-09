@@ -4,10 +4,9 @@ import logging
 import asyncio
 import json
 import os
-from datetime import datetime, timedelta
 import asyncpg
 from seahorse_ai.schemas import Message
-from seahorse_ai.tools.viz import generate_business_chart
+from seahorse_ai.tools.viz import create_custom_chart
 from seahorse_ai.tools.forecaster import forecast_sales
 
 logger = logging.getLogger(__name__)
@@ -124,12 +123,33 @@ class AnomalyWatcher:
                         if worst_branch:
                             trend_data = await self._get_historical_trend(worst_branch)
                             if trend_data:
-                                image_path = generate_business_chart(
-                                    data=trend_data,
-                                    x_col="date",
-                                    y_col="revenue",
-                                    title=f"7-Day Revenue Trend: {worst_branch}",
-                                    chart_type="line"
+                                # Provide code for Area Chart in watcher alert
+                                watcher_chart_code = f"""
+import pandas as pd
+data = {json.dumps(trend_data)}
+df = pd.DataFrame(data)
+ax.plot(df['date'], df['revenue'].astype(float), marker='o', linewidth=3, markersize=8, color='#ff9999')
+ax.fill_between(df['date'], df['revenue'].astype(float), color='#ffb3ba', alpha=0.3)
+for i, txt in enumerate(df['revenue'].astype(float)):
+    ax.annotate(f"{{f'{{txt:,.0f}}'}}", (df['date'].iloc[i], txt), 
+                textcoords="offset points", xytext=(0,12), ha='center', fontsize=10, color='#1f2937', 
+                fontweight='bold', fontproperties=prop_bold)
+ax.set_title("7-Day Revenue Anomaly Risk: {worst_branch}", fontsize=18, fontweight='bold', pad=25, color='#1f2937', fontproperties=prop_bold)
+ax.set_ylabel("Revenue", fontsize=12, color='#4b5563', labelpad=15, fontproperties=prop_reg)
+for label in ax.get_xticklabels():
+    label.set_fontproperties(prop_reg)
+    label.set_fontsize(11)
+    label.set_color('#374151')
+    label.set_rotation(45)
+for label in ax.get_yticklabels():
+    label.set_fontproperties(prop_reg)
+    label.set_fontsize(11)
+    label.set_color('#374151')
+ax.get_yaxis().set_major_formatter(plt.FuncFormatter(lambda x, loc: "{{:,}}".format(int(x))))
+"""
+                                image_path = create_custom_chart(
+                                    python_code=watcher_chart_code,
+                                    data_json=json.dumps(trend_data)
                                 )
                                 
                                 forecast = forecast_sales(trend_data)

@@ -8,15 +8,15 @@ CONFIDENCE_RULES = """\
 → Do NOT also run web_search to "double-check". Trust the stored data.
 
 **When memory is empty for an internal product (Package X, Plan Y, etc.):**
-→ Say: "ไม่มีข้อมูล [product] ในระบบครับ คุณต้องการแจ้งราคาให้ฉันบันทึกไว้ไหม?"
+→ Say: "There is no data for [product] in the system. Would you like to provide it so I can save it?"
 → Do NOT search the web for an internal product name. Web results will be irrelevant.
 
 **When the request is ambiguous (missing subject):**
 → Ask a clarifying question with numbered options before taking any action.
-→ Format: "คุณหมายถึง [X] ไหนครับ?\n1. [option A]\n2. [option B]"
+→ Format: "Which [X] do you mean?\n1. [option A]\n2. [option B]"
 
 **When web search finds no relevant answer:**
-→ Say: "ไม่พบข้อมูลที่ชัดเจนจากการค้นหา" — do NOT fabricate.
+→ Say: "No clear information found from the search." — do NOT fabricate.
 
 **NEVER:**
 - Run web_search after memory already returned a result.

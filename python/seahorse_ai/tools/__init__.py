@@ -25,7 +25,7 @@ from seahorse_ai.tools.memory import (
 )
 from seahorse_ai.tools.python_interpreter import python_interpreter
 from seahorse_ai.tools.strategy_engine import war_room
-from seahorse_ai.tools.viz import generate_business_chart
+from seahorse_ai.tools.viz import create_custom_chart
 from seahorse_ai.tools.web_search import web_search
 
 __all__ = [
@@ -54,7 +54,7 @@ __all__ = [
     "database_schema",
     "calculate_promo_impact",
     "calculate_margin",
-    "generate_business_chart",
+    "create_custom_chart",
     "forecast_sales",
 ]
 
@@ -82,7 +82,7 @@ def make_default_registry() -> SeahorseToolRegistry:
         database_schema,
         calculate_promo_impact,
         calculate_margin,
-        generate_business_chart,
+        create_custom_chart,
         forecast_sales,
     ):
         registry.register(fn)

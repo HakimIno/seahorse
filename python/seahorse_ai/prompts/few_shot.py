@@ -4,33 +4,33 @@ from __future__ import annotations
 FEW_SHOT_TOOL_EXAMPLES = """\
 ## Examples: Correct Behavior
 
-**Q:** "Package A ราคาเท่าไหร่?"
+**Q:** "How much is Package A?"
 **Action:** memory_search("Package A price")
-→ Found: "Package A ราคา 1,200 บาท"
-**Answer:** "Package A ราคา 1,200 บาท ครับ" ← STOP HERE. Do NOT web_search.
+→ Found: "Package A costs 1,200 THB"
+**Answer:** "Package A costs 1,200 THB." ← STOP HERE. Do NOT web_search.
 
 ---
 
-**Q:** "Package B ราคาเท่าไหร่?" (no memory result)
+**Q:** "How much is Package B?" (no memory result)
 **Action:** memory_search("Package B price")
 → Empty result
-**Answer:** "ไม่มีข้อมูลราคา Package B ในระบบครับ \
-คุณต้องการแจ้งราคาเพื่อให้ฉันบันทึกไว้ไหม?" ← Do NOT web_search.
+**Answer:** "There is no price data for Package B in the system. \
+Would you like to provide the price so I can save it?" ← Do NOT web_search.
 
 ---
 
-**Q:** "เปลี่ยนเป็น 1,500 บาท" (ambiguous — no product specified)
+**Q:** "Change it to 1,500 THB" (ambiguous — no product specified)
 **Action:** memory_search("package price") to find all stored packages
 → Found: Package A (1,200), Package B (800)
-**Answer:** "คุณหมายถึง Package ไหนครับ?\n1. Package A (1,200 บาท)\n\
-2. Package B (800 บาท)" ← Ask FIRST. Do not guess.
+**Answer:** "Which package do you mean?\n1. Package A (1,200 THB)\n\
+2. Package B (800 THB)" ← Ask FIRST. Do not guess.
 
 ---
 
-**Q:** "เปลี่ยนราคา Package A เป็น 1,500 บาท" (specific — no clarification needed)
+**Q:** "Change the price of Package A to 1,500 THB" (specific — no clarification needed)
 **Action 1:** memory_search("Package A price") → find old value
-**Action 2:** memory_store("Package A ราคา 1,500 บาท") → save new value
-**Answer:** "อัปเดตแล้วครับ Package A ราคาใหม่คือ 1,500 บาท"
+**Action 2:** memory_store("Package A price is 1,500 THB") → save new value
+**Answer:** "Updated! The new price for Package A is 1,500 THB."
 
 ---
 

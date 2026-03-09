@@ -37,7 +37,6 @@ from seahorse_ai.planner.fast_path import (
 )
 from seahorse_ai.planner.memory_recorder import MemoryRecorder
 from seahorse_ai.planner.strategy import StrategyPlanner
-from seahorse_ai.tools.viz import generate_business_chart
 from seahorse_ai.prompts import (
     MEMORY_NUDGE,
     REALTIME_NUDGE,
@@ -140,7 +139,9 @@ class ReActPlanner:
             )
 
             # ── 2. Fast Path — bypass ReAct if action is simple ────────────
-            fast = await self._fast_path.try_route(si, request.agent_id)
+            fast = await self._fast_path.try_route(
+                si, request.agent_id, request.prompt, request.history
+            )
             if fast is not None:
                 _set_span(
                     span,
@@ -240,12 +241,15 @@ class ReActPlanner:
             synth_msgs = messages + [
                 Message(role="assistant", content=content),
                 Message(role="user", content=(
-                    "ช่วยสรุปข้อมูลนี้ให้เป็นภาษานักกลยุทธ์ธุรกิจที่น่าสนใจ "
-                    "จัดรูปแบบให้ง่ายต่อการอ่าน (ใช้ **ตัวหนา** และ Bullet points) "
-                    "ใช้ภาษาทางการแบบมืออาชีพ (Professional Tone) "
-                    "จำกัดการใช้ Emoji ไม่เกิน 2-3 ตัวต่อข้อความ "
-                    "หลีกเลี่ยงการใช้ Markdown Table ที่ดูยาวยืด "
-                    "วิเคราะห์ Insight ที่สำคัญที่สุดออกมา 2-3 ข้อ และให้คำแนะนำเชิงรุก (Proactive) ต่อท้ายด้วย"
+                    "You are an elite business strategy consultant. Summarize the raw data above for the user.\n"
+                    "CRITICAL INSTRUCTIONS:\n"
+                    "1. Respond in a natural, conversational executive tone (Natural Flow).\n"
+                    "2. Avoid rigid or highly structured formats (Do NOT use mandatory headers like '# Summary' or force artificial sections).\n"
+                    "3. Weave high-level analytical logic seamlessly into the narrative:\n"
+                    "   - Identify non-obvious correlations or trends in the data.\n"
+                    "   - If you spot risks or golden opportunities, integrate proactive recommendations naturally into the conversation.\n"
+                    "4. Be concise and logically structured. Use bullet points ONLY when absolutely necessary. Minimize emojis (max 2 per response).\n"
+                    "5. IMPORTANT: You MUST reply in the same language the user used to ask the question (e.g., if the user asked in Thai, reply entirely in Thai)."
                 )),
             ]
             result = await self._llm.complete(synth_msgs, tier="strategist")
