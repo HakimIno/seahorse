@@ -1,17 +1,12 @@
-"""seahorse_ai.tools.db — Database connector tools for structured querying.
-
-Allows the agent to execute SELECT queries against a local or remote SQL database.
-Uses a simplified interface for demonstration; in production, use a read-only 
-DB user and proper connection pooling.
-"""
-from __future__ import annotations
-
 import logging
 import os
+import json
 import sqlite3
+from datetime import date, datetime
+from decimal import Decimal
 
-import psycopg2
-from psycopg2.extras import RealDictCursor
+import aiosqlite
+import asyncpg
 
 from seahorse_ai.tools.base import tool
 
@@ -20,7 +15,16 @@ logger = logging.getLogger(__name__)
 # Default config
 _DB_TYPE = os.environ.get("SEAHORSE_DB_TYPE", "sqlite")
 _SQLITE_PATH = os.environ.get("SEAHORSE_DB_PATH", "workspace/corporate.db")
-_PG_URI = os.environ.get("SEAHORSE_PG_URI", "postgresql://seahorse_user:seahorse_password@localhost:5432/seahorse_enterprise")
+_PG_URI = os.environ.get("SEAHORSE_PG_URI")
+
+
+class DataEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, (datetime, date)):
+            return obj.isoformat()
+        if isinstance(obj, Decimal):
+            return float(obj)
+        return super().default(obj)
 
 
 @tool(
@@ -29,10 +33,10 @@ _PG_URI = os.environ.get("SEAHORSE_PG_URI", "postgresql://seahorse_user:seahorse
 )
 async def database_schema() -> str:
     """Introspect the database schema to find table and column names."""
+    conn = None
     try:
         if _DB_TYPE == "postgres":
-            conn = psycopg2.connect(_PG_URI)
-            cursor = conn.cursor(cursor_factory=RealDictCursor)
+            conn = await asyncpg.connect(_PG_URI)
             # Query for tables and columns in the public schema
             query = """
                 SELECT table_name, column_name, data_type 
@@ -40,21 +44,11 @@ async def database_schema() -> str:
                 WHERE table_schema = 'public'
                 ORDER BY table_name, ordinal_position;
             """
-        else:
-            conn = sqlite3.connect(_SQLITE_PATH)
-            conn.row_factory = sqlite3.Row
-            cursor = conn.cursor()
-            # SQLite introspection requires a bit more manual work
-            query = "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%';"
-        
-        logger.info("database_schema: introspecting %s", _DB_TYPE)
-        cursor.execute(query)
-        rows = cursor.fetchall()
-        
-        if not rows:
-            return "The database is empty (no tables found)."
+            rows = await conn.fetch(query)
+            
+            if not rows:
+                return "The database is empty (no tables found)."
 
-        if _DB_TYPE == "postgres":
             # Group by table
             schema_dict: dict[str, list[str]] = {}
             for row in rows:
@@ -62,25 +56,39 @@ async def database_schema() -> str:
                 c = f"{row['column_name']} ({row['data_type']})"
                 schema_dict.setdefault(t, []).append(c)
         else:
-            # For SQLite, we need to fetch columns for each table
+            conn = await aiosqlite.connect(_SQLITE_PATH)
+            conn.row_factory = aiosqlite.Row
+            # SQLite introspection
+            query = "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%';"
+            async with conn.execute(query) as cursor:
+                rows = await cursor.fetchall()
+            
+            if not rows:
+                return "The database is empty (no tables found)."
+
             schema_dict = {}
             for row in rows:
                 table_name = row["name"]
-                cursor.execute(f"PRAGMA table_info({table_name});")
-                cols = cursor.fetchall()
-                schema_dict[table_name] = [f"{c['name']} ({c['type']})" for c in cols]
+                async with conn.execute(f"PRAGMA table_info({table_name});") as cursor:
+                    cols = await cursor.fetchall()
+                    schema_dict[table_name] = [f"{c['name']} ({c['type']})" for c in cols]
 
         # Format output
         output = [f"Found {len(schema_dict)} tables in the database:\n"]
         for table, cols in schema_dict.items():
             output.append(f"- **{table}**: {', '.join(cols)}")
         
-        conn.close()
         return "\n".join(output)
 
     except Exception as e:
         logger.error("database_schema error: %s", e)
         return f"Error introspecting schema: {e}"
+    finally:
+        if conn:
+            if _DB_TYPE == "postgres":
+                await conn.close()
+            else:
+                await conn.close()
 
 
 @tool(
@@ -105,30 +113,26 @@ async def database_query(query: str) -> str:
         return f"SQL Error (Self-Correction): {lint_error}. Please use table aliases (e.g., t.id) to avoid ambiguity."
 
     # ── 3. Connection & Execution ─────────────────────────────────────────────
+    conn = None
     try:
         if _DB_TYPE == "postgres":
-            conn = psycopg2.connect(_PG_URI)
-            cursor = conn.cursor(cursor_factory=RealDictCursor)
+            conn = await asyncpg.connect(_PG_URI)
+            rows = await conn.fetch(query)
+            results = [dict(row) for row in rows]
         else:
             # Ensure workspace directory exists if using default path
             if _SQLITE_PATH == "workspace/corporate.db":
                 os.makedirs("workspace", exist_ok=True)
-            conn = sqlite3.connect(_SQLITE_PATH)
-            conn.row_factory = sqlite3.Row  # Access by column name
-            cursor = conn.cursor()
+            conn = await aiosqlite.connect(_SQLITE_PATH)
+            conn.row_factory = aiosqlite.Row
+            async with conn.execute(query) as cursor:
+                rows = await cursor.fetchall()
+                results = [dict(row) for row in rows]
         
-        logger.info("database_query: executing %r on %s", query, _DB_TYPE)
-        cursor.execute(query)
-        rows = cursor.fetchall()
-        
-        if not rows:
+        if not results:
             return "Query executed successfully, but no rows were returned."
 
         # ── 3. Formatting Results ──────────────────────────────────────────────
-        # Convert rows to a list of dicts for pretty printing
-        results = [dict(row) for row in rows]
-        
-        # Limit output size to avoid blowing up context window
         max_rows = 20
         total_count = len(results)
         header = (
@@ -136,29 +140,15 @@ async def database_query(query: str) -> str:
             f"Showing top {max_rows} results:\n"
         )
         
-        import json
-        from datetime import date, datetime
-        from decimal import Decimal
-
-        class DataEncoder(json.JSONEncoder):
-            def default(self, obj):
-                if isinstance(obj, (datetime, date)):
-                    return obj.isoformat()
-                if isinstance(obj, Decimal):
-                    return float(obj)
-                return super().default(obj)
-
         formatted = json.dumps(results[:max_rows], indent=2, ensure_ascii=False, cls=DataEncoder)
-        
-        conn.close()
         return f"{header}{formatted}"
 
-    except (sqlite3.Error, psycopg2.Error) as e:
+    except Exception as e:
         logger.error("database_query error: %s", e)
         return f"Database Error: {e}"
-    except Exception as e:
-        logger.error("database_query unexpected error: %s", e)
-        return f"An unexpected error occurred: {e}"
+    finally:
+        if conn:
+            await conn.close()
 
 
 def create_demo_database() -> None:

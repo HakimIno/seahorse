@@ -22,13 +22,23 @@ font_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "fonts
 thai_font_path = os.path.join(font_dir, "IBMPlexSansThai-Regular.ttf")
 thai_font_bold_path = os.path.join(font_dir, "IBMPlexSansThai-Bold.ttf")
 
+# Cached FontProperties
+prop_reg = None
+prop_bold = None
+
 try:
     if os.path.exists(font_dir):
         for font_file in os.listdir(font_dir):
             if font_file.endswith(".ttf"):
                 fm.fontManager.addfont(os.path.join(font_dir, font_file))
+        
+        if os.path.exists(thai_font_path):
+            prop_reg = fm.FontProperties(fname=thai_font_path)
+        if os.path.exists(thai_font_bold_path):
+            prop_bold = fm.FontProperties(fname=thai_font_bold_path)
 except Exception as e:
     logger.warning(f"Failed to load custom Thai fonts: {e}")
+
 
 @tool(
     "Generates a business chart (bar, line, or pie) from a list of data records. "
@@ -101,12 +111,6 @@ def generate_business_chart(
             logger.error(f"viz: Missing columns {x_col} or {y_col} in data. Available: {list(df.columns)}")
             return None
 
-        plt.style.use('default') # Professional light mode
-        
-        # Explicit font properties for Thai support
-        prop_reg = fm.FontProperties(fname=thai_font_path) if os.path.exists(thai_font_path) else None
-        prop_bold = fm.FontProperties(fname=thai_font_bold_path) if os.path.exists(thai_font_bold_path) else None
-        
         fig, ax = plt.subplots(figsize=(12, 7))
         fig.patch.set_facecolor('#ffffff')
         ax.set_facecolor('#ffffff')

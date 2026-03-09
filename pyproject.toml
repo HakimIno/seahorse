@@ -30,6 +30,8 @@ dependencies = [
     "faker>=40.8.0",
     "matplotlib>=3.10.8",
     "pandas>=3.0.1",
+    "asyncpg>=0.31.0",
+    "aiosqlite>=0.22.1",
 ]
 
 [build-system]

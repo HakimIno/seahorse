@@ -21,8 +21,7 @@ from collections import defaultdict, deque
 
 import discord
 import discord.ui
-import psycopg2
-from psycopg2.extras import RealDictCursor
+import asyncpg
 
 from seahorse_ai.analysis.watcher import AnomalyWatcher
 from seahorse_ai.planner import ReActPlanner

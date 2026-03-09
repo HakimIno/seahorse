@@ -17,6 +17,7 @@ hnsw_rs     = { workspace = true }
 wasmtime    = { workspace = true }
 bytemuck    = { workspace = true }
 dashmap     = { version = "6.1.0", features = ["serde"] }
+rig-core    = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true }

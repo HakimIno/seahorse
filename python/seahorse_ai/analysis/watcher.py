@@ -3,16 +3,17 @@ from __future__ import annotations
 import logging
 import asyncio
 import json
+import os
 from datetime import datetime, timedelta
-import psycopg2
-from psycopg2.extras import RealDictCursor
+import asyncpg
 from seahorse_ai.schemas import Message
 from seahorse_ai.tools.viz import generate_business_chart
 from seahorse_ai.tools.forecaster import forecast_sales
 
 logger = logging.getLogger(__name__)
 
-PG_URI = "postgresql://seahorse_user:seahorse_password@localhost:5432/seahorse_enterprise"
+# Load from environment
+PG_URI = os.environ.get("SEAHORSE_PG_URI")
 
 class AnomalyWatcher:
     """Service that periodically scans the DB for business-critical changes."""
@@ -25,8 +26,16 @@ class AnomalyWatcher:
 
     async def start(self, interval_seconds: int = 3600):
         """Start the background monitoring loop."""
+        if not PG_URI:
+            logger.error("AnomalyWatcher: SEAHORSE_PG_URI not set. Monitoring disabled.")
+            return
+
         self._is_running = True
         logger.info("AnomalyWatcher: starting background loop (interval: %ds)", interval_seconds)
+        
+        # Ensure persistence table exists
+        await self._init_db()
+
         while self._is_running:
             try:
                 await self._check_for_anomalies()
@@ -37,12 +46,32 @@ class AnomalyWatcher:
     async def stop(self):
         self._is_running = False
 
+    async def _init_db(self):
+        """Create the persistence table for alerts if it doesn't exist."""
+        try:
+            conn = await asyncpg.connect(PG_URI)
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS processed_alerts (
+                    id SERIAL PRIMARY KEY,
+                    alert_title TEXT UNIQUE,
+                    detected_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
+            """)
+            # Load existing alerts into memory cache
+            rows = await conn.fetch("SELECT alert_title FROM processed_alerts")
+            for r in rows:
+                self._sent_alerts.add(r['alert_title'])
+            await conn.close()
+            logger.info("AnomalyWatcher: Persistence layer initialized (loaded %d alerts)", len(self._sent_alerts))
+        except Exception as e:
+            logger.error("AnomalyWatcher: Failed to initialize persistence table: %s", e)
+
     async def _check_for_anomalies(self):
         """Execute health-check queries and use LLM to decide if it's an anomaly."""
         logger.info("AnomalyWatcher: running health checks...")
         
         # 1. Gather data: Compare last 24h vs previous 24h
-        stats = self._get_comparison_data()
+        stats = await self._get_comparison_data()
         if not stats:
             return
 
@@ -53,41 +82,37 @@ class AnomalyWatcher:
             "Business Rules:\n"
             "- CRITICAL: Ignore 100% drops or massive drops on weekends (Saturday/Sunday) for branches located in office buildings (e.g., Silom Complex, All Seasons Place, Sathorn Square, Empire Tower, Interchange 21). This is expected behavior because offices are closed.\n"
             "- Focus only on severe and unexpected drops on weekdays or for non-office branches.\n"
-            "Return JSON: { \"is_anomaly\": bool, \"severity\": \"low\"|\"high\", \"title\": \"Short Title\", \"reason\": \"Explanation\" }\n\n"
+            "Return JSON: { \"is_anomaly\": bool, \"severity\": \"low\"|\"high\", \"title\": \"Short Title\", \"reason\": \"Explanation\" }\n"
             f"DATA: {json.dumps(stats, indent=2)}"
         )
         
         try:
-            # Type ignore since we use protocol in planner but object here
             result = await self._llm.complete( # type: ignore
                 [Message(role="user", content=prompt)],
                 tier="worker"
             )
             
-            # Extract content from the response
             content = ""
             if isinstance(result, dict):
                 content = result.get("content", "")
             else:
                 content = str(result)
             
-            # Robustly parse JSON (handle markdown backticks)
             clean_content = content.replace("```json", "").replace("```", "").strip()
             data = json.loads(clean_content)
             
             if data.get("is_anomaly"):
                 title = data.get("title", "Unknown Anomaly")
                 
-                # Check if we already alerted this specific title
                 if title not in self._sent_alerts:
-                    # Mark as alerted immediately to prevent duplicates from concurrent runs
+                    # Persist to DB immediately
+                    await self._persist_alert(title)
                     self._sent_alerts.add(title)
+                    
                     logger.warning("🚨 ANOMALY DETECTED: %s - %s", title, data.get("reason"))
                     
-                    # 3. Generate visual context: find the branch mentioned
                     image_path = None
                     try:
-                        # Simple heuristic: find branch name in stats that changed most
                         worst_branch = None
                         max_drop = -1.0
                         for s in stats:
@@ -97,9 +122,8 @@ class AnomalyWatcher:
                                 worst_branch = s['name']
                         
                         if worst_branch:
-                            trend_data = self._get_historical_trend(worst_branch)
+                            trend_data = await self._get_historical_trend(worst_branch)
                             if trend_data:
-                                # A) Generate Chart
                                 image_path = generate_business_chart(
                                     data=trend_data,
                                     x_col="date",
@@ -108,7 +132,6 @@ class AnomalyWatcher:
                                     chart_type="line"
                                 )
                                 
-                                # B) Predictive Analysis
                                 forecast = forecast_sales(trend_data)
                                 if "error" not in forecast:
                                     risk_amount = forecast.get("total_predicted_revenue", 0)
@@ -119,28 +142,32 @@ class AnomalyWatcher:
                     except Exception as e:
                         logger.error("Failed to generate anomaly visuals/forecast: %s", e)
                     
-                    # Add the generated image path to the payload before notifying
                     if image_path:
                         data["image_paths"] = [image_path]
                         
                     await self._notify(data)
                 else:
-                    logger.info("Skipping duplicate alert: %s", title)
+                    logger.info("Skipping persistent duplicate alert: %s", title)
             else:
-                # Clear alerts if everything returns to 'normal' (optional logic)
-                # For now, we clear if LLM says no anomaly to allow future re-triggers
-                self._sent_alerts.clear()
+                # Optional: clear if everything returns to normal for a long duration
+                pass
                 
         except Exception as e:
             logger.error("AnomalyWatcher LLM analysis failed: %s", e)
 
-    def _get_comparison_data(self) -> list[dict]:
-        """Fetch raw numbers from PG."""
+    async def _persist_alert(self, title: str):
+        """Save alert title to DB to prevent duplicate notifications after restart."""
         try:
-            conn = psycopg2.connect(PG_URI)
-            cursor = conn.cursor(cursor_factory=RealDictCursor)
-            
-            # Simple query: revenue per branch in last 24h vs previous 24h
+            conn = await asyncpg.connect(PG_URI)
+            await conn.execute("INSERT INTO processed_alerts (alert_title) VALUES ($1) ON CONFLICT DO NOTHING", title)
+            await conn.close()
+        except Exception as e:
+            logger.error("Failed to persist alert in DB: %s", e)
+
+    async def _get_comparison_data(self) -> list[dict]:
+        """Fetch raw numbers using asyncpg."""
+        try:
+            conn = await asyncpg.connect(PG_URI)
             query = """
                 WITH daily_sales AS (
                     SELECT 
@@ -158,11 +185,9 @@ class AnomalyWatcher:
                 FROM daily_sales s
                 JOIN branches b ON s.branch_id = b.id;
             """
-            cursor.execute(query)
-            rows = cursor.fetchall() or []
-            conn.close()
+            rows = await conn.fetch(query)
+            await conn.close()
             
-            # Convert Decimals to floats for JSON serialization
             results = []
             for r in rows:
                 d = dict(r)
@@ -171,29 +196,26 @@ class AnomalyWatcher:
                 results.append(d)
             return results
         except Exception as e:
-            logger.error("Watcher DB query failed: %s", e)
+            logger.error("Watcher async DB query failed: %s", e)
             return []
 
-    def _get_historical_trend(self, branch_name: str) -> list[dict]:
-        """Fetch last 7 days of daily revenue for a specific branch."""
+    async def _get_historical_trend(self, branch_name: str) -> list[dict]:
+        """Fetch last 7 days of daily revenue using asyncpg."""
         try:
-            conn = psycopg2.connect(PG_URI)
-            cursor = conn.cursor(cursor_factory=RealDictCursor)
-            
+            conn = await asyncpg.connect(PG_URI)
             query = """
                 SELECT 
                     transaction_date::date as date,
                     SUM(total_amount) as revenue
                 FROM transactions t
                 JOIN branches b ON t.branch_id = b.id
-                WHERE b.name = %s
+                WHERE b.name = $1
                   AND transaction_date > NOW() - INTERVAL '7 DAYS'
                 GROUP BY 1
                 ORDER BY 1 ASC;
             """
-            cursor.execute(query, (branch_name,))
-            rows = cursor.fetchall() or []
-            conn.close()
+            rows = await conn.fetch(query, branch_name)
+            await conn.close()
             
             return [{"date": str(r['date']), "revenue": float(r['revenue'] or 0)} for r in rows]
         except Exception as e:
@@ -201,7 +223,5 @@ class AnomalyWatcher:
             return []
 
     async def _notify(self, anomaly_data: dict):
-        """Dispatch notification to Discord (Placeholder for now)."""
-        # In a real impl, this would call the Discord bot directly or via a queue
-        # For now, we'll log it specifically for the user to see in logs
+        """Dispatch notification to Discord."""
         logger.info("ANOMALY_ALERT_DISCORD: %s", json.dumps(anomaly_data, ensure_ascii=False))

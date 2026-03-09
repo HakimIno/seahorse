@@ -8,6 +8,7 @@
 #![warn(clippy::all, clippy::pedantic)]
 #![allow(clippy::must_use_candidate, clippy::module_name_repetitions)]
 
+pub mod agent;
 pub mod config;
 pub mod error;
 pub mod graph;
@@ -16,6 +17,7 @@ pub mod scheduler;
 pub mod wasm;
 pub mod worker;
 
+pub use agent::RigAgent;
 pub use config::Config;
 pub use error::{CoreError, CoreResult};
 pub use memory::AgentMemory;
