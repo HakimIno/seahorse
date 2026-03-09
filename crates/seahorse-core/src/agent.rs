@@ -1,6 +1,7 @@
 //! Rig-based agent implementation for native Rust performance.
 use rig::providers::openai;
 use rig::agent::Agent;
+use rig::completion::Prompt;
 use std::sync::Arc;
 use tracing::info;
 

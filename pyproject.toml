@@ -32,6 +32,7 @@ dependencies = [
     "pandas>=3.0.1",
     "asyncpg>=0.31.0",
     "aiosqlite>=0.22.1",
+    "python-telegram-bot>=21.0"
 ]
 
 [build-system]

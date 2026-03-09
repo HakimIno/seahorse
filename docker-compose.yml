@@ -39,5 +39,17 @@ services:
       SEAHORSE_PG_URI: postgresql://seahorse_user:seahorse_password@db:5432/seahorse_enterprise
     command: ["uv", "run", "python", "-m", "seahorse_ai.analysis.feeder"]
 
+  telegram-agent:
+    build: .
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      SEAHORSE_PG_URI: postgresql://seahorse_user:seahorse_password@db:5432/seahorse_enterprise
+    command:
+      ["uv", "run", "python", "-m", "seahorse_ai.adapters.telegram_adapter"]
+
 volumes:
   postgres_data:

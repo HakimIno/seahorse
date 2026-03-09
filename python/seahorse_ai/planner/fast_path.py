@@ -68,7 +68,7 @@ Rules:
 - "ข่าวล่าสุด" → {{"intent":"PUBLIC_REALTIME","action":"SEARCH_WEB","entity":"latest news"}}
 - "Hi" / "สวัสดี" → {{"intent":"GENERAL","action":"GREET"}}
 - General questions / coding → {{"intent":"GENERAL","action":"CHAT"}}
-- Database queries → {{"intent":"DATABASE","action":"SQL","entity":"..."}}
+- Database queries / "เชื่อมต่อฐานข้อมูลอะไร" / "schema" → {{"intent":"DATABASE","action":"SQL","entity":"current connection status"}}
 
 Conversation history (if any):
 {history_summary}
