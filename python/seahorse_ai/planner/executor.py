@@ -105,9 +105,9 @@ class ReActExecutor:
                 messages.append(Msg(
                     role="user",
                     content=(
-                        f"[SYSTEM: Step {step} timed out after "
+                        f"(Internal Error: Step {step} timed out after "
                         f"{self._cfg.step_timeout_seconds}s. "
-                        "Try a faster approach or shorter response.]"
+                        "Try a faster approach or shorter response.)"
                     ),
                 ))
                 self._cb.record_error(None)  # type: ignore[union-attr]
@@ -208,7 +208,8 @@ class ReActExecutor:
                 if self._total_obs_chars > self._cfg.token_burn_warn_chars:
                     messages.append(Msg(
                         role="user",
-                        content="[SYSTEM: 30k+ chars gathered. Stop researching. Synthesize now.]",
+                        content="(Internal Control: 30k+ chars gathered. "
+                                "Stop researching. Synthesize now.)",
                     ))
 
                 continue

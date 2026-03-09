@@ -57,8 +57,9 @@ Rules:
 - "Latest news" → {{"intent":"PUBLIC_REALTIME","action":"SEARCH_WEB","entity":"latest news"}}
 - "Hi" / "Hello" → {{"intent":"GENERAL","action":"GREET"}}
 - General questions / coding → {{"intent":"GENERAL","action":"CHAT"}}
-- Database queries / "schema" → {{"intent":"DATABASE","action":"SQL","entity":"current connection status"}}
-- "Draw a chart", "Create a dashboard", "วิเคราะห์เป็นกราฟ" → {{"intent":"DATABASE","action":"VISUALIZE","entity":"chart request"}}
+- Database queries / "schema" → {{"intent":"DATABASE","action":"SQL"}}
+- "Draw a chart", "Create a dashboard" \
+→ {{"intent":"DATABASE","action":"VISUALIZE","entity":"chart request"}}
 
 
 Conversation history (if any):

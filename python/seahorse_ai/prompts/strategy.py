@@ -20,7 +20,7 @@ Output format (3-5 bullet points, no prose):
 """
 
 STRATEGY_NUDGE = (
-    "[SYSTEM] A [STRATEGY PLAN] has been provided. "
+    "INTERNAL NUDGE: A [STRATEGY PLAN] has been provided. "
     "Complete ALL tool steps in the plan before answering. "
     "Do not skip steps marked as mandatory."
 )
