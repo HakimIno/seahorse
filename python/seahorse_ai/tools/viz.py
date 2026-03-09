@@ -19,6 +19,9 @@ import matplotlib.font_manager as fm
 
 # Load custom Thai fonts for professional rendering
 font_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "fonts")
+thai_font_path = os.path.join(font_dir, "IBMPlexSansThai-Regular.ttf")
+thai_font_bold_path = os.path.join(font_dir, "IBMPlexSansThai-Bold.ttf")
+
 try:
     if os.path.exists(font_dir):
         for font_file in os.listdir(font_dir):
@@ -100,9 +103,9 @@ def generate_business_chart(
 
         plt.style.use('default') # Professional light mode
         
-        # Override font after setting style to ensure Thai characters render
-        plt.rcParams['font.family'] = 'sans-serif'
-        plt.rcParams['font.sans-serif'] = ['IBM Plex Sans Thai', 'Arial', 'sans-serif']
+        # Explicit font properties for Thai support
+        prop_reg = fm.FontProperties(fname=thai_font_path) if os.path.exists(thai_font_path) else None
+        prop_bold = fm.FontProperties(fname=thai_font_bold_path) if os.path.exists(thai_font_bold_path) else None
         
         fig, ax = plt.subplots(figsize=(12, 7))
         fig.patch.set_facecolor('#ffffff')
@@ -117,7 +120,7 @@ def generate_business_chart(
             for bar in bars:
                 yval = bar.get_height()
                 ax.text(bar.get_x() + bar.get_width()/2, yval + (yval * 0.02), f"{yval:,.0f}", 
-                        ha='center', va='bottom', fontsize=10, color='#1f2937', fontweight='bold')
+                        ha='center', va='bottom', fontsize=10, color='#1f2937', fontweight='bold', fontproperties=prop_bold)
         elif chart_type == "line":
             ax.plot(df[x_col].astype(str), df[y_col].astype(float), marker='o', linewidth=3, markersize=8, color='#10b981')
             # Fill under the line
@@ -125,19 +128,35 @@ def generate_business_chart(
             # Add value labels for points
             for i, txt in enumerate(df[y_col].astype(float)):
                 ax.annotate(f"{txt:,.0f}", (df[x_col].astype(str).iloc[i], txt), 
-                            textcoords="offset points", xytext=(0,12), ha='center', fontsize=10, color='#1f2937', fontweight='bold')
+                            textcoords="offset points", xytext=(0,12), ha='center', fontsize=10, color='#1f2937', 
+                            fontweight='bold', fontproperties=prop_bold)
         elif chart_type == "pie":
-            ax.pie(df[y_col].astype(float), labels=df[x_col].astype(str), autopct='%1.1f%%', 
+            patches, texts, autotexts = ax.pie(df[y_col].astype(float), labels=df[x_col].astype(str), autopct='%1.1f%%', 
                    startangle=140, colors=bar_colors, wedgeprops={'edgecolor': '#ffffff', 'linewidth': 2}, textprops={'color': '#1f2937'})
+            for text in texts:
+                text.set_fontproperties(prop_reg)
+            for autotext in autotexts:
+                autotext.set_fontproperties(prop_bold)
             ax.axis('equal')
         
         # Premium styling
-        ax.set_title(title, fontsize=18, fontweight='bold', pad=25, color='#1f2937')
+        ax.set_title(title, fontsize=18, fontweight='bold', pad=25, color='#1f2937', fontproperties=prop_bold)
         if chart_type != "pie":
-            ax.set_ylabel(y_col.replace('_', ' ').title(), fontsize=12, color='#4b5563', labelpad=15)
-            ax.set_xlabel(x_col.replace('_', ' ').title(), fontsize=12, color='#4b5563', labelpad=15)
-            ax.tick_params(axis='x', rotation=45, colors='#374151', labelsize=11)
-            ax.tick_params(axis='y', colors='#374151', labelsize=11)
+            ax.set_ylabel(y_col.replace('_', ' ').title(), fontsize=12, color='#4b5563', labelpad=15, fontproperties=prop_reg)
+            ax.set_xlabel(x_col.replace('_', ' ').title(), fontsize=12, color='#4b5563', labelpad=15, fontproperties=prop_reg)
+            
+            # Set tick labels font
+            for label in ax.get_xticklabels():
+                label.set_fontproperties(prop_reg)
+                label.set_fontsize(11)
+                label.set_color('#374151')
+                label.set_rotation(45)
+            
+            for label in ax.get_yticklabels():
+                label.set_fontproperties(prop_reg)
+                label.set_fontsize(11)
+                label.set_color('#374151')
+
             ax.grid(axis='y', linestyle='--', alpha=0.5, color='#e5e7eb')
             ax.get_yaxis().set_major_formatter(plt.FuncFormatter(lambda x, loc: "{:,}".format(int(x))))
             ax.spines['top'].set_visible(False)
