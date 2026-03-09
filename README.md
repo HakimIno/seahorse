@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/logo-icon.png" alt="Seahorse Logo" width="120">
+  <img src="assets/logo-icon.png" alt="Seahorse Logo" width="80" style="border-radius: 12px; overflow: hidden;">
 </p>
 
 <h1 align="center">Seahorse Agent</h1>
