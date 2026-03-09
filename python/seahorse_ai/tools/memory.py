@@ -13,6 +13,8 @@ from __future__ import annotations
 
 import logging
 import os
+import json
+import asyncio
 
 from seahorse_ai.tools.base import tool
 
@@ -126,7 +128,29 @@ async def memory_store(text: str, importance: int = 3, agent_id: str | None = No
             logger.info("memory_store: conflict resolved. Updated %r -> %r", best_text, text)
             return f"Updated existing memory: {best_text!r} is now {text!r}"
 
-    # 2. Default: Store as a new fact
+    # 2. Decision: Direct Sync or Transactional Outbox?
+    backend = os.environ.get("SEAHORSE_VECTOR_DB", "hnsw").lower()
+    if backend == "qdrant":
+        # Phase 2: Transactional Outbox Pattern
+        import asyncpg
+        pg_uri = os.environ.get("SEAHORSE_PG_URI")
+        if pg_uri:
+            try:
+                conn = await asyncpg.connect(pg_uri)
+                try:
+                    await conn.execute("""
+                        INSERT INTO seahorse_outbox (event_type, payload)
+                        VALUES ($1, $2)
+                    """, "MEMORY_STORE", json.dumps({"text": text, "metadata": metadata}))
+                    logger.info("memory_store: queued to outbox text_len=%d", len(text))
+                    return f"บันทึกข้อมูลเข้าคิวเรียบร้อยครับ (Transactional Outbox) ✅: {text[:50]}..."
+                finally:
+                    await conn.close()
+            except Exception as e:
+                logger.error("memory_store outbox error: %s — falling back to direct sync", e)
+
+    # 3. Default: Store as a new fact (Direct Sync / Fallback)
+    pipeline = get_pipeline()
     doc_id = await pipeline.store(text, metadata=metadata)
     logger.info("memory_store: stored new doc_id=%d text_len=%d", doc_id, len(text))
     return (
@@ -181,10 +205,27 @@ async def memory_search(query: str, k: int = 10, agent_id: str | None = None) ->
 )
 async def memory_delete(query: str) -> str:
     """Search for and delete a matching memory entry."""
+    backend = os.environ.get("SEAHORSE_VECTOR_DB", "hnsw").lower()
+    if backend == "qdrant":
+        import asyncpg
+        pg_uri = os.environ.get("SEAHORSE_PG_URI")
+        if pg_uri:
+            try:
+                conn = await asyncpg.connect(pg_uri)
+                try:
+                    await conn.execute("""
+                        INSERT INTO seahorse_outbox (event_type, payload)
+                        VALUES ($1, $2)
+                    """, "MEMORY_DELETE", json.dumps({"query": query}))
+                    logger.info("memory_delete: queued to outbox query=%r", query)
+                    return f"ส่งคำขอลบข้อมูลเข้าคิวเรียบร้อยครับ (Transactional Outbox) 🗑️: {query}"
+                finally:
+                    await conn.close()
+            except Exception as e:
+                logger.error("memory_delete outbox error: %s — falling back to direct sync", e)
+
     pipeline = get_pipeline()
-
     logger.debug("memory_delete: query=%r", query)
-
     deleted_entry = await pipeline.delete_by_text(query)
 
     if deleted_entry:

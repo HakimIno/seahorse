@@ -93,6 +93,11 @@ def create_custom_chart(
         df = pd.DataFrame(data)
 
         # 2. Setup Premium Canvas
+        if prop_reg:
+            plt.rcParams['font.family'] = 'sans-serif'
+            plt.rcParams['font.sans-serif'] = [prop_reg.get_name(), 'DejaVu Sans', 'Arial', 'sans-serif']
+            plt.rcParams['axes.unicode_minus'] = False # Fix minus sign with custom fonts
+            
         fig, ax = plt.subplots(figsize=(12, 7))
         fig.patch.set_facecolor('#ffffff')
         ax.set_facecolor('#ffffff')

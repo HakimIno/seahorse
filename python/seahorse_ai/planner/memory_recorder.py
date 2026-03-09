@@ -5,6 +5,7 @@ Includes rate limiting and deduplication to prevent API cost spikes.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from typing import TYPE_CHECKING
@@ -51,9 +52,16 @@ class MemoryRecorder:
         self._llm = llm
         self._tools = tools
         self._last_run: float = 0.0
+        self._is_syncing: bool = False
 
     async def record(self, messages: list[Message], agent_id: str | None = None) -> None:
         """Analyze conversation and store key facts. Rate-limited and non-blocking."""
+        # ... (previous implementation)
+        # ── 1. Start outbox processing if not already running ──────────────────
+        if not self._is_syncing:
+            asyncio.create_task(self.process_outbox())
+            self._is_syncing = True
+
         # Rate limit check
         now = time.monotonic()
         if now - self._last_run < self.MIN_INTERVAL_SECONDS:
@@ -91,6 +99,71 @@ class MemoryRecorder:
 
         except Exception as exc:  # noqa: BLE001
             logger.error("memory_recorder: failed: %s", exc)
+
+    async def process_outbox(self) -> None:
+        """Background loop to sync seahorse_outbox with Qdrant."""
+        import os
+        import json
+        import asyncpg
+        from seahorse_ai.tools.memory import get_pipeline
+
+        pg_uri = os.environ.get("SEAHORSE_PG_URI")
+        if not pg_uri:
+            return
+
+        logger.info("memory_recorder: starting Transactional Outbox worker")
+        while True:
+            try:
+                conn = await asyncpg.connect(pg_uri)
+                try:
+                    # Get pending events
+                    rows = await conn.fetch("""
+                        SELECT id, event_type, payload 
+                        FROM seahorse_outbox 
+                        WHERE status = 'PENDING' 
+                        LIMIT 10
+                        FOR UPDATE SKIP LOCKED
+                    """)
+                    
+                    if not rows:
+                        await asyncio.sleep(5)
+                        continue
+
+                    pipeline = get_pipeline()
+                    for row in rows:
+                        event_id = row['id']
+                        event_type = row['event_type']
+                        payload = json.loads(row['payload'])
+                        
+                        try:
+                            if event_type == "MEMORY_STORE":
+                                await pipeline.store(
+                                    payload['text'], 
+                                    metadata=payload.get('metadata')
+                                )
+                            elif event_type == "MEMORY_DELETE":
+                                await pipeline.delete_by_text(payload['query'])
+                            
+                            await conn.execute("""
+                                UPDATE seahorse_outbox 
+                                SET status = 'SYNCED', synced_at = NOW() 
+                                WHERE id = $1
+                            """, event_id)
+                            logger.info("outbox worker: synced event_id=%d type=%s", event_id, event_type)
+                        except Exception as e:
+                            logger.error("outbox worker: failed event_id=%d: %s", event_id, e)
+                            await conn.execute("""
+                                UPDATE seahorse_outbox 
+                                SET status = 'FAILED', error_message = $1 
+                                WHERE id = $2
+                            """, str(e), event_id)
+
+                finally:
+                    await conn.close()
+
+            except Exception as e:
+                logger.error("outbox worker: connection error: %s", e)
+                await asyncio.sleep(10)
 
     # ── Private helpers ────────────────────────────────────────────────────────
 

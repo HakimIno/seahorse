@@ -33,7 +33,6 @@ from telegram.ext import (
     filters,
     TypeHandler,
 )
-from telegram.constants import ParseMode
 
 from seahorse_ai.planner import ReActPlanner
 from seahorse_ai.router import ModelRouter
@@ -67,6 +66,7 @@ class TelegramAdapter:
         self._history: dict[int, deque[Message]] = defaultdict(
             lambda: deque(maxlen=_MAX_HISTORY)
         )
+        self._callback_data_map = {}
 
     async def handle_update(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Global debug handler for all updates."""
@@ -82,13 +82,25 @@ class TelegramAdapter:
             return
         chat_id = update.effective_chat.id
         chat_type = update.effective_chat.type
-        await msg.reply_text(
+        await self._safe_send_message(
+            context,
+            chat_id,
             f"📍 **Chat Info**\nID: `{chat_id}`\nType: {chat_type}",
             parse_mode=ParseMode.MARKDOWN
         )
 
-    async def handle_message(self
-, update: Update, context: ContextTypes.DEFAULT_TYPE):
+    async def _safe_send_message(self, context: ContextTypes.DEFAULT_TYPE, chat_id: int, text: str, **kwargs):
+        """Send a message with Markdown, falling back to plain text if parsing fails."""
+        try:
+            return await context.bot.send_message(chat_id=chat_id, text=text, **kwargs)
+        except Exception as e:
+            if "Can't parse entities" in str(e):
+                logger.warning("Telegram: Markdown failed for message, falling back to plain text: %s", e)
+                kwargs.pop("parse_mode", None)
+                return await context.bot.send_message(chat_id=chat_id, text=text, **kwargs)
+            raise e
+
+    async def handle_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         msg = (
             update.message 
             or update.channel_post 
@@ -101,12 +113,8 @@ class TelegramAdapter:
         text = msg.text or msg.caption or ""
         chat_id = update.effective_chat.id
         chat_type = update.effective_chat.type
-        logger.info(
-            "Telegram: Update in %s (%s): %s", 
-            chat_id, chat_type, text
-        )
+        logger.info("Telegram: Update in %s (%s): %s", chat_id, chat_type, text)
 
-        # Emergency handle for /id
         if text.strip().startswith("/id"):
             await self.id_command(update, context)
             return
@@ -114,12 +122,10 @@ class TelegramAdapter:
         if not text:
             return
 
-        # Fallback to chat_id if no user (common in channels)
         user_id = update.effective_user.id if update.effective_user else chat_id
         agent_id = f"telegram_{user_id}"
 
         try:
-            # Prepare request
             history = list(self._history[user_id])
             request = AgentRequest(
                 prompt=text,
@@ -127,27 +133,15 @@ class TelegramAdapter:
                 history=history,
             )
 
-            # Continuous typing indicator task
             async def keep_typing():
-                logger.info("Telegram: Started keep_typing loop for chat %s", chat_id)
-                ping_count = 0
                 try:
                     while True:
-                        ping_count += 1
-                        try:
-                            logger.info("Telegram: keep_typing ping #%d", ping_count)
-                            await context.bot.send_chat_action(chat_id=chat_id, action="typing")
-                        except Exception as e:
-                            logger.error("Telegram: keep_typing send error: %s", e)
-                        
-                        # Telegram's typing indicator lasts 5 seconds, ping every 3
-                        # We use 3.0 to give plenty of buffer
+                        await context.bot.send_chat_action(chat_id=chat_id, action="typing")
                         await asyncio.sleep(3.0)
                 except asyncio.CancelledError:
-                    logger.info("Telegram: keep_typing loop cancelled after %d pings", ping_count)
+                    pass
 
             typing_task = asyncio.create_task(keep_typing())
-            # Yield control immediately so the task can start its first ping
             await asyncio.sleep(0)
 
             try:
@@ -159,7 +153,6 @@ class TelegramAdapter:
                 except asyncio.CancelledError:
                     pass
 
-            # Update history
             self._history[user_id].append(Message(role="user", content=text))
             self._history[user_id].append(Message(role="assistant", content=response.content))
 
@@ -170,32 +163,45 @@ class TelegramAdapter:
             if choices:
                 keyboard = []
                 for i, choice in enumerate(choices):
-                    # Telegram limit is 64 bytes for callback_data
-                    # We use a unique key per user/session
                     cb_key = f"c_{user_id}_{i}"
                     self._callback_data_map[cb_key] = choice
                     keyboard.append([InlineKeyboardButton(choice, callback_data=cb_key)])
                 reply_markup = InlineKeyboardMarkup(keyboard)
 
-            # Send files if any
             if hasattr(response, "image_paths") and response.image_paths:
                 for path in response.image_paths:
                     if os.path.exists(path):
-                        await context.bot.send_photo(
-                            chat_id=chat_id,
-                            photo=open(path, 'rb'),
-                            caption=content if len(content) < 1024 else None,
-                            parse_mode=ParseMode.MARKDOWN
-                        )
+                        try:
+                            await context.bot.send_photo(
+                                chat_id=chat_id,
+                                photo=open(path, 'rb'),
+                                caption=content if len(content) < 1024 else None,
+                                parse_mode=ParseMode.MARKDOWN
+                            )
+                        except Exception as e:
+                            if "Can't parse entities" in str(e):
+                                logger.warning("Telegram: Photo caption Markdown failed, falling back")
+                                await context.bot.send_photo(
+                                    chat_id=chat_id,
+                                    photo=open(path, 'rb'),
+                                    caption=content if len(content) < 1024 else None
+                                )
+                            else:
+                                raise e
+                        
                         if len(content) >= 1024:
-                            await msg.reply_text(
+                            await self._safe_send_message(
+                                context,
+                                chat_id,
                                 content, 
                                 reply_markup=reply_markup,
                                 parse_mode=ParseMode.MARKDOWN
                             )
                         return
 
-            await msg.reply_text(
+            await self._safe_send_message(
+                context,
+                chat_id,
                 content, 
                 reply_markup=reply_markup,
                 parse_mode=ParseMode.MARKDOWN
@@ -203,9 +209,11 @@ class TelegramAdapter:
 
         except Exception as e:
             logger.error("Error processing Telegram message: %s", e)
-            # Avoid sending long technical errors to user
             clean_error = str(e).split(":")[0]
-            await msg.reply_text(f"❌ ผมพบปัญหาขัดข้องชั่วคราว: {clean_error}")
+            await context.bot.send_message(
+                chat_id=chat_id, 
+                text=f"❌ ผมพบปัญหาขัดข้องชั่วคราว: {clean_error}"
+            )
 
     async def handle_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle button clicks."""
@@ -216,30 +224,24 @@ class TelegramAdapter:
         await query.answer()
         
         cb_key = query.data
-        choice = self._callback_data_map.get(cb_key, cb_key) # Fallback to key if not found
+        choice = self._callback_data_map.get(cb_key, cb_key)
         
         chat_id = update.effective_chat.id
         logger.info("Telegram: Callback from %s: %s (key: %s)", chat_id, choice, cb_key)
         
-        # We simulate a new message from the user
-        # Instead of just calling handle_message, we create a pseudo-update 
-        # to ensure it flows through correctly
         if query.message:
-            # Edit original message to remove buttons (UX improvement)
             await query.edit_message_reply_markup(reply_markup=None)
             
-            # Send the choice as if user typed it
-            await context.bot.send_message(
-                chat_id=chat_id,
-                text=f"_{choice}_",
+            await self._safe_send_message(
+                context,
+                chat_id,
+                f"_{choice}_",
                 parse_mode=ParseMode.MARKDOWN
             )
             
-            # Now trigger the brain
-            # Create a mock update for handle_message
+            # Simulate trigger
             update.message = query.message
             update.message.text = choice
-            # We must set effector user correctly for agent_id
             await self.handle_message(update, context)
 
     async def send_proactive_alert(self, data: dict):
@@ -267,15 +269,31 @@ class TelegramAdapter:
             image_paths = data.get("image_paths", [])
             for path in image_paths:
                 if os.path.exists(path):
-                    await bot.send_photo(
-                        chat_id=chat_id, 
-                        photo=open(path, 'rb'), 
-                        caption=message_content, 
-                        parse_mode=ParseMode.MARKDOWN
-                    )
+                    try:
+                        await bot.send_photo(
+                            chat_id=chat_id, 
+                            photo=open(path, 'rb'), 
+                            caption=message_content, 
+                            parse_mode=ParseMode.MARKDOWN
+                        )
+                    except Exception as e:
+                        if "Can't parse entities" in str(e):
+                            await bot.send_photo(
+                                chat_id=chat_id, 
+                                photo=open(path, 'rb'), 
+                                caption=message_content
+                            )
+                        else:
+                            raise e
                     return
             
-            await bot.send_message(chat_id=chat_id, text=message_content, parse_mode=ParseMode.MARKDOWN)
+            try:
+                await bot.send_message(chat_id=chat_id, text=message_content, parse_mode=ParseMode.MARKDOWN)
+            except Exception as e:
+                if "Can't parse entities" in str(e):
+                    await bot.send_message(chat_id=chat_id, text=message_content)
+                else:
+                    raise e
         except Exception as e:
             logger.error("Failed to send Telegram proactive alert: %s", e)
 
@@ -295,24 +313,19 @@ def main():
 
     app = ApplicationBuilder().token(token).build()
 
-    # Global Debug Handler (catches EVERYTHING)
     app.add_handler(TypeHandler(Update, adapter.handle_update), group=-1)
 
-    # Handlers
     app.add_handler(CommandHandler("start", adapter.start_command))
     app.add_handler(CommandHandler("id", adapter.id_command))
     
-    # Explicitly handle all message types
     app.add_handler(MessageHandler(filters.ALL, adapter.handle_message))
     
     app.add_handler(CallbackQueryHandler(adapter.handle_callback))
 
-    # Anomaly Watcher
     from seahorse_ai.analysis.watcher import AnomalyWatcher
     watcher = AnomalyWatcher(llm_backend=router)
     watcher._notify = adapter.send_proactive_alert
     
-    # We use post_init to start the watcher task inside the application loop
     async def post_init(application) -> None:
         interval = int(os.environ.get("SEAHORSE_ALERTS_INTERVAL", "300"))
         asyncio.create_task(watcher.start(interval_seconds=interval))
@@ -322,7 +335,6 @@ def main():
 
     logger.info("Telegram bot starting via run_polling...")
     
-    # Standard blocking polling
     app.run_polling(allowed_updates=[
         "message", "channel_post", "callback_query", 
         "edited_message", "edited_channel_post"

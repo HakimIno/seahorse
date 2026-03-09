@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import random
 from collections.abc import AsyncIterator
 
 import litellm
@@ -41,11 +42,17 @@ class LLMClient:
         self, messages: list[Message], retries: int = 2, tier: str = "worker"
     ) -> AsyncIterator[str]:
         """Stream tokens as they are generated, with exponential backoff on errors."""
+        from seahorse_ai.planner.circuit_breaker import is_system_healthy
+        if not await is_system_healthy():
+            logger.critical("LLM call blocked by Global Circuit Breaker — System is in Safe Mode")
+            raise RuntimeError("System is temporarily in Safe Mode due to multiple LLM failures. Please try again in 1 minute.")
+
         model = (
             self._config.thinker_model
             if tier in ("thinker", "strategist")
             else self._config.model
         )
+        timeout_sec = 120.0 if tier in ("thinker", "strategist") else 30.0
         backoff = 1.0
         for attempt in range(retries + 1):
             try:
@@ -55,7 +62,7 @@ class LLMClient:
                     temperature=self._config.temperature,
                     max_tokens=self._config.max_tokens,
                     stream=True,
-                    timeout=45.0,
+                    timeout=timeout_sec,
                 )
                 async for chunk in response:  # type: ignore[union-attr]
                     delta = chunk.choices[0].delta.content
@@ -65,11 +72,13 @@ class LLMClient:
 
             except _RETRYABLE as exc:
                 if attempt < retries:
+                    jitter = random.random()
+                    total_backoff = backoff * (0.5 + jitter)
                     logger.warning(
                         "LLM stream transient error: %s. Retrying in %.1fs… (%d left)",
-                        exc, backoff, retries - attempt,
+                        exc, total_backoff, retries - attempt,
                     )
-                    await asyncio.sleep(backoff)
+                    await asyncio.sleep(total_backoff)
                     backoff *= 2
                 else:
                     logger.error("LLM stream failed after %d retries: %s", retries, exc)
@@ -90,17 +99,23 @@ class LLMClient:
         tier: str = "worker",
     ) -> dict:
         """Internal completion with exponential backoff retries on transient errors."""
+        from seahorse_ai.planner.circuit_breaker import is_system_healthy
+        if not await is_system_healthy():
+            logger.critical("LLM call blocked by Global Circuit Breaker — System is in Safe Mode")
+            raise RuntimeError("System is temporarily in Safe Mode due to multiple LLM failures. Please try again in 1 minute.")
+
         model = (
             self._config.thinker_model
             if tier in ("thinker", "strategist")
             else self._config.model
         )
+        timeout_sec = 120.0 if tier in ("thinker", "strategist") else 30.0
         kwargs: dict = {
             "model": model,
             "messages": [m.model_dump(exclude_none=True) for m in messages],
             "temperature": self._config.temperature,
             "max_tokens": self._config.max_tokens,
-            "timeout": 45.0,
+            "timeout": timeout_sec,
         }
         if tools:
             kwargs["tools"] = tools
@@ -112,11 +127,13 @@ class LLMClient:
 
         except _RETRYABLE as exc:
             if retries > 0:
+                jitter = random.random()
+                total_backoff = backoff * (0.5 + jitter)
                 logger.warning(
                     "LLM transient error: %s. Retrying in %.1fs… (%d left)",
-                    exc, backoff, retries,
+                    exc, total_backoff, retries,
                 )
-                await asyncio.sleep(backoff)
+                await asyncio.sleep(total_backoff)
                 return await self._complete_with_retry(
                     messages, tools=tools, retries=retries - 1, backoff=backoff * 2
                 )

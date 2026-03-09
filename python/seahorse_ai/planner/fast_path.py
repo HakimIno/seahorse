@@ -335,38 +335,3 @@ def _split_entities(entity: str) -> list[str]:
     parts = re.split(r",\s+|\sและ\s|\sand\s", entity, flags=re.IGNORECASE)
     items = [p.strip() for p in parts if p.strip() and len(p.strip()) > 3]
     return items if items else [entity]
-
-
-def _format_memory_results(raw: str) -> str:
-    """Convert raw memory_search output to natural Thai response.
-
-    Input:  'Memory search results for: ...\n1. [Imp:3] [53.6% match] (Saved: ...) Packet A ราคา 1200'
-    Output: 'จากข้อมูลที่บันทึกไว้ครับ:\n• Packet A ราคา 1200'
-    """
-    lines = raw.strip().split("\n")
-    items: list[str] = []
-
-    for line in lines:
-        # Skip header line
-        if line.startswith("Memory search") or not line.strip():
-            continue
-        # Extract the actual text after metadata
-        # Format: "1. [Imp:3] [53.6% match] (Saved: 2026-03-08 15:36) Packet A ราคา 1200"
-        match = re.search(r"\)\s+(.+)$", line)
-        if match:
-            items.append(match.group(1).strip())
-        else:
-            # Fallback: remove leading number and brackets
-            cleaned = re.sub(r"^\d+\.\s*(\[.*?\]\s*)*(\(.*?\)\s*)*", "", line).strip()
-            if cleaned:
-                items.append(cleaned)
-
-    if not items:
-        return raw  # Fallback: return as-is
-
-    if len(items) == 1:
-        return f"จากข้อมูลที่บันทึกไว้ครับ:\n\n**{items[0]}**"
-
-    bullet_list = "\n".join(f"  • {item}" for item in items)
-    return f"จากข้อมูลที่บันทึกไว้ครับ ({len(items)} รายการ):\n\n{bullet_list}"
-

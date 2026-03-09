@@ -56,17 +56,12 @@ class ReActExecutor:
     - Intent classification (→ prompts.classify_intent)
     """
 
-    def __init__(
-        self,
-        llm: object,
-        tools: object,
-        circuit_breaker: object,
-        config: ExecutorConfig | None = None,
-    ) -> None:
+    def __init__(self, llm: object, tools: object, circuit_breaker: object, config: ExecutorConfig | None = None, step_callback: callable | None = None) -> None:
         self._llm = llm
         self._tools = tools
         self._cb = circuit_breaker
         self._cfg = config or ExecutorConfig()
+        self._step_callback = step_callback
         self._total_obs_chars: int = 0
 
     async def run(
@@ -211,6 +206,9 @@ class ReActExecutor:
                         content="(Internal Control: 30k+ chars gathered. "
                                 "Stop researching. Synthesize now.)",
                     ))
+
+                if self._step_callback:
+                    await self._step_callback(messages)
 
                 continue
 

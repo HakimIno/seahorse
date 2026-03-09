@@ -26,6 +26,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
+import uuid
 from typing import Protocol, runtime_checkable
 
 from seahorse_ai.observability import get_tracer, setup_telemetry
@@ -104,13 +106,20 @@ class ReActPlanner:
     async def run(self, request: AgentRequest) -> AgentResponse:
         """Execute the agent pipeline and return the final response."""
         tracer = get_tracer("seahorse.planner")
-
         with tracer.start_as_current_span("agent.run") as span:
+            # ── 0. Persist Execution State (Phase 2: Durable Execution) ────
+            execution_id = uuid.uuid4()
             _set_span(span, {
                 "agent.id": request.agent_id,
+                "agent.execution_id": str(execution_id),
                 "agent.prompt_len": len(request.prompt),
                 "agent.max_steps": self._cfg.max_steps,
             })
+            
+            # Initial state persistence
+            await self._persist_execution(
+                execution_id, request.agent_id, request.prompt, request.history
+            )
 
             # Fresh circuit breaker per request
             self._circuit_breaker = CircuitBreaker()
@@ -188,47 +197,55 @@ class ReActPlanner:
             openai_tools = getattr(self._tools, "to_openai_tools", lambda: [])()
 
             # 6. Execute ReAct loop
-            executor = ReActExecutor(
-                llm=self._llm,
-                tools=self._tools,
-                circuit_breaker=self._circuit_breaker,
-                config=self._cfg,
-            )
-            result = await executor.run(
-                messages, openai_tools, agent_id=request.agent_id,
-            )
-
-            # 7. Final synthesis with strategist tier for complex or data-heavy results
-            content = result.content
-            is_data_intent = intent in ("DATABASE", "PRIVATE_MEMORY", "PUBLIC_REALTIME")
-            if not result.terminated and (current_tier == "strategist" or is_data_intent):
-                content = await self._synthesize(
-                    messages, content, request.prompt,
+            try:
+                executor = ReActExecutor(
+                    llm=self._llm,
+                    tools=self._tools,
+                    circuit_breaker=self._circuit_breaker,
+                    config=self._cfg,
+                    step_callback=lambda msgs: self._update_execution(execution_id, msgs),
+                )
+                result = await executor.run(
+                    messages, openai_tools, agent_id=request.agent_id,
                 )
 
-            # 8. Background memory (rate-limited, non-blocking)
-            asyncio.create_task(
-                self._memory.record(messages, agent_id=request.agent_id)
-            )
+                # Update final status
+                await self._update_execution(
+                    execution_id, messages, status="DONE" if not result.terminated else "TERMINATED"
+                )
 
-            _set_span(span, {
-                "agent.steps_taken": result.steps,
-                "agent.total_ms": result.total_ms,
-                "agent.status": "terminated" if result.terminated else "done",
-                "agent.intent": intent,
-                "agent.action": si.action,
-                "strategy.cache_size": self._strategy.cache_size,
-            })
+                # 7. Final synthesis
+                content = result.content
+                is_data_intent = intent in ("DATABASE", "PRIVATE_MEMORY", "PUBLIC_REALTIME")
+                if not result.terminated and (current_tier == "strategist" or is_data_intent):
+                    content = await self._synthesize(
+                        messages, content, request.prompt,
+                    )
 
-            return AgentResponse(
-                content=content,
-                steps=result.steps,
-                agent_id=request.agent_id,
-                elapsed_ms=result.total_ms,
-                terminated=result.terminated,
-                termination_reason=result.termination_reason,
-                image_paths=result.image_paths,
-            )
+                # 8. Background memory (rate-limited, non-blocking)
+                asyncio.create_task(
+                    self._memory.record(messages, agent_id=request.agent_id)
+                )
+
+                _set_span(span, {
+                    "agent.steps_taken": result.steps,
+                    "agent.total_ms": result.total_ms,
+                    "agent.status": "terminated" if result.terminated else "done",
+                })
+
+                return AgentResponse(
+                    content=content,
+                    steps=result.steps,
+                    agent_id=request.agent_id,
+                    elapsed_ms=result.total_ms,
+                    terminated=result.terminated,
+                    termination_reason=result.termination_reason,
+                    image_paths=result.image_paths,
+                )
+
+            except Exception as e:
+                await self._update_execution(execution_id, messages, status="FAILED")
+                raise e
 
     # ── Private helpers ────────────────────────────────────────────────────────
 
@@ -259,6 +276,52 @@ class ReActPlanner:
         except Exception as exc:  # noqa: BLE001
             logger.error("agent.run synthesis failed: %s", exc)
             return content
+
+    async def _persist_execution(
+        self, execution_id: uuid.UUID, agent_id: str, prompt: str, history: list[Message] | None
+    ) -> None:
+        """Create initial execution record in Postgres."""
+        import asyncpg
+        import json
+        pg_uri = os.environ.get("SEAHORSE_PG_URI")
+        if not pg_uri:
+            return
+        try:
+            conn = await asyncpg.connect(pg_uri)
+            try:
+                hist_json = json.dumps([h.to_dict() for h in history]) if history else None
+                await conn.execute("""
+                    INSERT INTO seahorse_executions (id, agent_id, prompt, history, status)
+                    VALUES ($1, $2, $3, $4, 'RUNNING')
+                """, execution_id, agent_id, prompt, hist_json)
+            finally:
+                await conn.close()
+        except Exception as e:
+            logger.error("planner._persist_execution failed: %s", e)
+
+    async def _update_execution(
+        self, execution_id: uuid.UUID, messages: list[Message], status: str = "RUNNING"
+    ) -> None:
+        """Update existing execution record with current conversation state."""
+        import asyncpg
+        import json
+        pg_uri = os.environ.get("SEAHORSE_PG_URI")
+        if not pg_uri:
+            return
+        try:
+            conn = await asyncpg.connect(pg_uri)
+            try:
+                msgs_json = json.dumps([m.model_dump() for m in messages])
+                await conn.execute("""
+                    UPDATE seahorse_executions 
+                    SET messages = $1, status = $2, updated_at = NOW()
+                    WHERE id = $3
+                """, msgs_json, status, execution_id)
+                logger.info("planner._update_execution: updated id=%s to status=%s", execution_id, status)
+            finally:
+                await conn.close()
+        except Exception as e:
+            logger.error("planner._update_execution failed: %s", e)
 
     @staticmethod
     def _default_tools() -> ToolRegistry:
