@@ -1,9 +1,11 @@
 """seahorse_ai.analysis.feeder — Real-time sales simulator for Seahorse."""
 import asyncio
-import random
+import contextlib
 import logging
 import os
+import random
 from datetime import datetime
+
 import asyncpg
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] FEEDS: %(message)s')
@@ -13,7 +15,7 @@ logger = logging.getLogger(__name__)
 PG_URI = os.environ.get("SEAHORSE_PG_URI")
 
 class RealTimeFeeder:
-    def __init__(self):
+    def __init__(self) -> None:
         self.conn = None
         self.branches = []
         self.products = []
@@ -23,7 +25,7 @@ class RealTimeFeeder:
         self.anomaly_branch_id = 1 # Silom Complex (Default test)
         self.anomaly_end_time = 0
 
-    async def _init_db(self):
+    async def _init_db(self) -> bool | None:
         """Initialize connection and load reference data."""
         if not PG_URI:
             logger.error("Feeder: SEAHORSE_PG_URI not set. Exit.")
@@ -50,7 +52,7 @@ class RealTimeFeeder:
             logger.error("Feeder DB Init Error: %s", e)
             return False
 
-    def trigger_anomaly(self, duration_sec=1800):
+    def trigger_anomaly(self, duration_sec=1800) -> None:
         """Pick a random branch to stop selling for a while."""
         if not self.branches:
             return
@@ -59,7 +61,7 @@ class RealTimeFeeder:
         self.anomaly_end_time = asyncio.get_event_loop().time() + duration_sec
         logger.warning("🚨 SIMULATING ANOMALY: Branch '%s' (ID: %s) has stopped selling for %ds!", branch['name'], branch['id'], duration_sec)
 
-    async def run(self):
+    async def run(self) -> None:
         if not await self._init_db():
             return
 
@@ -109,12 +111,10 @@ class RealTimeFeeder:
                 logger.error("Feeder loop error: %s", e)
                 # Attempt to reconnect if lost
                 await asyncio.sleep(10)
-                try:
+                with contextlib.suppress(BaseException):
                     await self._init_db()
-                except:
-                    pass
 
-async def main():
+async def main() -> None:
     feeder = RealTimeFeeder()
     await feeder.run()
 

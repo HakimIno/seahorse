@@ -69,7 +69,8 @@ async def google_calendar_add_event(
         
         import asyncio
         loop = asyncio.get_running_loop()
-        func = lambda: service.events().insert(calendarId='primary', body=event).execute()
+        def func():
+            return service.events().insert(calendarId='primary', body=event).execute()
         created_event = await loop.run_in_executor(None, func)
         
         return f"Successfully created event: {created_event.get('htmlLink')}"

@@ -113,9 +113,11 @@ class MemoryRecorder:
 
     async def process_outbox(self) -> None:
         """Background loop to sync seahorse_outbox with Qdrant."""
-        import os
         import json
+        import os
+
         import asyncpg
+
         from seahorse_ai.tools.memory import get_pipeline
 
         pg_uri = os.environ.get("SEAHORSE_PG_URI")

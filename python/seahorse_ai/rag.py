@@ -16,6 +16,7 @@ The RAGPipeline also functions as an agent tool: `memory_store` and
 """
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import os
@@ -142,7 +143,7 @@ class RAGPipeline:
             if self._use_rust and self._memory is not None:
                 raw = self._memory.search(embedding.tobytes(), k=top_k)
                 results = []
-                for i, (doc_id, dist, text, meta_json) in enumerate(raw):
+                for _i, (doc_id, dist, text, meta_json) in enumerate(raw):
                     metadata = json.loads(meta_json)
                     if filter_metadata:
                         matches = all(
@@ -286,10 +287,8 @@ class RAGPipeline:
                     "rag.delete: removed doc_id=%d text=%r", 
                     best_id, deleted_entry["text"][:50]
                 )
-                try:
+                with contextlib.suppress(Exception):
                     span.set_attribute("rag.deleted_id", best_id)
-                except Exception:
-                    pass
                 return deleted_entry
 
             return None

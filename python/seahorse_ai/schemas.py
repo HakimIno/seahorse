@@ -17,8 +17,8 @@ class Message(BaseModel):
 class LLMConfig(BaseModel):
     """LLM provider configuration with tier support."""
 
-    model: str = "openrouter/google/gemini-2.0-flash-001"  # Default 'worker' model
-    thinker_model: str = "claude-3-5-sonnet-20241022"      # Default 'reasoning' model
+    model: str = "openrouter/google/gemini-3-flash-preview"  # Default 'worker' model
+    thinker_model: str = "openrouter/google/gemini-3-flash-preview"      # Default 'reasoning' model
     temperature: float = Field(default=0.7, ge=0.0, le=2.0)
     max_tokens: int = Field(default=4096, ge=1, le=128_000)
 

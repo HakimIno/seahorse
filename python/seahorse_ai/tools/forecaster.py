@@ -1,7 +1,9 @@
 """seahorse_ai.tools.forecaster — Predictive analytics for Seahorse AI."""
 import logging
+from typing import Any
+
 import numpy as np
-from typing import List, Dict, Any, Tuple
+
 from seahorse_ai.tools.base import tool
 
 logger = logging.getLogger(__name__)
@@ -11,11 +13,10 @@ logger = logging.getLogger(__name__)
     "Requires a list of dictionaries with 'date' and 'revenue' keys, and an optional days_to_forecast integer."
 )
 def forecast_sales(
-    history: List[Dict[str, Any]], 
+    history: list[dict[str, Any]], 
     days_to_forecast: int = 7
-) -> Dict[str, Any]:
-    """
-    Predicts future sales based on historical data using linear regression.
+) -> dict[str, Any]:
+    """Predicts future sales based on historical data using linear regression.
     
     Args:
         history: List of dictionaries with 'date' and 'revenue' keys.
@@ -23,6 +24,7 @@ def forecast_sales(
         
     Returns:
         A dictionary containing the forecast and confidence metrics.
+
     """
     if len(history) < 3:
         return {"error": "Insufficient data for forecasting (need at least 3 days)."}
@@ -45,7 +47,7 @@ def forecast_sales(
         # Calculate daily average Growth Rate
         # (Current - Start) / Start
         start_val = max(y[0], 1)
-        total_growth = (y[-1] - y[0]) / start_val
+        (y[-1] - y[0]) / start_val
         
         # Calculate R-squared (simple confidence metric)
         y_pred = m * x + c

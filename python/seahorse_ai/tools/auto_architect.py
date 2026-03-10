@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+
 from seahorse_ai.tools.base import tool
 
 logger = logging.getLogger(__name__)

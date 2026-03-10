@@ -1,6 +1,8 @@
 """seahorse_ai.tools.business_math — Tools for financial and business analysis."""
 from __future__ import annotations
+
 import logging
+
 from seahorse_ai.tools.base import tool
 
 logger = logging.getLogger(__name__)

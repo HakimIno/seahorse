@@ -53,6 +53,7 @@ logger = logging.getLogger(__name__)
 
 class LLMBackend(Protocol):
     """Any object that can complete a list of messages with tier support."""
+
     async def complete(
         self, messages: list[Message], tools: list[dict] | None = None, tier: str = "worker"
     ) -> str | dict[str, object]: ...
@@ -61,6 +62,7 @@ class LLMBackend(Protocol):
 @runtime_checkable
 class ToolRegistry(Protocol):
     """Any object that can dispatch a named tool call."""
+
     async def call(self, name: str, args: dict[str, object]) -> str: ...
 
 
@@ -99,14 +101,14 @@ class ReActPlanner:
         self._cfg = ExecutorConfig(
             max_steps=max_steps,
             step_timeout_seconds=step_timeout_seconds,
-            global_timeout_seconds=global_timeout_seconds,
+            global_timeout_seconds=300,
         )
         setup_telemetry()  # idempotent
 
     # ── Public API ─────────────────────────────────────────────────────────────
 
     async def run(self, request: AgentRequest) -> AgentResponse:
-        """Execute the agent pipeline and return the final response."""
+        """Execute the ReAct planning loop and return the final response."""
         tracer = get_tracer("seahorse.planner")
         with tracer.start_as_current_span("agent.run") as span:
             # ── 0. Persist Execution State (Phase 2: Durable Execution) ────
@@ -134,7 +136,7 @@ class ReActPlanner:
                     ),
                     timeout=15.0  # Reduced timeout for fast worker
                 )
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 logger.warning(
                     "agent.run intent classification timed out — falling back to GENERAL"
                 )
@@ -169,8 +171,9 @@ class ReActPlanner:
                 )
                 return fast  # Done! 1 LLM call total ⚡
 
-            # ── 2.5 Crew Mode - trigger multi-agent for complex tasks ─────
-            if si.complexity >= 4:
+            # ── 2.5 Auto-Seahorse Mode - trigger multi-agent for complex tasks ──
+            # NEVER trigger Auto-Seahorse Mode for sub-agents (crew_*) to avoid infinite recursion
+            if si.complexity >= 4 and not request.agent_id.startswith("crew_"):
                 logger.info(
                     "agent.run CROSS-OVER to Auto-Seahorse complexity=%d agent_id=%s",
                     si.complexity,
@@ -178,7 +181,7 @@ class ReActPlanner:
                 )
                 from seahorse_ai.tools.auto_seahorse import execute_auto_seahorse
                 crew_result = await execute_auto_seahorse(request.prompt)
-                _set_span(span, {"agent.crew_mode": True, "agent.complexity": si.complexity})
+                _set_span(span, {"agent.auto_seahorse_mode": True, "agent.complexity": si.complexity})
                 return AgentResponse(
                     content=crew_result,
                     steps=1, # Abstraction level
@@ -306,8 +309,9 @@ class ReActPlanner:
         self, execution_id: uuid.UUID, agent_id: str, prompt: str, history: list[Message] | None
     ) -> None:
         """Create initial execution record in Postgres."""
-        import asyncpg
         import json
+
+        import asyncpg
         pg_uri = os.environ.get("SEAHORSE_PG_URI")
         if not pg_uri:
             return
@@ -328,8 +332,9 @@ class ReActPlanner:
         self, execution_id: uuid.UUID, messages: list[Message], status: str = "RUNNING"
     ) -> None:
         """Update existing execution record with current conversation state."""
-        import asyncpg
         import json
+
+        import asyncpg
         pg_uri = os.environ.get("SEAHORSE_PG_URI")
         if not pg_uri:
             return

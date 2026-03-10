@@ -43,6 +43,7 @@ class KnowledgeBase:
     source:
         Path to a directory containing ``*.md``, ``*.txt``, or ``*.jsonl``
         files.  Can also be ``None`` if you only supply docs via ``add_docs()``.
+
     """
 
     def __init__(self, source: str | Path | None = None) -> None:

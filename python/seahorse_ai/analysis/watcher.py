@@ -1,13 +1,16 @@
 """seahorse_ai.analysis.watcher — Background service for detecting anomalies."""
 from __future__ import annotations
-import logging
+
 import asyncio
 import json
+import logging
 import os
+
 import asyncpg
+
 from seahorse_ai.schemas import Message
-from seahorse_ai.tools.viz import create_custom_chart
 from seahorse_ai.tools.forecaster import forecast_sales
+from seahorse_ai.tools.viz import create_custom_chart
 
 logger = logging.getLogger(__name__)
 
@@ -17,13 +20,13 @@ PG_URI = os.environ.get("SEAHORSE_PG_URI")
 class AnomalyWatcher:
     """Service that periodically scans the DB for business-critical changes."""
     
-    def __init__(self, llm_backend: object):
+    def __init__(self, llm_backend: object) -> None:
         self._llm = llm_backend
         self._is_running = False
         # To avoid spamming the same alert repeatedly
         self._sent_alerts: set[str] = set()
 
-    async def start(self, interval_seconds: int = 3600):
+    async def start(self, interval_seconds: int = 3600) -> None:
         """Start the background monitoring loop."""
         if not PG_URI:
             logger.error("AnomalyWatcher: SEAHORSE_PG_URI not set. Monitoring disabled.")
@@ -42,10 +45,10 @@ class AnomalyWatcher:
                 logger.error("AnomalyWatcher loop error: %s", e)
             await asyncio.sleep(interval_seconds)
 
-    async def stop(self):
+    async def stop(self) -> None:
         self._is_running = False
 
-    async def _init_db(self):
+    async def _init_db(self) -> None:
         """Create the persistence table for alerts if it doesn't exist."""
         try:
             conn = await asyncpg.connect(PG_URI)
@@ -65,7 +68,7 @@ class AnomalyWatcher:
         except Exception as e:
             logger.error("AnomalyWatcher: Failed to initialize persistence table: %s", e)
 
-    async def _check_for_anomalies(self):
+    async def _check_for_anomalies(self) -> None:
         """Execute health-check queries and use LLM to decide if it's an anomaly."""
         logger.info("AnomalyWatcher: running health checks...")
         
@@ -92,10 +95,7 @@ class AnomalyWatcher:
             )
             
             content = ""
-            if isinstance(result, dict):
-                content = result.get("content", "")
-            else:
-                content = str(result)
+            content = result.get("content", "") if isinstance(result, dict) else str(result)
             
             clean_content = content.replace("```json", "").replace("```", "").strip()
             data = json.loads(clean_content)
@@ -175,7 +175,7 @@ ax.get_yaxis().set_major_formatter(plt.FuncFormatter(lambda x, loc: "{{:,}}".for
         except Exception as e:
             logger.error("AnomalyWatcher LLM analysis failed: %s", e)
 
-    async def _persist_alert(self, title: str):
+    async def _persist_alert(self, title: str) -> None:
         """Save alert title to DB to prevent duplicate notifications after restart."""
         try:
             conn = await asyncpg.connect(PG_URI)
@@ -242,6 +242,6 @@ ax.get_yaxis().set_major_formatter(plt.FuncFormatter(lambda x, loc: "{{:,}}".for
             logger.error("Watcher trend query failed for %s: %s", branch_name, e)
             return []
 
-    async def _notify(self, anomaly_data: dict):
+    async def _notify(self, anomaly_data: dict) -> None:
         """Dispatch notification to Discord."""
         logger.info("ANOMALY_ALERT_DISCORD: %s", json.dumps(anomaly_data, ensure_ascii=False))

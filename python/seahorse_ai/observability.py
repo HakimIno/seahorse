@@ -142,7 +142,7 @@ class _NoopSpan:
     def set_attribute(self, *_: Any, **__: Any) -> None:
         pass
 
-    def __enter__(self) -> "_NoopSpan":
+    def __enter__(self) -> _NoopSpan:
         return self
 
     def __exit__(self, *_: Any) -> None:

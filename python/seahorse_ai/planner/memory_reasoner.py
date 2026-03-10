@@ -6,8 +6,8 @@ naturally and coherently.
 """
 from __future__ import annotations
 
-import logging
 import asyncio
+import logging
 
 from seahorse_ai.schemas import AgentResponse, Message
 

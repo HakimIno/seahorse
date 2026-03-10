@@ -82,7 +82,7 @@ async def load_mcp_tools(
         func.__doc__ = spec.description
         
         # Store metadata directly onto the function so `ToolRegistry.register` can read it
-        setattr(func, "_tool_spec", spec)
+        func._tool_spec = spec
         
         registry.register(func)
         logger.info("Registered MCP tool: %s", spec.name)

@@ -1,12 +1,18 @@
-import os
-import logging
-import uuid
 import json
+import logging
+import os
+import re
+import uuid
+import contextlib
+
 import matplotlib
-matplotlib.use('Agg') # Headless backend for Discord bot
 import matplotlib.pyplot as plt
+import matplotlib.font_manager as fm
+import numpy as np
 import pandas as pd
-from typing import List, Dict, Any, Optional
+
+matplotlib.use('Agg')  # Headless backend for Discord bot
+
 from seahorse_ai.tools.base import tool
 
 logger = logging.getLogger(__name__)
@@ -14,8 +20,6 @@ logger = logging.getLogger(__name__)
 # Directory for temporary charts
 CHART_DIR = "/tmp/seahorse_charts"
 os.makedirs(CHART_DIR, exist_ok=True)
-
-import matplotlib.font_manager as fm
 
 # Load custom Thai fonts for professional rendering
 font_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "fonts")
@@ -45,7 +49,8 @@ except Exception as e:
     "You provide the custom plotting logic, which will be executed in a sandboxed environment.\n\n"
     "ENVIRONMENT SETUP (Already provided, DO NOT import these):\n"
     "- `pd`, `np`, `plt` are already imported.\n"
-    "- `df` (Pandas DataFrame) containing the parsed data is already instantiated.\n"
+    "- `df` (Pandas DataFrame) and `data` (List of dicts) contain the findings.\n"
+    "- Use `df` for vector operations, or `data` for list comprehensions.\n"
     "- A modern `fig, ax` (12x7, white bg, spines removed) are already created.\n"
     "- `prop_reg` and `prop_bold` are provided for Thai/premium typography.\n"
     "- A professional, corporate color list `bar_colors` (slate, navy, muted blue) is provided.\n\n"
@@ -61,41 +66,31 @@ except Exception as e:
 def create_custom_chart(
     python_code: str,
     data_json: str,
-) -> Optional[str]:
+) -> str | None:
     """Execute dynamic Matplotlib code to generate a custom business chart."""
     if not data_json or not python_code:
         logger.warning("viz: Missing code or data for chart generation.")
         return None
-
     try:
-        # 1. Parse Data
-        s_data = data_json.strip()
-        if s_data.startswith("```json"):
-            s_data = s_data[7:]
-        if s_data.startswith("```"):
-            s_data = s_data[3:]
-        if s_data.endswith("```"):
-            s_data = s_data[:-3]
-        
-        start_idx = s_data.find('[')
-        if start_idx == -1:
-            start_idx = s_data.find('{')
-        end_idx = s_data.rfind(']')
-        if end_idx == -1:
-            end_idx = s_data.rfind('}')
-        
-        if start_idx != -1 and end_idx != -1:
-            s_data = s_data[start_idx:end_idx+1]
+        # 1. Parse Data (Robustly extract JSON block)
+        json_match = re.search(r'(\[.*\]|\{.*\})', data_json.strip(), re.DOTALL)
+        if not json_match:
+            logger.warning(
+                "viz: No valid JSON structure found in %s...",
+                data_json[:100]
+            )
+            return "Chart Generation Error: No valid data found."
             
+        s_data = json_match.group(1)
         data = json.loads(s_data)
-        import pandas as pd
-        import numpy as np
         df = pd.DataFrame(data)
 
         # 2. Setup Premium Canvas
         if prop_reg:
             plt.rcParams['font.family'] = 'sans-serif'
-            plt.rcParams['font.sans-serif'] = [prop_reg.get_name(), 'DejaVu Sans', 'Arial', 'sans-serif']
+            plt.rcParams['font.sans-serif'] = [
+                prop_reg.get_name(), 'DejaVu Sans', 'Arial', 'sans-serif'
+            ]
             plt.rcParams['axes.unicode_minus'] = False # Fix minus sign with custom fonts
             
         fig, ax = plt.subplots(figsize=(12, 7))
@@ -103,7 +98,10 @@ def create_custom_chart(
         ax.set_facecolor('#ffffff')
         
         # Minimal, elegant pastel color palette
-        bar_colors = ['#aec6cf', '#ffb3ba', '#b3ecc6', '#fdfd96', '#cbb3cf', '#ffd1b3', '#b3e6e6', '#e6cce6', '#d9ead3']
+        bar_colors = [
+            '#aec6cf', '#ffb3ba', '#b3ecc6', '#fdfd96', '#cbb3cf',
+            '#ffd1b3', '#b3e6e6', '#e6cce6', '#d9ead3'
+        ]
         
         ax.spines['top'].set_visible(False)
         ax.spines['right'].set_visible(False)
@@ -117,6 +115,7 @@ def create_custom_chart(
             "np": np,
             "plt": plt,
             "df": df,
+            "data": data,  # Provide raw data for list comprehensions
             "fig": fig,
             "ax": ax,
             "prop_reg": prop_reg,
@@ -148,10 +147,11 @@ def create_custom_chart(
         return filepath
 
     except Exception as e:
-        logger.error(f"viz: Failed to generate custom chart. Error: {e}\nCode:\n{python_code[:200]}...")
+        logger.error(
+            "viz: Failed to generate custom chart. Error: %s\nCode:\n%s...",
+            e, python_code[:200]
+        )
         # Close the corrupt figure
-        try:
+        with contextlib.suppress(BaseException):
             plt.close()
-        except:
-            pass
         return f"Chart Generation Error: {e}"

@@ -3,7 +3,6 @@ from __future__ import annotations
 import datetime
 import os
 
-
 # ── Keywords that signal the query needs real-time data ──────────────────────
 # If any of these appear in the user's prompt, the agent MUST call web_search.
 REALTIME_KEYWORDS: tuple[str, ...] = (

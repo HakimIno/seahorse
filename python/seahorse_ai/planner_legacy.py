@@ -169,7 +169,7 @@ class ReActPlanner:
                         self._run_step(messages, openai_tools, step, tier=tier),
                         timeout=self._step_timeout_seconds
                     )
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     logger.error("agent.run step=%d timed out after %ds", step, self._step_timeout_seconds)
                     messages.append(Message(
                         role="user",
@@ -550,6 +550,7 @@ class ReActPlanner:
 
 class _nullctx:
     """No-op context manager — used when tracer.start_as_current_span is unavailable."""
+
     def __enter__(self) -> _nullctx: return self
     def __exit__(self, *_: object) -> None: pass
     def set_attribute(self, *_: object) -> None: pass

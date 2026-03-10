@@ -12,7 +12,6 @@ Usage:
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import os
 import re
@@ -21,7 +20,6 @@ from collections import defaultdict, deque
 
 import discord
 import discord.ui
-import asyncpg
 
 from seahorse_ai.analysis.watcher import AnomalyWatcher
 from seahorse_ai.planner import ReActPlanner
@@ -177,7 +175,7 @@ class ClarificationView(discord.ui.View):
 # ── Discord Client ─────────────────────────────────────────────────────────────
 
 class SeahorseDiscordClient(discord.Client):
-    def __init__(self, planner: ReActPlanner, *args, **kwargs):
+    def __init__(self, planner: ReActPlanner, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         self.planner = planner
         # Per-user conversation history: user_id → deque of Message
@@ -185,7 +183,7 @@ class SeahorseDiscordClient(discord.Client):
             lambda: deque(maxlen=_MAX_HISTORY)
         )
 
-    async def on_ready(self):
+    async def on_ready(self) -> None:
         logger.info("Logged in as %s (ID: %s)", self.user, self.user.id)
         logger.info("Seahorse AI: Proactive monitoring active.")
         logger.info("------")
@@ -240,7 +238,7 @@ class SeahorseDiscordClient(discord.Client):
         except Exception as e:
             logger.error("Failed to send proactive alert: %s", e)
 
-    async def on_message(self, message: discord.Message):
+    async def on_message(self, message: discord.Message) -> None:
         logger.debug(
             "Event: on_message triggered by %s. Content length: %d",
             message.author, len(message.content)
@@ -338,16 +336,16 @@ class SeahorseDiscordClient(discord.Client):
                     await message.channel.send(f"❌ Error: {str(e)}")
 
 
-async def main():
+async def main() -> None:
     token = os.environ.get("DISCORD_BOT_TOKEN")
     if not token:
         logger.error("DISCORD_BOT_TOKEN not found in environment.")
         return
 
     router = ModelRouter(
-        worker_model=os.environ.get("SEAHORSE_MODEL_WORKER", "openrouter/google/gemini-2.0-flash-001"),
-        thinker_model=os.environ.get("SEAHORSE_MODEL_THINKER", "openrouter/google/gemini-2.0-flash-001"),
-        strategist_model=os.environ.get("SEAHORSE_MODEL_STRATEGIST", "openrouter/anthropic/claude-3.5-sonnet"),
+        worker_model=os.environ.get("SEAHORSE_MODEL_WORKER", "openrouter/google/gemini-3-flash-preview"),
+        thinker_model=os.environ.get("SEAHORSE_MODEL_THINKER", "openrouter/google/gemini-3-flash-preview"),
+        strategist_model=os.environ.get("SEAHORSE_MODEL_STRATEGIST", "openrouter/google/gemini-3-flash-preview"),
     )
     planner = ReActPlanner(llm=router)
 

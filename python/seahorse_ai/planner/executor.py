@@ -29,6 +29,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class ExecutorConfig:
     """Configuration for the ReAct execution loop."""
+
     max_steps: int = 15
     step_timeout_seconds: int = 60
     global_timeout_seconds: int = 300
@@ -39,6 +40,7 @@ class ExecutorConfig:
 @dataclass
 class ExecutorResult:
     """Result of a ReAct execution loop."""
+
     content: str
     steps: int
     terminated: bool = False

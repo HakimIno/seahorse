@@ -20,6 +20,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class MemoryFact:
     """A single atomic, typed fact ready for storage."""
+
     text: str                          # The fact as a complete sentence
     fact_type: str = "FACT"           # PRICE | PERSON | EVENT | PREFERENCE | FACT | TASK
     entities: list[str] = field(default_factory=list)  # Named entities in the fact

@@ -5,13 +5,14 @@ Only allows a curated set of safe imports.
 """
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import logging
-import subprocess
+import os
 import sys
 import tempfile
 import textwrap
 
-import os
 from seahorse_ai.tools.base import tool
 
 logger = logging.getLogger(__name__)
@@ -27,6 +28,7 @@ _ALLOWED_IMPORTS = {
     "collections", "itertools", "functools",
     "random", "hashlib", "base64", "uuid",
     "typing", "dataclasses", "enum", "abc", "_io",
+    "pandas", "numpy", "matplotlib",
 }
 
 _SANDBOX_HEADER = textwrap.dedent(f"""\
@@ -61,7 +63,9 @@ def _get_python_executable() -> str:
     """
     # 1. Try to find .venv/bin/python relative to this file
     # This file is in <root>/python/seahorse_ai/tools/python_interpreter.py
-    base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+    base_dir = os.path.dirname(
+        os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    )
     venv_python = os.path.join(base_dir, ".venv", "bin", "python3")
     if os.path.exists(venv_python):
         return venv_python
@@ -103,22 +107,33 @@ async def python_interpreter(code: str) -> str:
             "LANG": os.environ.get("LANG", "en_US.UTF-8"),
         }
         
-        result = subprocess.run(
-            [_get_python_executable(), tmp_path],
-            capture_output=True,
-            text=True,
-            timeout=_TIMEOUT_SECONDS,
+        process = await asyncio.create_subprocess_exec(
+            _get_python_executable(),
+            tmp_path,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
             env=safe_env,
         )
-        stdout = result.stdout.strip()
-        stderr = result.stderr.strip()
+        
+        try:
+            stdout_bytes, stderr_bytes = await asyncio.wait_for(
+                process.communicate(), timeout=_TIMEOUT_SECONDS
+            )
+            stdout = stdout_bytes.decode().strip()
+            stderr = stderr_bytes.decode().strip()
+            returncode = process.returncode
+        except TimeoutError:
+            process.kill()
+            await process.wait()
+            logger.warning("python_interpreter: code timed out after %ds", _TIMEOUT_SECONDS)
+            return f"Error: Code execution timed out after {_TIMEOUT_SECONDS} seconds."
 
         logger.info(f"Interpreter stdout: {stdout}")
         if stderr:
             logger.error(f"Interpreter stderr: {stderr}")
 
-        if result.returncode != 0:
-            return f"Error (exit {result.returncode}):\n{stderr or stdout}"
+        if returncode != 0:
+            return f"Error (exit {returncode}):\n{stderr or stdout}"
 
         output_parts = []
         if stdout:
@@ -128,14 +143,9 @@ async def python_interpreter(code: str) -> str:
 
         return "\n".join(output_parts) if output_parts else "(no output)"
 
-    except subprocess.TimeoutExpired:
-        logger.warning("python_interpreter: code timed out after %ds", _TIMEOUT_SECONDS)
-        return f"Error: Code execution timed out after {_TIMEOUT_SECONDS} seconds."
     except Exception as exc:
         logger.error("python_interpreter: unexpected error: %s", exc)
         return f"Error: {exc}"
     finally:
-        try:
+        with contextlib.suppress(OSError):
             os.unlink(tmp_path)
-        except OSError:
-            pass

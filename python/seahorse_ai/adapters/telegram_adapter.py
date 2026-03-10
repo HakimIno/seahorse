@@ -12,27 +12,28 @@ Usage:
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import os
 import re
 import sys
 from collections import defaultdict, deque
-import httpx
 
+import httpx
 from telegram import (
-    Update,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
+    Update,
 )
 from telegram.constants import ParseMode
 from telegram.ext import (
     ApplicationBuilder,
-    CommandHandler,
-    MessageHandler,
     CallbackQueryHandler,
+    CommandHandler,
     ContextTypes,
-    filters,
+    MessageHandler,
     TypeHandler,
+    filters,
 )
 
 from seahorse_ai.router import ModelRouter
@@ -61,7 +62,10 @@ def _extract_choices(text: str) -> list[str]:
     return choices if 2 <= len(choices) <= 5 else []
 
 class TelegramAdapter:
+    """Adapter for Telegram Bot API integration."""
+
     def __init__(self, router_url: str = "http://localhost:8000") -> None:
+        """Initialize adapter with router URL."""
         self.router_url = router_url
         self._history: dict[int, deque[Message]] = defaultdict(
             lambda: deque(maxlen=_MAX_HISTORY)
@@ -73,6 +77,7 @@ class TelegramAdapter:
         logger.info("Telegram RAW Update: %s", update.to_dict())
 
     async def start_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle /start command."""
         await update.message.reply_text("สวัสดีครับ! ผม Seahorse AI พร้อมช่วยคุณวิเคราะห์ข้อมูลธุรกิจแล้วครับ")
 
     async def id_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -100,13 +105,14 @@ class TelegramAdapter:
         try:
             return await context.bot.send_message(chat_id=chat_id, text=text, **kwargs)
         except Exception as e:
-            if "Can't parse entities" in str(e):
-                logger.warning("Telegram: Markdown failed for message, falling back to plain text: %s", e)
-                kwargs.pop("parse_mode", None)
-                return await context.bot.send_message(chat_id=chat_id, text=text, **kwargs)
-            raise e
+            logger.warning(
+                "Telegram: Markdown failed for message, falling back to plain text: %s", e
+            )
+            kwargs.pop("parse_mode", None)
+            return await context.bot.send_message(chat_id=chat_id, text=text, **kwargs)
 
     async def handle_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle incoming text messages."""
         msg = (
             update.message 
             or update.channel_post 
@@ -130,16 +136,37 @@ class TelegramAdapter:
 
         user_id = update.effective_user.id if update.effective_user else chat_id
         agent_id = f"telegram_{user_id}"
+        
+        await self._process_text_input(update, context, text, chat_id, user_id, agent_id)
 
+    async def _process_text_input(
+        self, 
+        update: Update, 
+        context: ContextTypes.DEFAULT_TYPE, 
+        text: str, 
+        chat_id: int, 
+        user_id: int, 
+        agent_id: str
+    ) -> None:
+        """Core logic for processing user input and generating responses."""
         try:
-            history = list(self._history[user_id])
+            # Clean history: Merge consecutive messages with the same role
+            # This is required by some providers like Z-AI (GLM)
+            raw_history = list(self._history[user_id])
+            cleaned_history = []
+            for msg in raw_history:
+                if cleaned_history and cleaned_history[-1].role == msg.role:
+                    cleaned_history[-1].content += f"\n\n{msg.content}"
+                else:
+                    cleaned_history.append(msg)
+            
             request = AgentRequest(
                 prompt=text,
                 agent_id=agent_id,
-                history=history,
+                history=cleaned_history,
             )
 
-            async def keep_typing():
+            async def keep_typing() -> None:
                 try:
                     while True:
                         await context.bot.send_chat_action(chat_id=chat_id, action="typing")
@@ -152,10 +179,14 @@ class TelegramAdapter:
 
             try:
                 # UNIFIED: Redirect to Rust Router instead of local ReActPlanner
-                async with httpx.AsyncClient(timeout=120.0) as client:
+                async with httpx.AsyncClient(timeout=300.0) as client:
                     # Optimization: Send only a small window of history (e.g., last 5 messages) 
                     # to the Router for Fast Path checks to save tokens on every turn.
-                    fast_path_history = list(history)[-5:] if len(history) > 5 else list(history)
+                    fast_path_history = (
+                        list(cleaned_history)[-5:] 
+                        if len(cleaned_history) > 5 
+                        else list(cleaned_history)
+                    )
                     
                     resp = await client.post(
                         f"{self.router_url}/v1/agent/run",
@@ -185,31 +216,46 @@ class TelegramAdapter:
                         from seahorse_ai.planner import ReActPlanner
                         from seahorse_ai.router import ModelRouter
                         internal_router = ModelRouter(
-                            worker_model=os.environ.get("SEAHORSE_MODEL_WORKER", "google/gemini-3-flash-preview"),
-                            thinker_model=os.environ.get("SEAHORSE_MODEL_THINKER", "google/gemini-3-flash-preview"),
-                            strategist_model=os.environ.get("SEAHORSE_MODEL_STRATEGIST", "google/gemini-3-flash-preview"),
+                            worker_model=os.environ.get(
+                                "SEAHORSE_MODEL_WORKER",
+                                "openrouter/google/gemini-3-flash-preview"
+                            ),
+                            thinker_model=os.environ.get(
+                                "SEAHORSE_MODEL_THINKER",
+                                "openrouter/google/gemini-3-flash-preview"
+                            ),
+                            strategist_model=os.environ.get(
+                                "SEAHORSE_MODEL_STRATEGIST",
+                                "openrouter/google/gemini-3-flash-preview"
+                            ),
                         )
                         local_planner = ReActPlanner(llm=internal_router)
                         response = await local_planner.run(request)
 
             except Exception as e:
-                logger.error("Failed to connect to Rust Router: %s. Falling back to internal planner…", e)
+                logger.error(
+                    "Failed to connect to Rust Router: %s. Falling back to internal planner…", e
+                )
                 # Fallback to local planner if router is down
                 from seahorse_ai.planner import ReActPlanner
                 from seahorse_ai.router import ModelRouter
                 internal_router = ModelRouter(
-                    worker_model=os.environ.get("SEAHORSE_MODEL_WORKER", "google/gemini-3-flash-preview"),
-                    thinker_model=os.environ.get("SEAHORSE_MODEL_THINKER", "google/gemini-3-flash-preview"),
-                    strategist_model=os.environ.get("SEAHORSE_MODEL_STRATEGIST", "google/gemini-3-flash-preview"),
+                    worker_model=os.environ.get(
+                        "SEAHORSE_MODEL_WORKER", "openrouter/google/gemini-3-flash-preview"
+                    ),
+                    thinker_model=os.environ.get(
+                        "SEAHORSE_MODEL_THINKER", "openrouter/google/gemini-3-flash-preview"
+                    ),
+                    strategist_model=os.environ.get(
+                        "SEAHORSE_MODEL_STRATEGIST", "openrouter/google/gemini-3-flash-preview"
+                    ),
                 )
                 local_planner = ReActPlanner(llm=internal_router)
                 response = await local_planner.run(request)
             finally:
                 typing_task.cancel()
-                try:
+                with contextlib.suppress(asyncio.CancelledError):
                     await typing_task
-                except asyncio.CancelledError:
-                    pass
 
             self._history[user_id].append(Message(role="user", content=text))
             self._history[user_id].append(Message(role="assistant", content=response.content))
@@ -230,20 +276,22 @@ class TelegramAdapter:
                 for path in response.image_paths:
                     if os.path.exists(path):
                         try:
-                            await context.bot.send_photo(
-                                chat_id=chat_id,
-                                photo=open(path, 'rb'),
-                                caption=content if len(content) < 1024 else None,
-                                parse_mode=ParseMode.MARKDOWN
-                            )
+                            with open(path, "rb") as photo:
+                                await context.bot.send_photo(
+                                    chat_id=chat_id,
+                                    photo=photo,
+                                    caption=content if len(content) < 1024 else None,
+                                    parse_mode=ParseMode.MARKDOWN,
+                                )
                         except Exception as e:
                             if "Can't parse entities" in str(e):
                                 logger.warning("Telegram: Photo caption Markdown failed, falling back")
-                                await context.bot.send_photo(
-                                    chat_id=chat_id,
-                                    photo=open(path, 'rb'),
-                                    caption=content if len(content) < 1024 else None
-                                )
+                                with open(path, "rb") as photo:
+                                    await context.bot.send_photo(
+                                        chat_id=chat_id,
+                                        photo=photo,
+                                        caption=content if len(content) < 1024 else None,
+                                    )
                             else:
                                 raise e
                         
@@ -266,8 +314,10 @@ class TelegramAdapter:
             )
 
         except Exception as e:
-            logger.error("Error processing Telegram message: %s", e)
+            logger.exception("Error processing Telegram input in %s:", agent_id)
             clean_error = str(e).split(":")[0]
+            # Escape error text to avoid Markdown issues in error reporting
+            clean_error = clean_error.replace("_", "\\_").replace("*", "\\*").replace("`", "\\`")
             await context.bot.send_message(
                 chat_id=chat_id, 
                 text=f"❌ ผมพบปัญหาขัดข้องชั่วคราว: {clean_error}"
@@ -297,10 +347,10 @@ class TelegramAdapter:
                 parse_mode=ParseMode.MARKDOWN
             )
             
-            # Simulate trigger
-            update.message = query.message
-            update.message.text = choice
-            await self.handle_message(update, context)
+            # Simulate trigger without modifying update.message
+            user_id = update.effective_user.id if update.effective_user else chat_id
+            agent_id = f"telegram_{user_id}"
+            await self._process_text_input(update, context, choice, chat_id, user_id, agent_id)
 
     async def send_proactive_alert(self, data: dict[str, object]) -> None:
         """Send a proactive alert to any configured chat."""
@@ -328,25 +378,27 @@ class TelegramAdapter:
             for path in image_paths:
                 if os.path.exists(path):
                     try:
-                        await bot.send_photo(
-                            chat_id=chat_id, 
-                            photo=open(path, 'rb'), 
-                            caption=message_content, 
-                            parse_mode=ParseMode.MARKDOWN
-                        )
+                        with open(path, "rb") as photo:
+                            await bot.send_photo(
+                                chat_id=chat_id,
+                                photo=photo,
+                                caption=message_content,
+                                parse_mode=ParseMode.MARKDOWN,
+                            )
                     except Exception as e:
                         if "Can't parse entities" in str(e):
-                            await bot.send_photo(
-                                chat_id=chat_id, 
-                                photo=open(path, 'rb'), 
-                                caption=message_content
-                            )
+                            with open(path, "rb") as photo:
+                                await bot.send_photo(
+                                    chat_id=chat_id, photo=photo, caption=message_content
+                                )
                         else:
                             raise e
                     return
             
             try:
-                await bot.send_message(chat_id=chat_id, text=message_content, parse_mode=ParseMode.MARKDOWN)
+                await bot.send_message(
+                    chat_id=chat_id, text=message_content, parse_mode=ParseMode.MARKDOWN
+                )
             except Exception as e:
                 if "Can't parse entities" in str(e):
                     await bot.send_message(chat_id=chat_id, text=message_content)
@@ -356,6 +408,7 @@ class TelegramAdapter:
             logger.error("Failed to send Telegram proactive alert: %s", e)
 
 def main() -> None:
+    """Launch the Telegram bot application."""
     token = os.environ.get("TELEGRAM_BOT_TOKEN")
     if not token:
         logger.error("TELEGRAM_BOT_TOKEN not found.")
@@ -364,12 +417,26 @@ def main() -> None:
     adapter = TelegramAdapter(router_url=os.environ.get("SEAHORSE_ROUTER_URL", "http://localhost:8000"))
 
     router = ModelRouter(
-        worker_model=os.environ.get("SEAHORSE_MODEL_WORKER", "google/gemini-3-flash-preview"),
-        thinker_model=os.environ.get("SEAHORSE_MODEL_THINKER", "google/gemini-3-flash-preview"),
-        strategist_model=os.environ.get("SEAHORSE_MODEL_STRATEGIST", "google/gemini-3-flash-preview"),
+        worker_model=os.environ.get(
+            "SEAHORSE_MODEL_WORKER", "openrouter/google/gemini-3-flash-preview"
+        ),
+        thinker_model=os.environ.get(
+            "SEAHORSE_MODEL_THINKER", "openrouter/google/gemini-3-flash-preview"
+        ),
+        strategist_model=os.environ.get(
+            "SEAHORSE_MODEL_STRATEGIST", "openrouter/google/gemini-3-flash-preview"
+        ),
     )
 
-    app = ApplicationBuilder().token(token).build()
+    app = (
+        ApplicationBuilder()
+        .token(token)
+        .connect_timeout(60.0)
+        .read_timeout(360.0)
+        .write_timeout(120.0)
+        .pool_timeout(120.0)
+        .build()
+    )
 
     app.add_handler(TypeHandler(Update, adapter.handle_update), group=-1)
 
@@ -384,7 +451,7 @@ def main() -> None:
     watcher = AnomalyWatcher(llm_backend=router)
     watcher._notify = adapter.send_proactive_alert
     
-    async def post_init(application) -> None:
+    async def post_init(application: any) -> None:
         interval = int(os.environ.get("SEAHORSE_ALERTS_INTERVAL", "300"))
         asyncio.create_task(watcher.start(interval_seconds=interval))
         logger.info("Telegram: AnomalyWatcher task started via post_init.")
@@ -393,10 +460,13 @@ def main() -> None:
 
     logger.info("Telegram bot starting via run_polling...")
     
-    app.run_polling(allowed_updates=[
-        "message", "channel_post", "callback_query", 
-        "edited_message", "edited_channel_post"
-    ])
+    app.run_polling(
+        allowed_updates=[
+            "message", "channel_post", "callback_query", 
+            "edited_message", "edited_channel_post"
+        ],
+        bootstrap_retries=5
+    )
 
 if __name__ == "__main__":
     main()

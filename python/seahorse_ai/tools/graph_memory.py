@@ -6,7 +6,9 @@ from __future__ import annotations
 
 import logging
 import os
+
 from neo4j import AsyncGraphDatabase
+
 from seahorse_ai.tools.base import tool
 
 logger = logging.getLogger(__name__)

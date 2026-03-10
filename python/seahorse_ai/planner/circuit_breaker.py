@@ -1,6 +1,6 @@
+import json
 import logging
 import os
-import json
 import time
 
 logger = logging.getLogger(__name__)
@@ -19,6 +19,7 @@ class CircuitBreaker:
     TOOL_ERROR_NUDGE_THRESHOLD: int = 2
 
     def __init__(self) -> None:
+        """Initialize parameters for tracking consecutive and per-tool errors."""
         self._consecutive_errors: int = 0
         self._tool_errors: dict[str, int] = {}
 
@@ -62,6 +63,7 @@ class CircuitBreaker:
 
     @property
     def consecutive_errors(self) -> int:
+        """Return global consecutive error count."""
         return self._consecutive_errors
 
 
@@ -79,7 +81,10 @@ async def record_global_failure() -> None:
             await conn.execute("""
                 UPDATE seahorse_system_status 
                 SET value = jsonb_set(
-                    jsonb_set(value, '{fail_count}', ((value->>'fail_count')::int + 1)::text::jsonb),
+                    jsonb_set(
+                        value, '{fail_count}', 
+                        ((value->>'fail_count')::int + 1)::text::jsonb
+                    ),
                     '{last_fail}', to_jsonb(EXTRACT(EPOCH FROM NOW()))
                 )
                 WHERE key = 'circuit_breaker';
@@ -100,7 +105,9 @@ async def is_system_healthy() -> bool:
     try:
         conn = await asyncpg.connect(pg_uri)
         try:
-            row = await conn.fetchrow("SELECT value FROM seahorse_system_status WHERE key = 'circuit_breaker';")
+            row = await conn.fetchrow(
+                "SELECT value FROM seahorse_system_status WHERE key = 'circuit_breaker';"
+            )
             if not row:
                 return True
             
@@ -111,15 +118,19 @@ async def is_system_healthy() -> bool:
             fail_count = val.get('fail_count', 0)
             last_fail = val.get('last_fail')
             
-            # Trip if more than 5 failures in the last 60 seconds
-            if fail_count >= 5 and last_fail:
+            # Trip if more than 10 failures in the last 60 seconds
+            if fail_count >= 10 and last_fail:
                 now = time.time()
                 if now - last_fail < 60:
                     logger.critical("Global Circuit Breaker TRIPPED (fail_count=%d)", fail_count)
                     return False
                 else:
                     # Auto-reset if old
-                    await conn.execute("UPDATE seahorse_system_status SET value = '{\"status\": \"CLOSED\", \"fail_count\": 0, \"last_fail\": null}' WHERE key = 'circuit_breaker';")
+                    await conn.execute(
+                        "UPDATE seahorse_system_status SET value = "
+                        "'{\"status\": \"CLOSED\", \"fail_count\": 0, \"last_fail\": null}' "
+                        "WHERE key = 'circuit_breaker';"
+                    )
             
             return True
         finally:

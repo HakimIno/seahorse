@@ -30,6 +30,7 @@ class LLMClient:
     """Async LLM client wrapping LiteLLM for provider-agnostic access."""
 
     def __init__(self, config: LLMConfig) -> None:
+        """Initialize LLM client with configuration."""
         self._config = config
 
     async def complete(
@@ -45,7 +46,10 @@ class LLMClient:
         from seahorse_ai.planner.circuit_breaker import is_system_healthy
         if not await is_system_healthy():
             logger.critical("LLM call blocked by Global Circuit Breaker — System is in Safe Mode")
-            raise RuntimeError("System is temporarily in Safe Mode due to multiple LLM failures. Please try again in 1 minute.")
+            raise RuntimeError(
+                "System is temporarily in Safe Mode due to multiple LLM failures. "
+                "Please try again in 1 minute."
+            )
 
         model = (
             self._config.thinker_model
@@ -98,7 +102,7 @@ class LLMClient:
         backoff: float = 1.0,
         tier: str = "worker",
     ) -> dict:
-        """Internal completion with exponential backoff retries on transient errors."""
+        """Perform internal completion with exponential backoff retries on transient errors."""
         from seahorse_ai.planner.circuit_breaker import is_system_healthy
         if not await is_system_healthy():
             logger.critical("LLM call blocked by Global Circuit Breaker — System is in Safe Mode")
@@ -109,7 +113,7 @@ class LLMClient:
             if tier in ("thinker", "strategist")
             else self._config.model
         )
-        timeout_sec = 120.0 if tier in ("thinker", "strategist") else 30.0
+        timeout_sec = 120.0 if tier in ("thinker", "strategist") else 60.0
         kwargs: dict = {
             "model": model,
             "messages": [m.model_dump(exclude_none=True) for m in messages],

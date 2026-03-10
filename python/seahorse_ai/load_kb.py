@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""seahorse-load-kb — Pre-load a knowledge base directory into Seahorse RAG memory.
+r"""seahorse-load-kb — Pre-load a knowledge base directory into Seahorse RAG memory.
 
 Usage::
 
@@ -22,7 +22,6 @@ from __future__ import annotations
 import argparse
 import asyncio
 import logging
-import os
 import sys
 from pathlib import Path
 

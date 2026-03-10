@@ -26,6 +26,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class StructuredIntent:
     """Result of structured intent classification."""
+
     intent: str = "GENERAL"            # GENERAL|PUBLIC_REALTIME|PRIVATE_MEMORY|DATABASE
     action: str = "CHAT"               # STORE|QUERY|UPDATE|DELETE|SEARCH_WEB|SQL|GREET|CHAT|CLARIFY
     entity: str | None = None          # The key data to store/search
@@ -140,7 +141,8 @@ async def classify_structured_intent(
         logger.warning("structured_intent parse error: %s", exc)
         # Fallback: use keyword-based classification
         from seahorse_ai.prompts.intent import (
-            MEMORY_KEYWORDS, REALTIME_KEYWORDS,
+            MEMORY_KEYWORDS,
+            REALTIME_KEYWORDS,
         )
         for kw in MEMORY_KEYWORDS:
             if kw.lower() in q_lower:
@@ -190,9 +192,13 @@ class FastPathRouter:
         import time
         start_t = time.perf_counter()
 
-        if si.action in ("GREET", "CHAT"):
-            # Use the fast, free LLM tier to generate a natural conversational response
+        if si.action == "GREET":
             return await self._handle_conversational(prompt, history, start_t)
+
+        if si.action == "CHAT":
+            if si.complexity <= 2:
+                return await self._handle_conversational(prompt, history, start_t)
+            return None  # Complexity 3+ → ReAct or Auto-Seahorse
 
         if si.action == "STORE" and si.entity:
             return await self._handle_store(si.entity, agent_id)
@@ -205,6 +211,7 @@ class FastPathRouter:
     async def _handle_conversational(self, prompt: str, history: list[Message] | None, start_t: float) -> AgentResponse:
         """Process greetings and simple chat queries fully via the fast model."""
         import time
+
         from seahorse_ai.schemas import Message
         
         msgs = [

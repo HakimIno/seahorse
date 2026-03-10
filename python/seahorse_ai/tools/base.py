@@ -44,17 +44,20 @@ def tool(description: str) -> Callable[[F], F]:
 
 class ToolError(Exception):
     """Base class for tool-related errors."""
+
     def __init__(self, message: str, is_system_error: bool = False) -> None:
         super().__init__(message)
         self.is_system_error = is_system_error
 
 class ToolInputError(ToolError):
     """Error caused by invalid model inputs/arguments."""
+
     def __init__(self, message: str) -> None:
         super().__init__(message, is_system_error=False)
 
 class ToolSystemError(ToolError):
     """Error caused by internal code bugs or environment issues."""
+
     def __init__(self, message: str) -> None:
         super().__init__(message, is_system_error=True)
 
