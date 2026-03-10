@@ -23,6 +23,7 @@ from seahorse_ai.tools.memory import (
     memory_search,
     memory_store,
 )
+from seahorse_ai.tools.auto_seahorse import execute_auto_seahorse
 from seahorse_ai.tools.python_interpreter import python_interpreter
 from seahorse_ai.tools.strategy_engine import war_room
 from seahorse_ai.tools.viz import create_custom_chart
@@ -56,6 +57,7 @@ __all__ = [
     "calculate_margin",
     "create_custom_chart",
     "forecast_sales",
+    "execute_auto_seahorse",
 ]
 
 
@@ -63,6 +65,7 @@ def make_default_registry() -> SeahorseToolRegistry:
     """Return a SeahorseToolRegistry pre-loaded with all built-in tools."""
     registry = SeahorseToolRegistry()
     for fn in (
+        execute_auto_seahorse,
         web_search,
         python_interpreter,
         list_files,

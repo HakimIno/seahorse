@@ -33,16 +33,13 @@ class MemoryRecorder:
 
     SUMMARY_SYSTEM_PROMPT = (
         "You are a background memory worker. "
-        "Analyze the conversation below and extract KEY FACTS, USER PREFERENCES, "
-        "and IMPORTANT CONTEXT that should be remembered for future interactions. "
-        "CRITICAL: Each fact MUST be independent. "
-        "For each fact, assign an 'importance' level from 1 to 5: "
-        "5 = Critical/Permanent (e.g. name, birthday), "
-        "3 = Standard preference (e.g. food, hobbies), "
-        "1 = Contextual/Temporary (e.g. today's plan). "
-        "Format: [importance] Fact text. "
-        "Example:\n- [5] The user's name is Kim.\n- [3] The user likes Thai Tea.\n"
-        "If no new facts are found, return 'NONE'.\n\n"
+        "Analyze the conversation below and extract KEY FACTS and RELATIONSHIPS. "
+        "1. ENTITY RELATIONSHIPS: Extract triples in the format [REL] (Subject) --[RELATION]--> (Object). "
+        "   Example: [REL] (Somchai) --[WORKS_AT]--> (Apple). "
+        "2. ATOMIC FACTS: Extract user preferences or general knowledge. "
+        "   Assign importance (1-5). Format: [importance] Fact text. "
+        "   Example: [5] The user's name is Kim. "
+        "If no new information is found, return 'NONE'.\n\n"
         "### Conversation History ###\n"
     )
 
@@ -88,14 +85,28 @@ class MemoryRecorder:
             if "NONE" in raw.upper() or len(raw.strip()) < 5:
                 return
 
+            storage_tasks = []
             for line in raw.split("\n"):
                 line = line.strip("-* ").strip()
                 if not line or len(line) < 5:
                     continue
-                importance, fact = self._parse_fact_line(line)
-                await self._store_fact(fact, importance, agent_id)
+                
+                if line.startswith("[REL]"):
+                    import re
+                    match = re.search(r"\((.+)\)\s*--\[(.+)\]-->\s*\((.+)\)", line)
+                    if match:
+                        storage_tasks.append(self._tools.call(
+                            "graph_store_triple", 
+                            {"subject": match.group(1), "predicate": match.group(2), "object_entity": match.group(3)}
+                        ))
+                else:
+                    importance, fact = self._parse_fact_line(line)
+                    storage_tasks.append(self._store_fact(fact, importance, agent_id))
 
-            logger.info("memory_recorder: processed facts for agent_id=%s", agent_id)
+            if storage_tasks:
+                await asyncio.gather(*storage_tasks)
+
+            logger.info("memory_recorder: processed %d facts for agent_id=%s", len(storage_tasks), agent_id)
 
         except Exception as exc:  # noqa: BLE001
             logger.error("memory_recorder: failed: %s", exc)
@@ -190,11 +201,14 @@ class MemoryRecorder:
             for marker in self.SPLIT_MARKERS:
                 temp = temp.replace(marker, "SPLIT_TOKEN")
             parts = [p.strip() for p in temp.split("SPLIT_TOKEN") if len(p.strip()) > 3]
-            for part in parts:
-                await self._tools.call(  # type: ignore[union-attr]
+            
+            tasks = [
+                self._tools.call(
                     "memory_store",
                     {"text": part, "importance": importance, "agent_id": agent_id},
-                )
+                ) for part in parts
+            ]
+            await asyncio.gather(*tasks)
         else:
             await self._tools.call(  # type: ignore[union-attr]
                 "memory_store",

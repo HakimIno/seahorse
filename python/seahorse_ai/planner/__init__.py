@@ -84,10 +84,12 @@ class ReActPlanner:
         default_tier: str = "worker",
         step_timeout_seconds: int = 30,
         global_timeout_seconds: int = 120,
+        identity_prompt: str | None = None,
     ) -> None:
         self._llm = llm
         self._tools = tools or self._default_tools()
         self._default_tier = default_tier
+        self._identity_prompt = identity_prompt
 
         # Build sub-components
         self._circuit_breaker = CircuitBreaker()
@@ -167,9 +169,30 @@ class ReActPlanner:
                 )
                 return fast  # Done! 1 LLM call total ⚡
 
+            # ── 2.5 Crew Mode - trigger multi-agent for complex tasks ─────
+            if si.complexity >= 4:
+                logger.info(
+                    "agent.run CROSS-OVER to Auto-Seahorse complexity=%d agent_id=%s",
+                    si.complexity,
+                    request.agent_id,
+                )
+                from seahorse_ai.tools.auto_seahorse import execute_auto_seahorse
+                crew_result = await execute_auto_seahorse(request.prompt)
+                _set_span(span, {"agent.crew_mode": True, "agent.complexity": si.complexity})
+                return AgentResponse(
+                    content=crew_result,
+                    steps=1, # Abstraction level
+                    agent_id=request.agent_id,
+                    elapsed_ms=0, # Calculation delegated
+                )
+
             # ── 3. Build system messages (full ReAct path) ─────────────────
+            sys_prompt = build_system_prompt()
+            if self._identity_prompt:
+                sys_prompt += f"\n\n{self._identity_prompt}"
+                
             messages: list[Message] = [
-                Message(role="system", content=build_system_prompt()),
+                Message(role="system", content=sys_prompt),
             ]
             if request.history:
                 messages.extend(request.history)
@@ -217,7 +240,11 @@ class ReActPlanner:
                 # 7. Final synthesis
                 content = result.content
                 is_data_intent = intent in ("DATABASE", "PRIVATE_MEMORY", "PUBLIC_REALTIME")
-                if not result.terminated and (current_tier == "strategist" or is_data_intent):
+                
+                # OPTIMIZATION: Skip synthesis if response is already "direct" (factual memory)
+                skip_synthesis = getattr(result, "is_direct", False)
+                
+                if not result.terminated and not skip_synthesis and (current_tier == "strategist" or is_data_intent):
                     content = await self._synthesize(
                         messages, content, request.prompt,
                     )
@@ -258,15 +285,13 @@ class ReActPlanner:
             synth_msgs = messages + [
                 Message(role="assistant", content=content),
                 Message(role="user", content=(
-                    "You are an elite business strategy consultant. Summarize the raw data above for the user.\n"
-                    "CRITICAL INSTRUCTIONS:\n"
-                    "1. Respond in a natural, conversational executive tone (Natural Flow).\n"
-                    "2. Avoid rigid or highly structured formats (Do NOT use mandatory headers like '# Summary' or force artificial sections).\n"
-                    "3. Weave high-level analytical logic seamlessly into the narrative:\n"
-                    "   - Identify non-obvious correlations or trends in the data.\n"
-                    "   - If you spot risks or golden opportunities, integrate proactive recommendations naturally into the conversation.\n"
-                    "4. Be concise and logically structured. Use bullet points ONLY when absolutely necessary. Minimize emojis (max 2 per response).\n"
-                    "5. IMPORTANT: You MUST reply in the same language the user used to ask the question (e.g., if the user asked in Thai, reply entirely in Thai)."
+                    "Summarize the information above for the user in a helpful, natural, and conversational tone.\n"
+                    "RULES:\n"
+                    "1. BE CONCISE. If the answer is already clear, do not add fluff.\n"
+                    "2. Avoid rigid business jargon unless specifically asked for analysis.\n"
+                    "3. If you see interesting patterns or risks, mention them briefly and naturally.\n"
+                    "4. Minimize emojis (max 1-2). Use bullet points ONLY for lists of 3+ items.\n"
+                    "5. IMPORTANT: You MUST reply in the same language the user used (Thai for Thai, English for English)."
                 )),
             ]
             result = await self._llm.complete(synth_msgs, tier="strategist")

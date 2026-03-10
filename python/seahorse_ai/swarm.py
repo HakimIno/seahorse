@@ -9,7 +9,6 @@ Fixed issues (Phase 2):
 """
 from __future__ import annotations
 
-import asyncio
 import logging
 
 from seahorse_ai.planner import LLMBackend, ReActPlanner, ToolRegistry
@@ -28,68 +27,142 @@ class SwarmAgent:
         self.planner = planner
 
 
+class CrewAgent(SwarmAgent):
+    """A specialized agent with a role, goal, and backstory (CrewAI-inspired)."""
+
+    def __init__(
+        self,
+        name: str,
+        role: str,
+        goal: str,
+        backstory: str,
+        planner: ReActPlanner,
+    ) -> None:
+        super().__init__(name, description=f"{role}: {goal}", planner=planner)
+        self.role = role
+        self.goal = goal
+        self.backstory = backstory
+
+    def build_system_prompt_extension(self) -> str:
+        """Inject Role/Goal/Backstory into the system prompt."""
+        return (
+            f"\n\n## Your Identity\n"
+            f"Role: {self.role}\n"
+            f"Goal: {self.goal}\n"
+            f"Backstory: {self.backstory}\n"
+        )
+
+
+class SeahorseTask:
+    """A specific objective assigned to an agent."""
+
+    def __init__(
+        self,
+        description: str,
+        expected_output: str,
+        agent_name: str,
+        context_from_tasks: list[str] | None = None,
+    ) -> None:
+        self.description = description
+        self.expected_output = expected_output
+        self.agent_name = agent_name
+        self.context_from_tasks = context_from_tasks or []
+        self.output: str | None = None
+
+
+class SeahorseCrew:
+    """Orchestrates a list of tasks performed by a team of CrewAgents."""
+
+    def __init__(self, agents: list[CrewAgent], tasks: list[SeahorseTask]) -> None:
+        self.agents = {a.name: a for a in agents}
+        self.tasks = tasks
+
+    async def kickoff(self) -> str:
+        """Execute all tasks in sequence, passing context between them."""
+        overall_context = ""
+        last_output = ""
+
+        for i, task in enumerate(self.tasks):
+            agent = self.agents.get(task.agent_name)
+            if not agent:
+                logger.error("Crew: Agent '%s' not found for task %d", task.agent_name, i)
+                continue
+
+            # Build specialized prompt for this task
+            context_snippet = (
+                f"\n\nContext from previous steps:\n{overall_context}"
+                if overall_context else ""
+            )
+            
+            task_prompt = (
+                f"TASK DESCRIPTION: {task.description}\n"
+                f"EXPECTED OUTPUT: {task.expected_output}\n"
+                f"{context_snippet}"
+            )
+
+            logger.info("Crew: Agent '%s' starting task: %s", agent.name, task.description[:50])
+            
+            # Temporary override of system prompt via history injection if needed
+            # For now, we rely on the agent's planner already being configured
+            request = AgentRequest(
+                prompt=task_prompt,
+                agent_id=f"crew_{agent.name}_task_{i}",
+            )
+            
+            response = await agent.planner.run(request)
+            last_output = response.content
+            task.output = last_output
+            
+            # Accumulate context
+            overall_context += f"\n--- Result of Task {i} ({agent.role}) ---\n{last_output}\n"
+
+        return last_output
+
 class SwarmOrchestrator:
     """Manages a collection of agents and provides a unified entry point."""
 
     def __init__(self, llm: LLMBackend) -> None:
         self._llm = llm
-        self._agents: dict[str, SwarmAgent] = {}
+        self._agents: dict[str, CrewAgent] = {}
         self._shared_registry = SeahorseToolRegistry()
-        self._master: ReActPlanner | None = None  # Cached — not re-created per request
+        self._master: ReActPlanner | None = None
 
-    def add_agent(self, name: str, description: str, tools: ToolRegistry) -> None:
-        """Register a new specialized agent in the swarm."""
-        planner = ReActPlanner(llm=self._llm, tools=tools)
-        agent = SwarmAgent(name, description, planner)
+    def add_agent(
+        self,
+        name: str,
+        role: str,
+        goal: str,
+        backstory: str,
+        tools: ToolRegistry,
+    ) -> None:
+        """Register a new specialized CrewAgent in the swarm."""
+        # Inject backstory into a custom prompt for this planner's system message
+        agent_identity = (
+            f"\n\n## Your Identity\n"
+            f"Role: {role}\n"
+            f"Goal: {goal}\n"
+            f"Backstory: {backstory}\n"
+        )
+        planner = ReActPlanner(llm=self._llm, tools=tools, identity_prompt=agent_identity)
+        agent = CrewAgent(name, role, goal, backstory, planner)
         self._agents[name] = agent
 
-        # FIX: Capture name and planner by value using default args.
-        # Without this, all closures would share the same (last) loop variables.
-        @tool(f"Delegate complex {name} tasks to this specialized agent. Useful for: {description}")
-        async def delegate_tool(query: str, _name: str = name, _planner: ReActPlanner = planner) -> str:
-            logger.info("Swarm: delegating to %s", _name)
-            request = AgentRequest(prompt=query, agent_id=f"swarm_{_name}")
-            response = await _planner.run(request)
+        @tool(f"Delegate to {name} ({role}). Goal: {goal}")
+        async def delegate_tool(query: str, _name: str = name, _agent: CrewAgent = agent) -> str:
+            logger.info("Crew: delegating to %s", _name)
+            request = AgentRequest(prompt=query, agent_id=f"crew_{_name}")
+            response = await _agent.planner.run(request)
             return response.content
 
         self._shared_registry.register(delegate_tool)
-        # Invalidate cached master so it picks up the new tool
         self._master = None
-        logger.info("Swarm: added agent '%s'", name)
+        logger.info("Crew: added agent '%s' as %s", name, role)
 
     async def run(self, prompt: str) -> str:
-        """Run the main 'Master' agent which routes to specialists.
-
-        The master planner is cached and reused across requests.
-        It is invalidated whenever a new agent is added.
-        """
+        """Run the main coordinator."""
         if self._master is None:
             self._master = ReActPlanner(llm=self._llm, tools=self._shared_registry)
-            logger.info("Swarm: master planner created (agents=%d)", len(self._agents))
-
+        
         request = AgentRequest(prompt=prompt)
         response = await self._master.run(request)
         return response.content
-
-    async def broadcast(self, prompt: str) -> dict[str, str]:
-        """Send the same prompt to ALL agents in parallel and gather responses.
-
-        Useful for Tier 3 'Cognitive Synthesis' where different perspectives are needed.
-        """
-        logger.info("Swarm: broadcasting prompt to %d agents", len(self._agents))
-
-        agent_names = list(self._agents.keys())
-        tasks = [
-            self._agents[name].planner.run(AgentRequest(prompt=prompt))
-            for name in agent_names
-        ]
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-
-        return {
-            name: (res.content if not isinstance(res, Exception) else f"Error: {res}")
-            for name, res in zip(agent_names, results, strict=False)
-        }
-
-    @property
-    def agent_names(self) -> list[str]:
-        return list(self._agents.keys())

@@ -43,3 +43,4 @@ class AgentResponse(BaseModel):
     elapsed_ms: int = 0
     terminated: bool = False
     termination_reason: str | None = None
+    is_direct: bool = False  # If True, skip final strategist synthesis

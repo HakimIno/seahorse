@@ -16,6 +16,7 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass
+from typing import Any
 
 from seahorse_ai.schemas import AgentResponse, Message
 
@@ -29,6 +30,7 @@ class StructuredIntent:
     action: str = "CHAT"               # STORE|QUERY|UPDATE|DELETE|SEARCH_WEB|SQL|GREET|CHAT|CLARIFY
     entity: str | None = None          # The key data to store/search
     needs_clarification: bool = False   # True if ambiguous
+    complexity: int = 3                # 1-5 (1: Easy/Greetings, 5: Multi-agent project)
     raw_category: str = ""             # Legacy category for compatibility
 
 
@@ -45,21 +47,19 @@ Fields:
 - "action": one of STORE, QUERY, UPDATE, DELETE, SEARCH_WEB, SQL, GREET, CHAT, CLARIFY
 - "entity": the key data to store/search/update (string or null)
 - "needs_clarification": true if the request is ambiguous
+- "complexity": 1-5 (Integer)
+    - 1-2: Simple facts, greetings, or basic storage.
+    - 3: Complex tool usage, analysis, or logic (Single Agent).
+    - 4-5: Multi-step objectives, deep research, or projects (Specialized Crew required).
 
 Rules:
-- "Save X" / "Remember X" → {{"intent":"PRIVATE_MEMORY","action":"STORE","entity":"X"}}
-- "How much is X"
-  → {{"intent":"PRIVATE_MEMORY","action":"QUERY","entity":"X price"}}
-- "Change X price to Y"
-  → {{"intent":"PRIVATE_MEMORY","action":"UPDATE","entity":"X price Y"}}
-- "Change to Y" (no subject) → {{"action":"CLARIFY","needs_clarification":true}}
-- "Gold price today" → {{"intent":"PUBLIC_REALTIME","action":"SEARCH_WEB","entity":"gold price today"}}
-- "Latest news" → {{"intent":"PUBLIC_REALTIME","action":"SEARCH_WEB","entity":"latest news"}}
-- "Hi" / "Hello" → {{"intent":"GENERAL","action":"GREET"}}
-- General questions / coding → {{"intent":"GENERAL","action":"CHAT"}}
-- Database queries / "schema" → {{"intent":"DATABASE","action":"SQL"}}
-- "Draw a chart", "Create a dashboard" \
-→ {{"intent":"DATABASE","action":"VISUALIZE","entity":"chart request"}}
+- Simple greetings/casual talk → {{"action":"GREET","complexity":1}}
+- "Save/Remember X" → {{"action":"STORE","complexity":2}}
+- "What is X" (simple facts) → {{"action":"QUERY","complexity":2}}
+- Database/SQL queries → {{"action":"SQL","complexity":3}}
+- "Research X", "Summarize X", "Write a report about X", "Explain complex Y" 
+  → **STRICTLY** {{"action":"CHAT","complexity":4}} or 5.
+- Multi-step requests or deep analysis → {{"complexity":5}}
 
 
 Conversation history (if any):
@@ -111,32 +111,22 @@ async def classify_structured_intent(
         result = await llm_backend.complete(  # type: ignore[union-attr]
             [Message(role="user", content=prompt)], tier="worker"
         )
+        logger.info("structured_intent raw result: %r", result)
         
-        # Handle both dict and string results (for mocks vs real API)
+        # Handle both dict and string results
         if isinstance(result, dict):
-            # If mock returned raw response data, use it
-            if "content" in result and not isinstance(result["content"], str):
-                 data = result["content"]
-            elif "intent" in result:
-                 data = result
-            else:
-                 text = str(result.get("content", ""))
-                 data = json.loads(text) if text.strip().startswith("{") else {}
+            data = result.get("content", result)
+            if isinstance(data, str):
+                data = _robust_json_load(data)
         else:
-            text = str(result).strip()
-            # Strip markdown code fences if present
-            if text.startswith("```"):
-                text = text.split("\n", 1)[1] if "\n" in text else text[3:]
-            if text.endswith("```"):
-                text = text[:-3]
-            text = text.strip()
-            data = json.loads(text)
+            data = _robust_json_load(str(result))
 
         si = StructuredIntent(
             intent=data.get("intent", "GENERAL").upper(),
             action=data.get("action", "CHAT").upper(),
             entity=data.get("entity"),
             needs_clarification=data.get("needs_clarification", False),
+            complexity=int(data.get("complexity", 3)),
         )
         # Set legacy category
         si.raw_category = si.intent
@@ -335,3 +325,17 @@ def _split_entities(entity: str) -> list[str]:
     parts = re.split(r",\s+|\sและ\s|\sand\s", entity, flags=re.IGNORECASE)
     items = [p.strip() for p in parts if p.strip() and len(p.strip()) > 3]
     return items if items else [entity]
+
+
+def _robust_json_load(text: str) -> dict[str, Any]:
+    """Extract and parse JSON from text, handling markdown fences or preamble."""
+    text = text.strip()
+    # Find the first '{' and last '}'
+    start = text.find("{")
+    end = text.rfind("}")
+    if start != -1 and end != -1 and end > start:
+        try:
+            return json.loads(text[start : end + 1])
+        except json.JSONDecodeError:
+            pass
+    return {}
