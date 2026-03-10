@@ -11,6 +11,7 @@
 pub mod agent;
 pub mod config;
 pub mod error;
+pub mod fast_path;
 pub mod graph;
 pub mod memory;
 pub mod scheduler;
@@ -21,6 +22,7 @@ pub use agent::RigAgent;
 pub use config::Config;
 pub use error::{CoreError, CoreResult};
 pub use memory::AgentMemory;
+pub use fast_path::FastPath;
 pub use scheduler::{AgentScheduler, AgentTask};
 pub use worker::{spawn_worker_loop, PythonRunner};
 
@@ -32,6 +34,7 @@ pub struct SeahorseCore {
     pub config: Config,
     pub memory: Arc<AgentMemory>,
     pub scheduler: Arc<AgentScheduler>,
+    pub fast_path: Arc<FastPath>,
 }
 
 impl SeahorseCore {
@@ -45,10 +48,16 @@ impl SeahorseCore {
         ));
 
         let (scheduler, task_rx) = AgentScheduler::new(256);
+        let fast_path = Arc::new(FastPath::new(
+            config.fast_path_model.clone(),
+            config.openrouter_api_key.clone(),
+        ));
+
         let core = Self {
             config,
             memory,
             scheduler: Arc::new(scheduler),
+            fast_path,
         };
 
         info!("SeahorseCore initialised");

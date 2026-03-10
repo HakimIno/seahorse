@@ -289,7 +289,7 @@ class ReActPlanner:
         try:
             conn = await asyncpg.connect(pg_uri)
             try:
-                hist_json = json.dumps([h.to_dict() for h in history]) if history else None
+                hist_json = json.dumps([h.model_dump() for h in history]) if history else None
                 await conn.execute("""
                     INSERT INTO seahorse_executions (id, agent_id, prompt, history, status)
                     VALUES ($1, $2, $3, $4, 'RUNNING')

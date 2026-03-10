@@ -32,7 +32,13 @@ pub fn spawn_worker_loop(
                 // Clone the sender before calling into Python
                 let token_tx = task.response_tx.clone();
 
-                let result = runner.run(&task.id, &task.prompt, token_tx);
+                let result = runner.run(
+                    &task.id,
+                    &task.agent_id,
+                    &task.prompt,
+                    &task.history,
+                    token_tx,
+                );
 
                 match result {
                     Ok(full_response) => {

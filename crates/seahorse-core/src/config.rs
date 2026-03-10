@@ -19,6 +19,10 @@ pub struct Config {
     pub wasm_fuel_limit: u64,
     /// Wasmtime memory limit in MB (default 64MB)
     pub wasm_memory_limit: usize,
+    /// Fast Path LLM model (e.g. google/gemini-2.0-flash-lite-preview-02-05)
+    pub fast_path_model: String,
+    /// OpenRouter API Key for Fast Path
+    pub openrouter_api_key: String,
 }
 
 impl Config {
@@ -33,6 +37,9 @@ impl Config {
             http_port: env_u16("SEAHORSE_HTTP_PORT", 8080)?,
             wasm_fuel_limit: env_u64("SEAHORSE_WASM_FUEL_LIMIT", 10_000_000),
             wasm_memory_limit: env_usize("SEAHORSE_WASM_MEMORY_LIMIT", 64),
+            fast_path_model: std::env::var("SEAHORSE_FAST_PATH_MODEL")
+                .unwrap_or_else(|_| "google/gemini-2.0-flash-lite-preview-02-05".to_string()),
+            openrouter_api_key: std::env::var("OPENROUTER_API_KEY").unwrap_or_default(),
         })
     }
 }

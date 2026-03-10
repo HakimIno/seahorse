@@ -33,7 +33,9 @@ impl PythonRunner for PyPlannerRunner {
     fn run(
         &self,
         task_id: &str,
+        agent_id: &str,
         prompt: &str,
+        history: &[seahorse_core::scheduler::Message],
         token_tx: mpsc::Sender<String>,
     ) -> CoreResult<String> {
         info!(task_id, model = %self.model, "PyPlannerRunner::run");
@@ -41,7 +43,9 @@ impl PythonRunner for PyPlannerRunner {
         let model = self.model.clone();
         let max_steps = self.max_steps;
         let prompt = prompt.to_owned();
+        let agent_id = agent_id.to_owned();
         let task_id = task_id.to_owned();
+        let history = history.to_vec();
 
         // All PyO3 work must happen inside with_gil — coroutine objects are not Send.
         Python::with_gil(|py| -> CoreResult<String> {
@@ -116,14 +120,29 @@ impl PythonRunner for PyPlannerRunner {
                 .map_err(|e| CoreError::Config(format!("ReActPlanner(): {e}")))?;
 
             // ── AgentRequest ─────────────────────────────────────────────
+            let history_py = pyo3::types::PyList::empty_bound(py);
+            for m in history {
+                let m_dict = PyDict::new_bound(py);
+                m_dict.set_item("role", m.role).ok();
+                m_dict.set_item("content", m.content).ok();
+                
+                let m_obj = schemas_mod
+                    .getattr("Message")
+                    .map_err(|e| CoreError::Config(format!("Message attr: {e}")))?
+                    .call((), Some(&m_dict))
+                    .map_err(|e| CoreError::Config(format!("Message(): {e}")))?;
+                history_py.append(m_obj).ok();
+            }
+
+            let request_kwargs = PyDict::new_bound(py);
+            request_kwargs.set_item("prompt", &prompt).ok();
+            request_kwargs.set_item("agent_id", &agent_id).ok();
+            request_kwargs.set_item("history", history_py).ok();
+
             let request = schemas_mod
                 .getattr("AgentRequest")
                 .map_err(|e| CoreError::Config(format!("AgentRequest attr: {e}")))?
-                .call((), Some(&{
-                    let kw = PyDict::new_bound(py);
-                    kw.set_item("prompt", &prompt).ok();
-                    kw
-                }))
+                .call((), Some(&request_kwargs))
                 .map_err(|e| CoreError::Config(format!("AgentRequest(): {e}")))?;
 
             // ── coroutine ────────────────────────────────────────────────

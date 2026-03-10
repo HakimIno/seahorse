@@ -41,6 +41,9 @@ opentelemetry-semantic-conventions = "0.15"
 once_cell   = "1"
 bytes       = "1"
 uuid        = { version = "1", features = ["v4"] }
+dotenvy     = "0.15"
+# HTTP Client
+reqwest     = { version = "0.11", features = ["json"] }
 # PyO3 (FFI)
 pyo3        = { version = "0.21", features = ["abi3-py311", "auto-initialize"] }
 # Vector search

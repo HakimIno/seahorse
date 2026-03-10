@@ -16,7 +16,9 @@ pub trait PythonRunner: Send + Sync + 'static {
     fn run(
         &self,
         task_id: &str,
+        agent_id: &str,
         prompt: &str,
+        history: &[crate::scheduler::Message],
         token_tx: mpsc::Sender<String>,
     ) -> CoreResult<String>;
 

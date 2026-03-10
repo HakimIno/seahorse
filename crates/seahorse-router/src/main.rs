@@ -3,17 +3,23 @@ mod telemetry;
 use std::sync::Arc;
 
 use seahorse_core::{spawn_worker_loop, Config, SeahorseCore};
-use seahorse_ffi::graph_runner::make_arc_py_graph_runner;
+use seahorse_ffi::graph_runner::{init_python_env, make_arc_py_graph_runner};
 use seahorse_router::{auth::init_jwt, build_router};
 use tracing::info;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    // ── Load .env ──────────────────────────────────────────────────────────
+    dotenvy::dotenv().ok();
+
     // ── Telemetry: JSON logs + OTel traces → Jaeger ─────────────────────────
     telemetry::init_telemetry()?;
 
     // ── JWT auth initialisation ──────────────────────────────────────────────
     init_jwt()?;
+
+    // ── Python Environment Initialisation ───────────────────────────────────
+    init_python_env()?;
 
     let config = Config::from_env()?;
     let port = config.http_port;

@@ -3,6 +3,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 use pyo3::prelude::*;
+use pyo3::types::PyList;
 use seahorse_core::error::{CoreError, CoreResult};
 use seahorse_core::graph::{Graph, GraphState, EdgeDestination, Node, ConditionalEdgeClosure};
 
@@ -107,7 +108,7 @@ pub fn build_react_graph() -> Graph {
 
 use seahorse_core::worker::PythonRunner;
 use tokio::sync::mpsc;
-use tracing::{info, error};
+use tracing::{error, info, warn};
 
 pub struct PyGraphRunner {
     pub model: String,
@@ -123,7 +124,9 @@ impl PythonRunner for PyGraphRunner {
     fn run(
         &self,
         task_id: &str,
+        agent_id: &str,
         prompt: &str,
+        history: &[seahorse_core::scheduler::Message],
         token_tx: mpsc::Sender<String>,
     ) -> CoreResult<String> {
         info!(task_id, "PyGraphRunner::run starting Graph State Machine");
@@ -133,11 +136,16 @@ impl PythonRunner for PyGraphRunner {
         // Initialize State
         let mut initial_state = GraphState::new();
         initial_state.insert("prompt".to_string(), serde_json::to_value(&prompt).unwrap_or(serde_json::Value::Null));
+        initial_state.insert("agent_id".to_string(), serde_json::to_value(&agent_id).unwrap_or(serde_json::Value::Null));
         
-        let initial_messages = vec![
-            serde_json::json!({"role": "user", "content": prompt})
-        ];
-        initial_state.insert("messages".to_string(), serde_json::Value::Array(initial_messages));
+        let initial_messages = history.iter().map(|m| {
+            serde_json::json!({"role": &m.role, "content": &m.content})
+        }).collect::<Vec<_>>();
+        
+        let mut messages = initial_messages;
+        messages.push(serde_json::json!({"role": "user", "content": prompt}));
+        
+        initial_state.insert("messages".to_string(), serde_json::Value::Array(messages));
         
         // Run Graph
         // `graph.run()` is async, but PythonRunner::run is synchronous (runs inside spawn_blocking).
@@ -179,4 +187,65 @@ impl PythonRunner for PyGraphRunner {
 
 pub fn make_arc_py_graph_runner(model: &str) -> std::sync::Arc<dyn PythonRunner> {
     std::sync::Arc::new(PyGraphRunner::new(model.to_string()))
+}
+
+/// Global Python environment initialisation. 
+/// Adds ./python and .venv site-packages to sys.path.
+pub fn init_python_env() -> anyhow::Result<()> {
+    info!("Initialising Python environment...");
+    
+    // Help native extensions find their home by setting VIRTUAL_ENV
+    if let Ok(cwd) = std::env::current_dir() {
+        let venv_path = cwd.join(".venv");
+        if venv_path.exists() {
+            if let Some(s) = venv_path.to_str() {
+                std::env::set_var("VIRTUAL_ENV", s);
+                // Some native extensions (like tiktoken's rust core) check this
+                info!("Set VIRTUAL_ENV to {}", s);
+            }
+        }
+    }
+
+    Python::with_gil(|py| {
+        let sys = py.import_bound("sys")?;
+        let version: String = sys.getattr("version")?.extract()?;
+        let executable: String = sys.getattr("executable")?.extract()?;
+        info!("Python Version: {}", version);
+        info!("Python Executable: {}", executable);
+        
+        let path: Bound<'_, PyList> = sys.getattr("path")?.downcast_into()?;
+        
+        // Add local python source
+        path.insert(0, "python")?;
+        
+        // Find .venv site-packages
+        if let Ok(entries) = std::fs::read_dir(".venv/lib") {
+            for entry in entries.flatten() {
+                if let Ok(file_type) = entry.file_type() {
+                    if file_type.is_dir() {
+                        let mut sp_path = entry.path();
+                        sp_path.push("site-packages");
+                        if sp_path.exists() {
+                            if let Some(s) = sp_path.to_str() {
+                                path.append(s)?;
+                                info!("Added to sys.path: {}", s);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        // Warm up common heavy imports to prevent circular threading issues
+        if let Err(e) = py.import_bound("tiktoken") {
+            warn!("Optional: could not pre-load tiktoken: {}", e);
+        }
+        if let Err(e) = py.import_bound("litellm") {
+            warn!("Optional: could not pre-load litellm: {}", e);
+        }
+        
+        Ok::<(), PyErr>(())
+    }).map_err(|e| anyhow::anyhow!("Python init failed: {}", e))?;
+    
+    Ok(())
 }

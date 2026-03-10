@@ -4,11 +4,19 @@ use uuid::Uuid;
 
 use crate::error::{CoreError, CoreResult};
 
+#[derive(Debug, serde::Deserialize, serde::Serialize, Clone)]
+pub struct Message {
+    pub role: String,
+    pub content: String,
+}
+
 /// A pending agent task.
 #[derive(Debug)]
 pub struct AgentTask {
     pub id: String,
+    pub agent_id: String,
     pub prompt: String,
+    pub history: Vec<Message>,
     /// Channel to stream response tokens back to the caller.
     pub response_tx: mpsc::Sender<String>,
 }
@@ -27,14 +35,21 @@ impl AgentScheduler {
 
     /// Submit a task to the scheduler.
     /// Returns a `Receiver` that will stream response tokens.
-    #[instrument(skip(self, prompt), fields(prompt_len = prompt.len()))]
-    pub async fn submit(&self, prompt: String) -> CoreResult<(String, mpsc::Receiver<String>)> {
+    #[instrument(skip(self, prompt, history), fields(prompt_len = prompt.len()))]
+    pub async fn submit(
+        &self,
+        agent_id: String,
+        prompt: String,
+        history: Vec<Message>,
+    ) -> CoreResult<(String, mpsc::Receiver<String>)> {
         let id = Uuid::new_v4().to_string();
         let (response_tx, response_rx) = mpsc::channel(128);
 
         let task = AgentTask {
             id: id.clone(),
+            agent_id,
             prompt,
+            history,
             response_tx,
         };
 

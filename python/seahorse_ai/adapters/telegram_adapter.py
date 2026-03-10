@@ -17,6 +17,7 @@ import os
 import re
 import sys
 from collections import defaultdict, deque
+import httpx
 
 from telegram import (
     Update,
@@ -34,7 +35,6 @@ from telegram.ext import (
     TypeHandler,
 )
 
-from seahorse_ai.planner import ReActPlanner
 from seahorse_ai.router import ModelRouter
 from seahorse_ai.schemas import AgentRequest, Message
 
@@ -61,21 +61,21 @@ def _extract_choices(text: str) -> list[str]:
     return choices if 2 <= len(choices) <= 5 else []
 
 class TelegramAdapter:
-    def __init__(self, planner: ReActPlanner):
-        self.planner = planner
+    def __init__(self, router_url: str = "http://localhost:8000") -> None:
+        self.router_url = router_url
         self._history: dict[int, deque[Message]] = defaultdict(
             lambda: deque(maxlen=_MAX_HISTORY)
         )
         self._callback_data_map = {}
 
-    async def handle_update(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+    async def handle_update(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Global debug handler for all updates."""
         logger.info("Telegram RAW Update: %s", update.to_dict())
 
-    async def start_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+    async def start_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.message.reply_text("สวัสดีครับ! ผม Seahorse AI พร้อมช่วยคุณวิเคราะห์ข้อมูลธุรกิจแล้วครับ")
 
-    async def id_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+    async def id_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Reply with the current Chat ID."""
         msg = update.message or update.channel_post
         if not msg:
@@ -89,7 +89,13 @@ class TelegramAdapter:
             parse_mode=ParseMode.MARKDOWN
         )
 
-    async def _safe_send_message(self, context: ContextTypes.DEFAULT_TYPE, chat_id: int, text: str, **kwargs):
+    async def _safe_send_message(
+        self, 
+        context: ContextTypes.DEFAULT_TYPE, 
+        chat_id: int, 
+        text: str, 
+        **kwargs: object
+    ) -> None:
         """Send a message with Markdown, falling back to plain text if parsing fails."""
         try:
             return await context.bot.send_message(chat_id=chat_id, text=text, **kwargs)
@@ -100,7 +106,7 @@ class TelegramAdapter:
                 return await context.bot.send_message(chat_id=chat_id, text=text, **kwargs)
             raise e
 
-    async def handle_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+    async def handle_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         msg = (
             update.message 
             or update.channel_post 
@@ -145,7 +151,59 @@ class TelegramAdapter:
             await asyncio.sleep(0)
 
             try:
-                response = await self.planner.run(request)
+                # UNIFIED: Redirect to Rust Router instead of local ReActPlanner
+                async with httpx.AsyncClient(timeout=120.0) as client:
+                    # Optimization: Send only a small window of history (e.g., last 5 messages) 
+                    # to the Router for Fast Path checks to save tokens on every turn.
+                    fast_path_history = list(history)[-5:] if len(history) > 5 else list(history)
+                    
+                    resp = await client.post(
+                        f"{self.router_url}/v1/agent/run",
+                        json={
+                            "prompt": text,
+                            "agent_id": agent_id,
+                            "history": [m.model_dump() for m in fast_path_history]
+                        }
+                    )
+                    resp.raise_for_status()
+                    data = resp.json()
+                    
+                    # Wrap internal response format
+                    from seahorse_ai.schemas import AgentResponse
+                    
+                    # If Fast Path handled it, we get content directly
+                    if data.get("status") == "completed" and data.get("content"):
+                        response = AgentResponse(
+                            content=data["content"],
+                            steps=0,
+                            agent_id=agent_id,
+                            elapsed_ms=0
+                        )
+                    else:
+                        # If not Fast Path, fall back to local planner for immediate response
+                        logger.info("FastPath: [FALLBACK] or Queued. Using local ReActPlanner.")
+                        from seahorse_ai.planner import ReActPlanner
+                        from seahorse_ai.router import ModelRouter
+                        internal_router = ModelRouter(
+                            worker_model=os.environ.get("SEAHORSE_MODEL_WORKER", "google/gemini-3-flash-preview"),
+                            thinker_model=os.environ.get("SEAHORSE_MODEL_THINKER", "google/gemini-3-flash-preview"),
+                            strategist_model=os.environ.get("SEAHORSE_MODEL_STRATEGIST", "google/gemini-3-flash-preview"),
+                        )
+                        local_planner = ReActPlanner(llm=internal_router)
+                        response = await local_planner.run(request)
+
+            except Exception as e:
+                logger.error("Failed to connect to Rust Router: %s. Falling back to internal planner…", e)
+                # Fallback to local planner if router is down
+                from seahorse_ai.planner import ReActPlanner
+                from seahorse_ai.router import ModelRouter
+                internal_router = ModelRouter(
+                    worker_model=os.environ.get("SEAHORSE_MODEL_WORKER", "google/gemini-3-flash-preview"),
+                    thinker_model=os.environ.get("SEAHORSE_MODEL_THINKER", "google/gemini-3-flash-preview"),
+                    strategist_model=os.environ.get("SEAHORSE_MODEL_STRATEGIST", "google/gemini-3-flash-preview"),
+                )
+                local_planner = ReActPlanner(llm=internal_router)
+                response = await local_planner.run(request)
             finally:
                 typing_task.cancel()
                 try:
@@ -215,7 +273,7 @@ class TelegramAdapter:
                 text=f"❌ ผมพบปัญหาขัดข้องชั่วคราว: {clean_error}"
             )
 
-    async def handle_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+    async def handle_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle button clicks."""
         query = update.callback_query
         if not query or not query.data:
@@ -244,7 +302,7 @@ class TelegramAdapter:
             update.message.text = choice
             await self.handle_message(update, context)
 
-    async def send_proactive_alert(self, data: dict):
+    async def send_proactive_alert(self, data: dict[str, object]) -> None:
         """Send a proactive alert to any configured chat."""
         token = os.environ.get("TELEGRAM_BOT_TOKEN")
         chat_id = os.environ.get("TELEGRAM_ALERTS_CHAT_ID")
@@ -297,19 +355,19 @@ class TelegramAdapter:
         except Exception as e:
             logger.error("Failed to send Telegram proactive alert: %s", e)
 
-def main():
+def main() -> None:
     token = os.environ.get("TELEGRAM_BOT_TOKEN")
     if not token:
         logger.error("TELEGRAM_BOT_TOKEN not found.")
         return
 
+    adapter = TelegramAdapter(router_url=os.environ.get("SEAHORSE_ROUTER_URL", "http://localhost:8000"))
+
     router = ModelRouter(
-        worker_model=os.environ.get("SEAHORSE_MODEL_WORKER"),
-        thinker_model=os.environ.get("SEAHORSE_MODEL_THINKER"),
-        strategist_model=os.environ.get("SEAHORSE_MODEL_STRATEGIST"),
+        worker_model=os.environ.get("SEAHORSE_MODEL_WORKER", "google/gemini-3-flash-preview"),
+        thinker_model=os.environ.get("SEAHORSE_MODEL_THINKER", "google/gemini-3-flash-preview"),
+        strategist_model=os.environ.get("SEAHORSE_MODEL_STRATEGIST", "google/gemini-3-flash-preview"),
     )
-    planner = ReActPlanner(llm=router)
-    adapter = TelegramAdapter(planner)
 
     app = ApplicationBuilder().token(token).build()
 

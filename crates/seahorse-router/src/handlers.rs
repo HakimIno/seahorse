@@ -9,7 +9,7 @@ use axum::{
     },
     Json,
 };
-use futures_util::stream::StreamExt;
+use futures_util::stream::{BoxStream, StreamExt};
 use serde::{Deserialize, Serialize};
 use tokio_stream::wrappers::ReceiverStream;
 use tracing::instrument;
@@ -21,7 +21,9 @@ use crate::error::AppError;
 /// Minimal agent run request.
 #[derive(Debug, Deserialize)]
 pub struct RunRequest {
+    pub agent_id: String,
     pub prompt: String,
+    pub history: Vec<seahorse_core::scheduler::Message>,
 }
 
 /// Synchronous agent response.
@@ -29,6 +31,7 @@ pub struct RunRequest {
 pub struct RunResponse {
     pub task_id: String,
     pub status: &'static str,
+    pub content: Option<String>,
 }
 
 /// Health check — always returns 200 OK.
@@ -46,14 +49,23 @@ pub async fn run_agent(
         return Err(AppError::BadRequest("prompt must not be empty".into()));
     }
 
+    if let Some(answer) = core.fast_path.try_respond(&req.prompt, &req.history).await {
+        return Ok(Json(RunResponse {
+            task_id: "fast-path".into(),
+            status: "completed",
+            content: Some(answer),
+        }));
+    }
+
     let (task_id, _rx) = core
         .scheduler
-        .submit(req.prompt)
+        .submit(req.agent_id, req.prompt, req.history)
         .await?;
 
     Ok(Json(RunResponse {
         task_id,
         status: "queued",
+        content: None,
     }))
 }
 
@@ -62,16 +74,29 @@ pub async fn run_agent(
 pub async fn stream_agent(
     Extension(core): Extension<Arc<SeahorseCore>>,
     Json(req): Json<RunRequest>,
-) -> Result<Sse<impl futures_util::Stream<Item = Result<Event, std::convert::Infallible>>>, AppError>
+) -> Result<Sse<BoxStream<'static, Result<Event, std::convert::Infallible>>>, AppError>
 {
     if req.prompt.is_empty() {
         return Err(AppError::BadRequest("prompt must not be empty".into()));
     }
 
-    let (_task_id, rx) = core.scheduler.submit(req.prompt).await?;
+    if let Some(answer) = core.fast_path.try_respond(&req.prompt, &req.history).await {
+        let (tx, rx) = tokio::sync::mpsc::channel(1);
+        let _ = tx.send(answer).await;
+        let token_stream = ReceiverStream::new(rx)
+            .map(|token| Ok(Event::default().data(token)))
+            .boxed();
+        return Ok(Sse::new(token_stream).keep_alive(KeepAlive::default()));
+    }
+
+    let (_task_id, rx) = core
+        .scheduler
+        .submit(req.agent_id, req.prompt, req.history)
+        .await?;
 
     let token_stream = ReceiverStream::new(rx)
-        .map(|token| Ok(Event::default().data(token)));
+        .map(|token| Ok(Event::default().data(token)))
+        .boxed();
 
     Ok(Sse::new(token_stream).keep_alive(KeepAlive::default()))
 }

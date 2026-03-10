@@ -208,7 +208,7 @@ class FastPathRouter:
             return await self._handle_store(si.entity, agent_id)
 
         if si.action == "QUERY" and si.entity:
-            return await self._handle_query(si.entity, agent_id)
+            return await self._handle_query(si.entity, agent_id, history)
 
         return None
 
@@ -304,13 +304,13 @@ class FastPathRouter:
             return [MemoryFact(text=item, importance=3) for item in items]
 
     async def _handle_query(
-        self, entity: str, agent_id: str,
+        self, entity: str, agent_id: str, history: list[Message] | None = None
     ) -> AgentResponse | None:
         """Search memory and synthesize an answer (Phase 4)."""
         try:
             from seahorse_ai.planner.memory_reasoner import MemoryReasoner
             reasoner = MemoryReasoner(llm_backend=self._llm, tools_registry=self._tools)
-            return await reasoner.reason(query=entity, agent_id=agent_id)
+            return await reasoner.reason(query=entity, agent_id=agent_id, history=history)
         except Exception as exc:
             logger.error("fast_path.query failed: %s", exc)
             return None

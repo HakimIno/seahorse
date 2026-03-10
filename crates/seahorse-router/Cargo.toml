@@ -27,6 +27,7 @@ tokio-stream  = { workspace = true }
 jsonwebtoken  = "9"
 chrono        = { version = "0.4", features = ["serde"] }
 once_cell     = { workspace = true }
+dotenvy       = { workspace = true }
 
 [[bin]]
 name = "seahorse-router"
