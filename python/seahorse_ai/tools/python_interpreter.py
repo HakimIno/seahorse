@@ -18,7 +18,7 @@ from seahorse_ai.tools.base import tool
 logger = logging.getLogger(__name__)
 
 # Max execution time in seconds
-_TIMEOUT_SECONDS = 10
+_TIMEOUT_SECONDS = 30
 
 # Allowed stdlib modules inside the sandbox
 _ALLOWED_IMPORTS = {
@@ -45,13 +45,8 @@ _SANDBOX_HEADER = textwrap.dedent(f"""\
         return _real_import(name, *args, **kwargs)
 
     builtins.__import__ = _safe_import
-    # Remove dangerous builtins but KEEP our safe __import__
-    for _bad in ("open", "exec", "eval", "compile"):
-        if hasattr(builtins, _bad):
-            try:
-                delattr(builtins, _bad)
-            except Exception:
-                pass
+    # Note: We keep exec, eval, and compile as they are needed for many 
+    # data processing libraries (e.g. pandas) and dynamic code blocks.
 """)
 
 

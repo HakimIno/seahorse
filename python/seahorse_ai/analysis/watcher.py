@@ -91,7 +91,7 @@ class AnomalyWatcher:
         try:
             result = await self._llm.complete( # type: ignore
                 [Message(role="user", content=prompt)],
-                tier="worker"
+                tier="fast"
             )
             
             content = ""

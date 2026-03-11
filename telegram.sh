@@ -14,7 +14,15 @@ export PYO3_PYTHON="$UV_PYTHON"
 
 # Load environment variables from .env if it exists
 if [ -f .env ]; then
-  export $(grep -v '^#' .env | xargs)
+  while IFS= read -r line || [ -n "$line" ]; do
+    # Skip comments and empty lines
+    [[ "$line" =~ ^#.*$ ]] && continue
+    [[ -z "$line" ]] && continue
+    # Export explicitly, stripping potential surrounding quotes
+    key=$(echo "$line" | cut -d'=' -f1)
+    value=$(echo "$line" | cut -d'=' -f2- | sed -e 's/^"//' -e 's/"$//' -e "s/^'//" -e "s/'$//")
+    export "$key"="$value"
+  done < .env
 fi
 
 # Environment Configuration

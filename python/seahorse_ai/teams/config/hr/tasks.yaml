@@ -1,0 +1,15 @@
+draft_task:
+  description: >-
+    Draft a comprehensive list of requirements and responsibilities for {objective}.
+    Identify the core technical and soft skills needed.
+  expected_output: >-
+    A structured list of qualifications and job responsibilities.
+  agent: recruiter
+
+polish_task:
+  description: >-
+    Transform the draft into a professional HR document for {objective}.
+    Ensure the tone is premium and culturally aligned.
+  expected_output: >-
+    A polished, ready-to-publish HR document in markdown.
+  agent: specialist

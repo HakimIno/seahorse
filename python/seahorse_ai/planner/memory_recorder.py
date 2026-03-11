@@ -3,6 +3,7 @@
 Extracts key facts from conversations and stores them in the HNSW memory index.
 Includes rate limiting and deduplication to prevent API cost spikes.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -72,14 +73,15 @@ class MemoryRecorder:
 
         self._last_run = now
 
-        history_text = "\n".join(
-            f"{m.role}: {m.content}" for m in non_system
-        )
+        history_text = "\n".join(f"{m.role}: {m.content}" for m in non_system)
         try:
             from seahorse_ai.schemas import Message as Msg
-            response = await self._llm.complete([  # type: ignore[union-attr]
-                Msg(role="system", content=self.SUMMARY_SYSTEM_PROMPT + history_text)
-            ])
+
+            response = await self._llm.complete(
+                [  # type: ignore[union-attr]
+                    Msg(role="system", content=self.SUMMARY_SYSTEM_PROMPT + history_text)
+                ]
+            )
             raw = str(response.get("content", "") if isinstance(response, dict) else response)
 
             if "NONE" in raw.upper() or len(raw.strip()) < 5:
@@ -90,15 +92,22 @@ class MemoryRecorder:
                 line = line.strip("-* ").strip()
                 if not line or len(line) < 5:
                     continue
-                
+
                 if line.startswith("[REL]"):
                     import re
+
                     match = re.search(r"\((.+)\)\s*--\[(.+)\]-->\s*\((.+)\)", line)
                     if match:
-                        storage_tasks.append(self._tools.call(
-                            "graph_store_triple", 
-                            {"subject": match.group(1), "predicate": match.group(2), "object_entity": match.group(3)}
-                        ))
+                        storage_tasks.append(
+                            self._tools.call(
+                                "graph_store_triple",
+                                {
+                                    "subject": match.group(1),
+                                    "predicate": match.group(2),
+                                    "object_entity": match.group(3),
+                                },
+                            )
+                        )
                 else:
                     importance, fact = self._parse_fact_line(line)
                     storage_tasks.append(self._store_fact(fact, importance, agent_id))
@@ -106,7 +115,9 @@ class MemoryRecorder:
             if storage_tasks:
                 await asyncio.gather(*storage_tasks)
 
-            logger.info("memory_recorder: processed %d facts for agent_id=%s", len(storage_tasks), agent_id)
+            logger.info(
+                "memory_recorder: processed %d facts for agent_id=%s", len(storage_tasks), agent_id
+            )
 
         except Exception as exc:  # noqa: BLE001
             logger.error("memory_recorder: failed: %s", exc)
@@ -137,39 +148,47 @@ class MemoryRecorder:
                         LIMIT 10
                         FOR UPDATE SKIP LOCKED
                     """)
-                    
+
                     if not rows:
                         await asyncio.sleep(5)
                         continue
 
                     pipeline = get_pipeline()
                     for row in rows:
-                        event_id = row['id']
-                        event_type = row['event_type']
-                        payload = json.loads(row['payload'])
-                        
+                        event_id = row["id"]
+                        event_type = row["event_type"]
+                        payload = json.loads(row["payload"])
+
                         try:
                             if event_type == "MEMORY_STORE":
                                 await pipeline.store(
-                                    payload['text'], 
-                                    metadata=payload.get('metadata')
+                                    payload["text"], metadata=payload.get("metadata")
                                 )
                             elif event_type == "MEMORY_DELETE":
-                                await pipeline.delete_by_text(payload['query'])
-                            
-                            await conn.execute("""
+                                await pipeline.delete_by_text(payload["query"])
+
+                            await conn.execute(
+                                """
                                 UPDATE seahorse_outbox 
                                 SET status = 'SYNCED', synced_at = NOW() 
                                 WHERE id = $1
-                            """, event_id)
-                            logger.info("outbox worker: synced event_id=%d type=%s", event_id, event_type)
+                            """,
+                                event_id,
+                            )
+                            logger.info(
+                                "outbox worker: synced event_id=%d type=%s", event_id, event_type
+                            )
                         except Exception as e:
                             logger.error("outbox worker: failed event_id=%d: %s", event_id, e)
-                            await conn.execute("""
+                            await conn.execute(
+                                """
                                 UPDATE seahorse_outbox 
                                 SET status = 'FAILED', error_message = $1 
                                 WHERE id = $2
-                            """, str(e), event_id)
+                            """,
+                                str(e),
+                                event_id,
+                            )
 
                 finally:
                     await conn.close()
@@ -185,16 +204,14 @@ class MemoryRecorder:
         importance = 3
         if line.startswith("[") and "]" in line[:5]:
             try:
-                imp_str = line[1:line.index("]")]
+                imp_str = line[1 : line.index("]")]
                 importance = int(imp_str)
-                line = line[line.index("]") + 1:].strip()
+                line = line[line.index("]") + 1 :].strip()
             except (ValueError, IndexError):
                 pass
         return importance, line
 
-    async def _store_fact(
-        self, text: str, importance: int, agent_id: str | None
-    ) -> None:
+    async def _store_fact(self, text: str, importance: int, agent_id: str | None) -> None:
         """Store a single atomic fact, splitting on conjunctions if needed."""
         needs_split = any(m in text for m in self.SPLIT_MARKERS) and len(text) > 25
 
@@ -203,12 +220,13 @@ class MemoryRecorder:
             for marker in self.SPLIT_MARKERS:
                 temp = temp.replace(marker, "SPLIT_TOKEN")
             parts = [p.strip() for p in temp.split("SPLIT_TOKEN") if len(p.strip()) > 3]
-            
+
             tasks = [
                 self._tools.call(
                     "memory_store",
                     {"text": part, "importance": importance, "agent_id": agent_id},
-                ) for part in parts
+                )
+                for part in parts
             ]
             await asyncio.gather(*tasks)
         else:

@@ -22,13 +22,14 @@ ReActPlanner.run(request)
 Public API: ReActPlanner(llm, tools, ...) → .run(AgentRequest) → AgentResponse
 The API is identical to the legacy planner.py for full backward compatibility.
 """
+
 from __future__ import annotations
 
 import asyncio
 import logging
 import os
 import uuid
-from typing import Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
 from seahorse_ai.observability import get_tracer, setup_telemetry
 from seahorse_ai.planner.circuit_breaker import CircuitBreaker
@@ -45,28 +46,51 @@ from seahorse_ai.prompts import (
     build_system_prompt,
 )
 from seahorse_ai.schemas import AgentRequest, AgentResponse, Message
+from seahorse_ai.skills.base import SeahorseSkill
 
 logger = logging.getLogger(__name__)
 
 
 # ── Protocols (kept for type-safety and mocking in tests) ─────────────────────
 
+
 class LLMBackend(Protocol):
     """Any object that can complete a list of messages with tier support."""
 
     async def complete(
-        self, messages: list[Message], tools: list[dict] | None = None, tier: str = "worker"
-    ) -> str | dict[str, object]: ...
+        self,
+        messages: list[Message],
+        tools: list[dict[str, Any]] | None = None,
+        tier: str = "worker",
+    ) -> str | dict[str, object]:
+        """Complete a list of messages using the specified LLM tier.
+
+        Args:
+            messages: Conversation history.
+            tools: Optional OpenAI-format tool definitions.
+            tier: LLM tier to use (e.g., 'worker', 'strategist').
+
+        """
+        ...
 
 
 @runtime_checkable
 class ToolRegistry(Protocol):
     """Any object that can dispatch a named tool call."""
 
-    async def call(self, name: str, args: dict[str, object]) -> str: ...
+    async def call(self, name: str, args: dict[str, object]) -> str:
+        """Call a tool by name with arguments.
+
+        Args:
+            name: Tool name.
+            args: Map of argument names to values.
+
+        """
+        ...
 
 
 # ── Main Planner ──────────────────────────────────────────────────────────────
+
 
 class ReActPlanner:
     """High-performance ReAct agent orchestrator.
@@ -82,14 +106,29 @@ class ReActPlanner:
         self,
         llm: LLMBackend,
         tools: ToolRegistry | None = None,
+        skills: list[SeahorseSkill] | None = None,
         max_steps: int = 15,
         default_tier: str = "worker",
         step_timeout_seconds: int = 30,
         global_timeout_seconds: int = 120,
         identity_prompt: str | None = None,
     ) -> None:
+        """Initialize the ReActPlanner with its sub-components.
+
+        Args:
+            llm: The LLM backend for planning and execution.
+            tools: Optional tool registry. Defaults to a standard registry.
+            skills: Optional list of SeahorseSkill objects to define capabilities.
+            max_steps: Maximum ReAct loop iterations.
+            default_tier: Default LLM tier ('worker').
+            step_timeout_seconds: Timeout per iteration.
+            global_timeout_seconds: Total execution timeout.
+            identity_prompt: Optional extra system instruction for identity.
+
+        """
         self._llm = llm
         self._tools = tools or self._default_tools()
+        self._skills = skills or []
         self._default_tier = default_tier
         self._identity_prompt = identity_prompt
 
@@ -113,13 +152,16 @@ class ReActPlanner:
         with tracer.start_as_current_span("agent.run") as span:
             # ── 0. Persist Execution State (Phase 2: Durable Execution) ────
             execution_id = uuid.uuid4()
-            _set_span(span, {
-                "agent.id": request.agent_id,
-                "agent.execution_id": str(execution_id),
-                "agent.prompt_len": len(request.prompt),
-                "agent.max_steps": self._cfg.max_steps,
-            })
-            
+            _set_span(
+                span,
+                {
+                    "agent.id": request.agent_id,
+                    "agent.execution_id": str(execution_id),
+                    "agent.prompt_len": len(request.prompt),
+                    "agent.max_steps": self._cfg.max_steps,
+                },
+            )
+
             # Initial state persistence
             await self._persist_execution(
                 execution_id, request.agent_id, request.prompt, request.history
@@ -129,26 +171,36 @@ class ReActPlanner:
             self._circuit_breaker = CircuitBreaker()
 
             # ── 1. Structured Intent (1 LLM call → intent+action+entity) ──
-            try:
-                si = await asyncio.wait_for(
-                    classify_structured_intent(
-                        request.prompt, self._llm, request.history,
-                    ),
-                    timeout=15.0  # Reduced timeout for fast worker
-                )
-            except TimeoutError:
-                logger.warning(
-                    "agent.run intent classification timed out — falling back to GENERAL"
-                )
+            # OPTIMIZATION: Skip classification for sub-agents (crew_*)
+            is_crew = request.agent_id.startswith("crew_")
+            if is_crew:
                 from seahorse_ai.planner.fast_path import StructuredIntent
-                si = StructuredIntent(intent="GENERAL", action="CHAT")
+                si = StructuredIntent(intent="GENERAL", action="CHAT", complexity=3)
+            else:
+                try:
+                    si = await asyncio.wait_for(
+                        classify_structured_intent(
+                            request.prompt,
+                            self._llm,
+                            request.history,
+                        ),
+                        timeout=15.0,  # Reduced timeout for fast worker
+                    )
+                except TimeoutError:
+                    logger.warning(
+                        "agent.run intent classification timed out — falling back to GENERAL"
+                    )
+                    from seahorse_ai.planner.fast_path import StructuredIntent
+                    si = StructuredIntent(intent="GENERAL", action="CHAT")
+            
             intent = si.raw_category or si.intent
             logger.info(
-                "agent.run intent=%s action=%s entity=%r agent_id=%s",
+                "agent.run intent=%s action=%s entity=%r agent_id=%s (crew=%s)",
                 si.intent,
                 si.action,
                 si.entity,
                 request.agent_id,
+                is_crew,
             )
 
             # ── 2. Fast Path — bypass ReAct if action is simple ────────────
@@ -180,20 +232,30 @@ class ReActPlanner:
                     request.agent_id,
                 )
                 from seahorse_ai.tools.auto_seahorse import execute_auto_seahorse
-                crew_result = await execute_auto_seahorse(request.prompt)
-                _set_span(span, {"agent.auto_seahorse_mode": True, "agent.complexity": si.complexity})
+
+                crew_result = await execute_auto_seahorse(request.prompt, team_hint=si.intent)
+                
+                # Unpack if execute_auto_seahorse returns a dict (content, image_paths)
+                is_str = isinstance(crew_result, str)
+                content = crew_result if is_str else crew_result.get("content", "")
+                images = [] if is_str else crew_result.get("image_paths") or []
+
+                _set_span(
+                    span, {"agent.auto_seahorse_mode": True, "agent.complexity": si.complexity}
+                )
                 return AgentResponse(
-                    content=crew_result,
-                    steps=1, # Abstraction level
+                    content=content,
+                    steps=1,  # Abstraction level
                     agent_id=request.agent_id,
-                    elapsed_ms=0, # Calculation delegated
+                    elapsed_ms=0,  # Calculation delegated
+                    image_paths=images if images else None,
                 )
 
             # ── 3. Build system messages (full ReAct path) ─────────────────
-            sys_prompt = build_system_prompt()
+            sys_prompt = build_system_prompt(skills=self._skills, tone=si.tone)
             if self._identity_prompt:
                 sys_prompt += f"\n\n{self._identity_prompt}"
-                
+
             messages: list[Message] = [
                 Message(role="system", content=sys_prompt),
             ]
@@ -210,14 +272,19 @@ class ReActPlanner:
             # 4. Strategy plan (cached) for complex intents
             # Only use strategy for complex reasoning tasks to save latency
             current_tier = _classify_tier(
-                self._llm, request.prompt, self._default_tier,
+                self._llm,
+                request.prompt,
+                self._default_tier,
             )
             if current_tier == "strategist" and intent not in ("GENERAL", "GREET"):
                 plan = await self._strategy.plan(request.prompt)
-                messages.insert(1, Message(
-                    role="system",
-                    content=f"{plan}\n\n[SYSTEM] Follow the plan above before answering.",
-                ))
+                messages.insert(
+                    1,
+                    Message(
+                        role="system",
+                        content=f"{plan}\n\n[SYSTEM] Follow the plan above before answering.",
+                    ),
+                )
 
             # 5. Build OpenAI tool definitions
             openai_tools = getattr(self._tools, "to_openai_tools", lambda: [])()
@@ -232,7 +299,9 @@ class ReActPlanner:
                     step_callback=lambda msgs: self._update_execution(execution_id, msgs),
                 )
                 result = await executor.run(
-                    messages, openai_tools, agent_id=request.agent_id,
+                    messages,
+                    openai_tools,
+                    agent_id=request.agent_id,
                 )
 
                 # Update final status
@@ -243,25 +312,32 @@ class ReActPlanner:
                 # 7. Final synthesis
                 content = result.content
                 is_data_intent = intent in ("DATABASE", "PRIVATE_MEMORY", "PUBLIC_REALTIME")
-                
-                # OPTIMIZATION: Skip synthesis if response is already "direct" (factual memory)
+
+                # OPTIMIZATION: Skip synthesis for crew sub-agents or if is_direct
                 skip_synthesis = getattr(result, "is_direct", False)
-                
-                if not result.terminated and not skip_synthesis and (current_tier == "strategist" or is_data_intent):
+                if (
+                    not result.terminated
+                    and not skip_synthesis
+                    and not is_crew
+                    and (current_tier == "strategist" or is_data_intent)
+                ):
                     content = await self._synthesize(
-                        messages, content, request.prompt,
+                        messages,
+                        content,
+                        request.prompt,
                     )
 
                 # 8. Background memory (rate-limited, non-blocking)
-                asyncio.create_task(
-                    self._memory.record(messages, agent_id=request.agent_id)
-                )
+                asyncio.create_task(self._memory.record(messages, agent_id=request.agent_id))
 
-                _set_span(span, {
-                    "agent.steps_taken": result.steps,
-                    "agent.total_ms": result.total_ms,
-                    "agent.status": "terminated" if result.terminated else "done",
-                })
+                _set_span(
+                    span,
+                    {
+                        "agent.steps_taken": result.steps,
+                        "agent.total_ms": result.total_ms,
+                        "agent.status": "terminated" if result.terminated else "done",
+                    },
+                )
 
                 return AgentResponse(
                     content=content,
@@ -279,23 +355,24 @@ class ReActPlanner:
 
     # ── Private helpers ────────────────────────────────────────────────────────
 
-    async def _synthesize(
-        self, messages: list[Message], content: str, original_prompt: str
-    ) -> str:
+    async def _synthesize(self, messages: list[Message], content: str, original_prompt: str) -> str:
         """Run a final synthesis pass with the strategist model."""
         try:
             logger.info("agent.run synthesizing with strategist model")
             synth_msgs = messages + [
                 Message(role="assistant", content=content),
-                Message(role="user", content=(
-                    "Summarize the information above for the user in a helpful, natural, and conversational tone.\n"
-                    "RULES:\n"
-                    "1. BE CONCISE. If the answer is already clear, do not add fluff.\n"
-                    "2. Avoid rigid business jargon unless specifically asked for analysis.\n"
-                    "3. If you see interesting patterns or risks, mention them briefly and naturally.\n"
-                    "4. Minimize emojis (max 1-2). Use bullet points ONLY for lists of 3+ items.\n"
-                    "5. IMPORTANT: You MUST reply in the same language the user used (Thai for Thai, English for English)."
-                )),
+                Message(
+                    role="user",
+                    content=(
+                        "Summarize the context above for the user in a natural tone.\n"
+                        "RULES:\n"
+                        "1. BE CONCISE. If the answer is already clear, do not add fluff.\n"
+                        "2. Avoid rigid business jargon unless specifically asked.\n"
+                        "3. If you see patterns or risks, mention them briefly.\n"
+                        "5. DISTINGUISH between 'Technical Timeouts' (system taking too long) and 'Service Failures' (DB offline). Do not hallucinate connection issues if it was just a timeout.\n"
+                        "6. REPLY in the same language the user used (Thai/English)."
+                    ),
+                ),
             ]
             result = await self._llm.complete(synth_msgs, tier="strategist")
             if isinstance(result, dict):
@@ -312,6 +389,7 @@ class ReActPlanner:
         import json
 
         import asyncpg
+
         pg_uri = os.environ.get("SEAHORSE_PG_URI")
         if not pg_uri:
             return
@@ -319,10 +397,16 @@ class ReActPlanner:
             conn = await asyncpg.connect(pg_uri)
             try:
                 hist_json = json.dumps([h.model_dump() for h in history]) if history else None
-                await conn.execute("""
+                await conn.execute(
+                    """
                     INSERT INTO seahorse_executions (id, agent_id, prompt, history, status)
                     VALUES ($1, $2, $3, $4, 'RUNNING')
-                """, execution_id, agent_id, prompt, hist_json)
+                """,
+                    execution_id,
+                    agent_id,
+                    prompt,
+                    hist_json,
+                )
             finally:
                 await conn.close()
         except Exception as e:
@@ -335,6 +419,7 @@ class ReActPlanner:
         import json
 
         import asyncpg
+
         pg_uri = os.environ.get("SEAHORSE_PG_URI")
         if not pg_uri:
             return
@@ -342,12 +427,17 @@ class ReActPlanner:
             conn = await asyncpg.connect(pg_uri)
             try:
                 msgs_json = json.dumps([m.model_dump() for m in messages])
-                await conn.execute("""
+                await conn.execute(
+                    """
                     UPDATE seahorse_executions 
                     SET messages = $1, status = $2, updated_at = NOW()
                     WHERE id = $3
-                """, msgs_json, status, execution_id)
-                logger.info("planner._update_execution: updated id=%s to status=%s", execution_id, status)
+                """,
+                    msgs_json,
+                    status,
+                    execution_id,
+                )
+                logger.info("planner._update_execution: updated id=%s", execution_id)
             finally:
                 await conn.close()
         except Exception as e:
@@ -356,10 +446,12 @@ class ReActPlanner:
     @staticmethod
     def _default_tools() -> ToolRegistry:
         from seahorse_ai.tools import make_default_registry
+
         return make_default_registry()
 
 
 # ── Module-level helpers ───────────────────────────────────────────────────────
+
 
 def _classify_tier(llm: object, prompt: str, default: str) -> str:
     tier = getattr(llm, "classify_intent", lambda p: default)(prompt)

@@ -34,9 +34,10 @@ class CircuitBreaker:
         self._consecutive_errors += 1
         if tool_name:
             self._tool_errors[tool_name] = self._tool_errors.get(tool_name, 0) + 1
-        
+
         # Track globally as well
         import asyncio
+
         asyncio.create_task(record_global_failure())
 
         if is_crash:
@@ -70,6 +71,7 @@ class CircuitBreaker:
 async def record_global_failure() -> None:
     """Increment global failure counter in Postgres."""
     import asyncpg
+
     pg_uri = os.environ.get("SEAHORSE_PG_URI")
     if not pg_uri:
         return
@@ -98,6 +100,7 @@ async def record_global_failure() -> None:
 async def is_system_healthy() -> bool:
     """Check if the global circuit breaker has tripped."""
     import asyncpg
+
     pg_uri = os.environ.get("SEAHORSE_PG_URI")
     if not pg_uri:
         return True
@@ -110,16 +113,16 @@ async def is_system_healthy() -> bool:
             )
             if not row:
                 return True
-            
-            val = row['value']
+
+            val = row["value"]
             if isinstance(val, str):
                 val = json.loads(val)
-            
-            fail_count = val.get('fail_count', 0)
-            last_fail = val.get('last_fail')
-            
-            # Trip if more than 10 failures in the last 60 seconds
-            if fail_count >= 10 and last_fail:
+
+            fail_count = val.get("fail_count", 0)
+            last_fail = val.get("last_fail")
+
+            # Trip if more than 30 failures in the last 60 seconds
+            if fail_count >= 30 and last_fail:
                 now = time.time()
                 if now - last_fail < 60:
                     logger.critical("Global Circuit Breaker TRIPPED (fail_count=%d)", fail_count)
@@ -128,10 +131,10 @@ async def is_system_healthy() -> bool:
                     # Auto-reset if old
                     await conn.execute(
                         "UPDATE seahorse_system_status SET value = "
-                        "'{\"status\": \"CLOSED\", \"fail_count\": 0, \"last_fail\": null}' "
+                        '\'{"status": "CLOSED", "fail_count": 0, "last_fail": null}\' '
                         "WHERE key = 'circuit_breaker';"
                     )
-            
+
             return True
         finally:
             await conn.close()

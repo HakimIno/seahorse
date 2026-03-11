@@ -11,8 +11,11 @@ from __future__ import annotations
 
 import logging
 
+from typing import Any
+ 
 from seahorse_ai.planner import LLMBackend, ReActPlanner, ToolRegistry
 from seahorse_ai.schemas import AgentRequest
+from seahorse_ai.skills.base import SeahorseSkill
 from seahorse_ai.tools.base import SeahorseToolRegistry, tool
 
 logger = logging.getLogger(__name__)
@@ -37,11 +40,13 @@ class CrewAgent(SwarmAgent):
         goal: str,
         backstory: str,
         planner: ReActPlanner,
+        skills: list[SeahorseSkill] | None = None,
     ) -> None:
         super().__init__(name, description=f"{role}: {goal}", planner=planner)
         self.role = role
         self.goal = goal
         self.backstory = backstory
+        self.skills = skills or []
 
     def build_system_prompt_extension(self) -> str:
         """Inject Role/Goal/Backstory into the system prompt."""
@@ -77,10 +82,11 @@ class SeahorseCrew:
         self.agents = {a.name: a for a in agents}
         self.tasks = tasks
 
-    async def kickoff(self) -> str:
+    async def kickoff(self) -> dict[str, Any]:
         """Execute all tasks in sequence, passing context between them."""
         overall_context = ""
         last_output = ""
+        all_image_paths = []
 
         for i, task in enumerate(self.tasks):
             agent = self.agents.get(task.agent_name)
@@ -113,10 +119,21 @@ class SeahorseCrew:
             last_output = response.content
             task.output = last_output
             
-            # Accumulate context
-            overall_context += f"\n--- Result of Task {i} ({agent.role}) ---\n{last_output}\n"
+            # Collect image paths
+            if response.image_paths:
+                all_image_paths.extend(response.image_paths)
 
-        return last_output
+            # Accumulate context (with truncation to avoid token bloat)
+            overall_context += f"\n--- Result of Task {i} ({agent.role}) ---\n{last_output}\n"
+            
+            # Simple truncation: Keep only the last ~4000 chars of context 
+            if len(overall_context) > 4000:
+                overall_context = "..." + overall_context[-4000:]
+
+        return {
+            "content": last_output,
+            "image_paths": all_image_paths if all_image_paths else None
+        }
 
 class SwarmOrchestrator:
     """Manages a collection of agents and provides a unified entry point."""

@@ -228,6 +228,10 @@ class TelegramAdapter:
                                 "SEAHORSE_MODEL_STRATEGIST",
                                 "openrouter/google/gemini-3-flash-preview"
                             ),
+                            fast_path_model=os.environ.get(
+                                "SEAHORSE_FAST_PATH_MODEL",
+                                "openrouter/google/gemini-2.0-flash-lite-preview-02-05"
+                            ),
                         )
                         local_planner = ReActPlanner(llm=internal_router)
                         response = await local_planner.run(request)
@@ -248,6 +252,10 @@ class TelegramAdapter:
                     ),
                     strategist_model=os.environ.get(
                         "SEAHORSE_MODEL_STRATEGIST", "openrouter/google/gemini-3-flash-preview"
+                    ),
+                    fast_path_model=os.environ.get(
+                        "SEAHORSE_FAST_PATH_MODEL",
+                        "openrouter/google/gemini-2.0-flash-lite-preview-02-05"
                     ),
                 )
                 local_planner = ReActPlanner(llm=internal_router)
@@ -425,6 +433,10 @@ def main() -> None:
         ),
         strategist_model=os.environ.get(
             "SEAHORSE_MODEL_STRATEGIST", "openrouter/google/gemini-3-flash-preview"
+        ),
+        fast_path_model=os.environ.get(
+            "SEAHORSE_FAST_PATH_MODEL",
+            "openrouter/google/gemini-2.0-flash-lite-preview-02-05"
         ),
     )
 

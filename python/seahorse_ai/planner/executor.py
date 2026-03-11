@@ -11,6 +11,7 @@ Architecture:
         → if tool_calls: execute in parallel, append observations
         → if content: return final answer
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -31,8 +32,8 @@ class ExecutorConfig:
     """Configuration for the ReAct execution loop."""
 
     max_steps: int = 15
-    step_timeout_seconds: int = 60
-    global_timeout_seconds: int = 300
+    step_timeout_seconds: int = 180
+    global_timeout_seconds: int = 600
     token_burn_warn_chars: int = 30_000
     token_burn_hard_chars: int = 50_000
 
@@ -58,7 +59,14 @@ class ReActExecutor:
     - Intent classification (→ prompts.classify_intent)
     """
 
-    def __init__(self, llm: object, tools: object, circuit_breaker: object, config: ExecutorConfig | None = None, step_callback: callable | None = None) -> None:
+    def __init__(
+        self,
+        llm: object,
+        tools: object,
+        circuit_breaker: object,
+        config: ExecutorConfig | None = None,
+        step_callback: callable | None = None,
+    ) -> None:
         self._llm = llm
         self._tools = tools
         self._cb = circuit_breaker
@@ -99,19 +107,23 @@ class ReActExecutor:
                 )
             except TimeoutError:
                 logger.error("executor step=%d timed out", step)
-                messages.append(Msg(
-                    role="user",
-                    content=(
-                        f"(Internal Error: Step {step} timed out after "
-                        f"{self._cfg.step_timeout_seconds}s. "
-                        "Try a faster approach or shorter response.)"
-                    ),
-                ))
+                messages.append(
+                    Msg(
+                        role="user",
+                        content=(
+                            f"(Internal Error: Step {step} timed out after "
+                            f"{self._cfg.step_timeout_seconds}s. "
+                            "Try a faster approach or shorter response.)"
+                        ),
+                    )
+                )
                 self._cb.record_error(None)  # type: ignore[union-attr]
                 terminate, reason = self._cb.should_terminate()  # type: ignore[union-attr]
                 if terminate:
                     return ExecutorResult(
-                        content=reason, steps=step, terminated=True,
+                        content=reason,
+                        steps=step,
+                        terminated=True,
                         termination_reason="consecutive_timeouts",
                     )
                 continue
@@ -136,10 +148,7 @@ class ReActExecutor:
             # ── Tool calls ────────────────────────────────────────────────────
             if tool_calls:
                 # Execute all tools concurrently
-                tasks = [
-                    self._execute_tool(tc, step, agent_id)
-                    for tc in tool_calls
-                ]
+                tasks = [self._execute_tool(tc, step, agent_id) for tc in tool_calls]
                 results = await asyncio.gather(*tasks, return_exceptions=True)
 
                 found_crash = False
@@ -168,12 +177,14 @@ class ReActExecutor:
 
                     self._total_obs_chars += len(observation)
 
-                    messages.append(Msg(
-                        role="tool",
-                        content=observation,
-                        tool_call_id=call_id,
-                        name=tool_name,
-                    ))
+                    messages.append(
+                        Msg(
+                            role="tool",
+                            content=observation,
+                            tool_call_id=call_id,
+                            name=tool_name,
+                        )
+                    )
 
                 if any_success:
                     self._cb.record_success()  # type: ignore[union-attr]
@@ -189,25 +200,28 @@ class ReActExecutor:
                 terminate, reason = self._cb.should_terminate()  # type: ignore[union-attr]
                 if terminate:
                     return ExecutorResult(
-                        content=reason, steps=step + 1, terminated=True,
+                        content=reason,
+                        steps=step + 1,
+                        terminated=True,
                         termination_reason="consecutive_errors",
                     )
 
                 # Token burn guard
                 if self._total_obs_chars > self._cfg.token_burn_hard_chars:
                     return ExecutorResult(
-                        content=("[TERMINATED] Data limit (50k chars) reached. "
-                                 "Summarizing now."),
+                        content=("[TERMINATED] Data limit (50k chars) reached. Summarizing now."),
                         steps=step + 1,
                         terminated=True,
                         termination_reason="token_burn",
                     )
                 if self._total_obs_chars > self._cfg.token_burn_warn_chars:
-                    messages.append(Msg(
-                        role="user",
-                        content="(Internal Control: 30k+ chars gathered. "
-                                "Stop researching. Synthesize now.)",
-                    ))
+                    messages.append(
+                        Msg(
+                            role="user",
+                            content="(Internal Control: 30k+ chars gathered. "
+                            "Stop researching. Synthesize now.)",
+                        )
+                    )
 
                 if self._step_callback:
                     await self._step_callback(messages)
@@ -219,13 +233,15 @@ class ReActExecutor:
                 total_ms = int((time.monotonic() - wall_start) * 1000)
                 logger.info(
                     "executor done agent_id=%s steps=%d ms=%d",
-                    agent_id, step + 1, total_ms,
+                    agent_id,
+                    step + 1,
+                    total_ms,
                 )
                 return ExecutorResult(
                     content=content,
                     steps=step + 1,
                     total_ms=total_ms,
-                    image_paths=image_paths if image_paths else None
+                    image_paths=image_paths if image_paths else None,
                 )
 
         # Max steps reached

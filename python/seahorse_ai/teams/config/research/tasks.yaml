@@ -1,0 +1,15 @@
+research_task:
+  description: >-
+    Conduct thorough research on {objective}. Find at least 5 key points 
+    that provide a deep understanding of the topic.
+  expected_output: >-
+    A list of 5-10 detailed bullet points with citations where possible.
+  agent: researcher
+
+analysis_task:
+  description: >-
+    Analyze the research results for {objective} and write a professional report.
+    Ensure the tone is premium and insightful.
+  expected_output: >-
+    A professional markdown report with a summary, key findings, and recommendations.
+  agent: analyst

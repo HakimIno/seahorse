@@ -11,6 +11,7 @@ Falls back to regex if extractor unavailable.
 
 Complex actions (SEARCH_WEB, SQL, CHAT, CLARIFY) fall through to ReAct.
 """
+
 from __future__ import annotations
 
 import json
@@ -27,12 +28,13 @@ logger = logging.getLogger(__name__)
 class StructuredIntent:
     """Result of structured intent classification."""
 
-    intent: str = "GENERAL"            # GENERAL|PUBLIC_REALTIME|PRIVATE_MEMORY|DATABASE
-    action: str = "CHAT"               # STORE|QUERY|UPDATE|DELETE|SEARCH_WEB|SQL|GREET|CHAT|CLARIFY
-    entity: str | None = None          # The key data to store/search
-    needs_clarification: bool = False   # True if ambiguous
-    complexity: int = 3                # 1-5 (1: Easy/Greetings, 5: Multi-agent project)
-    raw_category: str = ""             # Legacy category for compatibility
+    intent: str = "GENERAL"  # GENERAL|PUBLIC_REALTIME|PRIVATE_MEMORY|DATABASE
+    action: str = "CHAT"  # STORE|QUERY|UPDATE|DELETE|SEARCH_WEB|SQL|GREET|CHAT|CLARIFY
+    entity: str | None = None  # The key data to store/search
+    needs_clarification: bool = False  # True if ambiguous
+    complexity: int = 3  # 1-5 (1: Easy/Greetings, 5: Multi-agent project)
+    tone: str = "PROFESSIONAL"  # PROFESSIONAL | CASUAL
+    raw_category: str = ""  # Legacy category for compatibility
 
 
 # Actions that bypass ReAct tools but still generate natural responses
@@ -49,6 +51,7 @@ Fields:
 - "entity": the key data to store/search/update (string or null)
 - "needs_clarification": true if the request is ambiguous
 - "complexity": 1-5 (Integer)
+- "tone": "PROFESSIONAL" (for work, facts, data) or "CASUAL" (for jokes, greetings, small talk)
     - 1-2: Simple facts, greetings, or basic storage.
     - 3: Complex tool usage, analysis, or logic (Single Agent).
     - 4-5: Multi-step objectives, deep research, or projects (Specialized Crew required).
@@ -87,21 +90,17 @@ async def classify_structured_intent(
     # Tier 0: Greeting fast-path (0 LLM calls for classification)
     if _is_greeting(q_lower):
         return StructuredIntent(
-            intent="GENERAL", action="GREET",
+            intent="GENERAL",
+            action="GREET",
             raw_category="GENERAL",
         )
 
     # Tier 1: Single LLM call for structured classification
     history_summary = ""
     if history:
-        recent = [
-            m for m in history[-6:]
-            if m.role in ("user", "assistant") and m.content
-        ]
+        recent = [m for m in history[-6:] if m.role in ("user", "assistant") and m.content]
         if recent:
-            history_summary = "\n".join(
-                f"- {m.role}: {(m.content or '')[:100]}" for m in recent
-            )
+            history_summary = "\n".join(f"- {m.role}: {(m.content or '')[:100]}" for m in recent)
 
     prompt = STRUCTURED_INTENT_PROMPT.format(
         query=query,
@@ -110,10 +109,10 @@ async def classify_structured_intent(
 
     try:
         result = await llm_backend.complete(  # type: ignore[union-attr]
-            [Message(role="user", content=prompt)], tier="worker"
+            [Message(role="user", content=prompt)], tier="fast"
         )
         logger.info("structured_intent raw result: %r", result)
-        
+
         # Handle both dict and string results
         if isinstance(result, dict):
             data = result.get("content", result)
@@ -128,12 +127,16 @@ async def classify_structured_intent(
             entity=data.get("entity"),
             needs_clarification=data.get("needs_clarification", False),
             complexity=int(data.get("complexity", 3)),
+            tone=data.get("tone", "PROFESSIONAL").upper(),
         )
         # Set legacy category
         si.raw_category = si.intent
         logger.info(
             "structured_intent: intent=%s action=%s entity=%r clarify=%s",
-            si.intent, si.action, si.entity, si.needs_clarification,
+            si.intent,
+            si.action,
+            si.entity,
+            si.needs_clarification,
         )
         return si
 
@@ -144,16 +147,19 @@ async def classify_structured_intent(
             MEMORY_KEYWORDS,
             REALTIME_KEYWORDS,
         )
+
         for kw in MEMORY_KEYWORDS:
             if kw.lower() in q_lower:
                 return StructuredIntent(
-                    intent="PRIVATE_MEMORY", action="QUERY",
+                    intent="PRIVATE_MEMORY",
+                    action="QUERY",
                     raw_category="PRIVATE_MEMORY",
                 )
         for kw in REALTIME_KEYWORDS:
             if kw.lower() in q_lower:
                 return StructuredIntent(
-                    intent="PUBLIC_REALTIME", action="SEARCH_WEB",
+                    intent="PUBLIC_REALTIME",
+                    action="SEARCH_WEB",
                     raw_category="PUBLIC_REALTIME",
                 )
         # Default to CHAT (slow path) for everything else, including mocks
@@ -190,14 +196,15 @@ class FastPathRouter:
             return None  # Complex → ReAct loop
 
         import time
+
         start_t = time.perf_counter()
 
         if si.action == "GREET":
-            return await self._handle_conversational(prompt, history, start_t)
+            return await self._handle_conversational(prompt, history, start_t, tone=si.tone)
 
         if si.action == "CHAT":
             if si.complexity <= 2:
-                return await self._handle_conversational(prompt, history, start_t)
+                return await self._handle_conversational(prompt, history, start_t, tone=si.tone)
             return None  # Complexity 3+ → ReAct or Auto-Seahorse
 
         if si.action == "STORE" and si.entity:
@@ -208,29 +215,38 @@ class FastPathRouter:
 
         return None
 
-    async def _handle_conversational(self, prompt: str, history: list[Message] | None, start_t: float) -> AgentResponse:
+    async def _handle_conversational(
+        self, prompt: str, history: list[Message] | None, start_t: float, tone: str = "PROFESSIONAL"
+    ) -> AgentResponse:
         """Process greetings and simple chat queries fully via the fast model."""
         import time
 
         from seahorse_ai.schemas import Message
-        
-        msgs = [
-            Message(
-                role="system", 
-                content=(
-                    "You are Seahorse AI, an intelligent business agent. "
-                    "You can summarize data, query databases, and remember context. "
-                    "Answer politely, concisely, and naturally in the user's language."
-                )
+
+        # Select persona based on tone
+        if tone == "CASUAL":
+            system_msg = (
+                "You are Seahorse AI, but in a friendly, casual, and slightly humorous mode. "
+                "You are chatting with a friend. Use emojis, be warm, and keep it light. "
+                "Reply in the user's language."
             )
-        ]
+        else:
+            system_msg = (
+                "You are Seahorse AI, an intelligent business agent. "
+                "You are professional, precise, and helpful. "
+                "Answer politely, concisely, and naturally in the user's language."
+            )
+
+        msgs = [Message(role="system", content=system_msg)]
         if history:
-            msgs.extend(history)
+            # OPTIMIZATION: Truncate history for greetings.
+            # Usually only need last 2 turns to maintain flow without token waste.
+            msgs.extend(history[-2:])
         msgs.append(Message(role="user", content=prompt))
-        
+
         try:
-            # Use the worker tier (gemini-3-flash) which is fast and essentially free
-            res = await self._llm.complete(msgs, tier="worker")
+            # Use the 'fast' tier (gemini-3.1-flash-lite) for extreme efficiency
+            res = await self._llm.complete(msgs, tier="fast")
             content = str(res.get("content", res) if isinstance(res, dict) else res)
         except Exception as e:
             logger.error(f"Fast chat fallback error: {e}")
@@ -243,7 +259,9 @@ class FastPathRouter:
         )
 
     async def _handle_store(
-        self, entity: str, agent_id: str,
+        self,
+        entity: str,
+        agent_id: str,
     ) -> AgentResponse:
         """Store entity in memory.
 
@@ -267,7 +285,9 @@ class FastPathRouter:
                 stored.append(fact.text)
                 logger.info(
                     "fast_path.store: type=%s importance=%d text=%r",
-                    fact.fact_type, fact.importance, fact.text,
+                    fact.fact_type,
+                    fact.importance,
+                    fact.text,
                 )
 
             if len(stored) == 1:
@@ -290,13 +310,13 @@ class FastPathRouter:
         """Extract MemoryFacts via LLM extractor, falling back to regex."""
         try:
             from seahorse_ai.tools.memory_extractor import MemoryExtractor
+
             extractor = MemoryExtractor(llm_backend=self._llm)
             return await extractor.extract(text)
         except Exception as exc:
-            logger.warning(
-                "fast_path: MemoryExtractor unavailable (%s) — using regex split", exc
-            )
+            logger.warning("fast_path: MemoryExtractor unavailable (%s) — using regex split", exc)
             from seahorse_ai.tools.memory_extractor import MemoryFact
+
             items = _split_entities(text)
             return [MemoryFact(text=item, importance=3) for item in items]
 
@@ -306,6 +326,7 @@ class FastPathRouter:
         """Search memory and synthesize an answer (Phase 4)."""
         try:
             from seahorse_ai.planner.memory_reasoner import MemoryReasoner
+
             reasoner = MemoryReasoner(llm_backend=self._llm, tools_registry=self._tools)
             return await reasoner.reason(query=entity, agent_id=agent_id, history=history)
         except Exception as exc:

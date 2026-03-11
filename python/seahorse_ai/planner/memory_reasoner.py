@@ -4,6 +4,7 @@ Phase 4 upgrade: Instead of just dumping raw search results, the MemoryReasoner
 uses an LLM to read the retrieved facts and answer the user's specific question
 naturally and coherently.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -37,6 +38,7 @@ Rules:
 5. If the information is found in Graph Relationships, present it as a clear logical connection.
 6. Use a polite Thai tone. If the information isn't found, say "I don't have that information yet" politely.
 """
+
 
 class MemoryReasoner:
     """Handles complex memory queries by searching and reasoning over facts."""
@@ -72,26 +74,40 @@ class MemoryReasoner:
                     "If none found, return 'NONE'.\n\n"
                     f"Query: {query}"
                 )
-                res = await self._llm.complete([Message(role="user", content=extract_prompt)], tier="worker")
+                res = await self._llm.complete(
+                    [Message(role="user", content=extract_prompt)], tier="worker"
+                )
                 raw = str(res.get("content", res) if isinstance(res, dict) else res).strip()
-                if "NONE" in raw.upper(): return set()
+                if "NONE" in raw.upper():
+                    return set()
                 return {e.strip() for e in raw.split(",") if len(e.strip()) > 1}
 
             # 2a. Run Vector Search + Entity Extraction in parallel
-            vector_task = self._tools.call("memory_search", {"query": query, "k": k, "agent_id": agent_id})
+            vector_task = self._tools.call(
+                "memory_search", {"query": query, "k": k, "agent_id": agent_id}
+            )
             entities_task = get_entities()
-            
+
             search_result, unique_entities = await asyncio.gather(vector_task, entities_task)
 
             # 2b. Format Vector Results
-            vector_facts = "\n".join([f"- {f['text']}" for f in search_result]) if search_result else "(No relevant long-term memories found)"
+            vector_facts = (
+                "\n".join([f"- {f['text']}" for f in search_result])
+                if search_result
+                else "(No relevant long-term memories found)"
+            )
 
             # 2c. Run Graph Neighbor searches in parallel for all extracted entities
-            graph_tasks = [self._tools.call("graph_search_neighbors", {"entity": entity}) for entity in unique_entities]
+            graph_tasks = [
+                self._tools.call("graph_search_neighbors", {"entity": entity})
+                for entity in unique_entities
+            ]
             graph_results = await asyncio.gather(*graph_tasks) if graph_tasks else []
-            
+
             graph_lines = [res for res in graph_results if "Graph relationships" in res]
-            graph_context = "\n".join(graph_lines) if graph_lines else "(No structural relationships found)"
+            graph_context = (
+                "\n".join(graph_lines) if graph_lines else "(No structural relationships found)"
+            )
 
             # 3. Format Conversation History (Short-term)
             history_str = "(No recent history available)"
@@ -103,25 +119,22 @@ class MemoryReasoner:
             # [OPTIMIZATION] We remove the separate 'Reranker' LLM call to reduce latency.
             # Instead, we pass ALL facts to the Synthesis prompt and let it filter internally.
             prompt = _REASONER_PROMPT.format(
-                facts=vector_facts, 
-                graph_context=graph_context,
-                history=history_str, 
-                query=query
+                facts=vector_facts, graph_context=graph_context, history=history_str, query=query
             )
-            
-            result = await self._llm.complete(
-                [Message(role="user", content=prompt)], tier="worker"
-            )
-            answer = str(result.get("content", result) if isinstance(result, dict) else result).strip()
+
+            result = await self._llm.complete([Message(role="user", content=prompt)], tier="worker")
+            answer = str(
+                result.get("content", result) if isinstance(result, dict) else result
+            ).strip()
 
             logger.info("memory_reasoner: synthesized answer for query=%r", query)
-            
+
             return AgentResponse(
                 content=answer,
                 steps=1,
                 agent_id=agent_id,
                 elapsed_ms=0,
-                is_direct=True, # Signal to skip final strategist synthesis
+                is_direct=True,  # Signal to skip final strategist synthesis
             )
 
         except Exception as exc:

@@ -51,12 +51,13 @@ class LLMClient:
                 "Please try again in 1 minute."
             )
 
-        model = (
-            self._config.thinker_model
-            if tier in ("thinker", "strategist")
-            else self._config.model
-        )
-        timeout_sec = 120.0 if tier in ("thinker", "strategist") else 30.0
+        if tier in ("thinker", "strategist"):
+            model = self._config.thinker_model
+        elif tier == "fast":
+            model = self._config.fast_path_model
+        else:
+            model = self._config.model
+        timeout_sec = 60.0 if tier in ("thinker", "strategist") else 15.0
         backoff = 1.0
         for attempt in range(retries + 1):
             try:
@@ -108,12 +109,13 @@ class LLMClient:
             logger.critical("LLM call blocked by Global Circuit Breaker — System is in Safe Mode")
             raise RuntimeError("System is temporarily in Safe Mode due to multiple LLM failures. Please try again in 1 minute.")
 
-        model = (
-            self._config.thinker_model
-            if tier in ("thinker", "strategist")
-            else self._config.model
-        )
-        timeout_sec = 120.0 if tier in ("thinker", "strategist") else 60.0
+        if tier in ("thinker", "strategist"):
+            model = self._config.thinker_model
+        elif tier == "fast":
+            model = self._config.fast_path_model
+        else:
+            model = self._config.model
+        timeout_sec = 180.0 if tier in ("thinker", "strategist", "worker") else 30.0
         kwargs: dict = {
             "model": model,
             "messages": [m.model_dump(exclude_none=True) for m in messages],
