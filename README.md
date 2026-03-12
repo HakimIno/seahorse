@@ -1,139 +1,112 @@
-<p align="center">
-  <img src="assets/logo-icon-rounded.png" alt="Seahorse Logo" width="100">
-</p>
+<div align="center">
+  <img src="assets/logo-icon-rounded.png" alt="Seahorse Logo" width="160">
+  <h1>Seahorse Agent</h1>
+  <p><strong>The High-Performance, Real-Time Multi-Agent Orchestration Framework</strong></p>
 
-<h1 align="center">Seahorse</h1>
+  <p>
+    <a href="https://www.rust-lang.org/"><img src="https://img.shields.io/badge/rust-v1.75+-orange.svg?style=for-the-badge&logo=rust&logoColor=white&labelColor=1a1a2e" alt="Rust"></a>
+    <a href="https://www.python.org/"><img src="https://img.shields.io/badge/python-v3.11+-blue.svg?style=for-the-badge&logo=python&logoColor=white&labelColor=1a1a2e" alt="Python"></a>
+    <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-yellow.svg?style=for-the-badge&labelColor=1a1a2e" alt="License: MIT"></a>
+  </p>
 
-<p align="center">High-Performance Multi-Agent Orchestration Framework</p>
+  <div style="width: 100%; height: 2px; margin: 20px 0; background: linear-gradient(90deg, transparent, #00d9ff, transparent);"></div>
 
-<p align="center">
-  <a href="https://www.rust-lang.org/"><img src="https://img.shields.io/badge/rust-1.75+-orange.svg?style=flat-square" alt="Rust"></a>
-  <a href="https://www.python.org/"><img src="https://img.shields.io/badge/python-3.11+-blue.svg?style=flat-square" alt="Python"></a>
-  <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/license-MIT-yellow.svg?style=flat-square" alt="License"></a>
-</p>
-
----
+  <a href="#-quick-start" style="text-decoration: none;">
+    <img src="https://img.shields.io/badge/Quick%20Start-Get%20Started%20Now-00d9ff?style=for-the-badge&logo=rocket&logoColor=white&labelColor=1a1a2e">
+  </a>
+</div>
 
 ## Overview
 
-Seahorse is an AI agent framework built for **performance, safety, and scalability**. It bridges a **Rust core** with a **Python intelligence layer** via PyO3 FFI, enabling true parallel agent collaboration through an event-driven pub/sub architecture.
+Seahorse is a next-generation AI agent framework engineered for enterprise-grade performance, safety, and scalability. By bridging the raw speed of **Rust** with the rich intelligence of **Python**, Seahorse enables true parallel collaboration among agents in a real-time, event-driven architecture.
 
-Unlike traditional hierarchical systems, agents in Seahorse communicate asynchronously over a native message bus — eliminating blocking bottlenecks and enabling real-time swarm coordination.
-
----
-
-## Architecture
-
-```mermaid
-graph TD
-    subgraph Python ["Python Intelligence Layer"]
-        A[Swarm Manager] --> B[RAG Pipeline]
-        B --> C[Hybrid Memory]
-        A --> D[Tool Registry]
-    end
-
-    subgraph Bridge ["PyO3 FFI Bridge"]
-        E[Native Bindings]
-    end
-
-    subgraph Rust ["Rust Core Layer"]
-        F[Tokio Pub/Sub Bus]
-        G[HNSW Vector Index]
-        H[Wasm Sandbox]
-        I[Axum Gateway]
-    end
-
-    Python <--> Bridge <--> Rust
-```
+Unlike traditional hierarchical agents, Seahorse utilizes a high-performance Pub/Sub message bus to facilitate asynchronous swarm collaboration, eliminating blocking bottlenecks and maximizing throughput.
 
 ---
 
-## Core Features
+## Key Pillars
 
-**Real-Time Swarm Orchestration**
-Agents communicate over a Rust-powered event bus with sub-millisecond latency and zero-copy message routing. Scouts, commanders, and workers run in parallel without synchronous delegation overhead.
+### Real-Time Swarm Orchestration
 
-**Hybrid RAG & Long-Term Memory**
-Dual-memory system combining HNSW vector search (Rust-native) with a knowledge graph (Subject-Predicate-Object triples) for high-accuracy contextual retrieval.
+Move beyond synchronous delegation. Seahorse agents communicate over a **Rust-powered event-driven bus**, allowing scouts, commanders, and workers to collaborate in parallel.
 
-**Secure Tool Sandboxing**
-Untrusted tool code executes inside a Wasmtime sandbox — host-isolated with full memory safety guarantees.
+- **Sub-ms Latency:** Native message routing with zero-copy communication.
+- **Event-Driven:** Reactive architecture that responds to environment changes in real-time.
 
-**Analytics & Visualization**
-Built-in support for SQL analytics, predictive forecasting, and automated chart generation (bar, line, pie) with multi-language output.
+### Hybrid RAG & Long-Term Memory
+
+Experience intelligence that never forgets. Seahorse integrates a dual-memory system for superior retrieval accuracy.
+
+- **Vector Search (HNSW):** Blazing fast similarity search powered by Rust.
+- **Knowledge Graph:** Capture complex relationships for deep contextual reasoning.
+
+### Secure Tool Sandboxing
+
+Deploy with confidence. Seahorse executes untrusted tool code within a **Wasmtime-sandboxed environment**, ensuring host isolation and memory safety.
 
 ---
 
-## Agent Types & Roles
+## Technical Architecture
 
-Seahorse organizes agents into three distinct roles within a swarm. Each role subscribes to specific message channels on the pub/sub bus and operates concurrently.
+Seahorse leverages a hybrid stack designed for speed and flexibility. The system distinguishes between the high-level orchestration in Python and the performance-critical core in Rust.
 
-| Role          | Responsibility                                                                                       |
-| ------------- | ---------------------------------------------------------------------------------------------------- |
-| **Commander** | Decomposes high-level tasks, assigns subtasks to workers, aggregates results                         |
-| **Scout**     | Performs retrieval and research — queries vector memory, knowledge graph, and external tools         |
-| **Worker**    | Executes specific subtasks (code generation, data transformation, API calls) inside the Wasm sandbox |
+<div align="center">
+  <img src="assets/seahorse-architecture.png" alt="Seahorse Architecture" width="800">
+  <p><i>Figure 1: High-level System Architecture</i></p>
+</div>
 
-Roles are composable. A single agent can be configured to act as Scout + Worker depending on the task graph. The Swarm Manager (Python layer) handles lifecycle, role assignment, and fault recovery.
+### Multi-modal Knowledge Grounding
+
+The pipeline supports sophisticated content parsing and graph-based grounding for diverse data types.
+
+<div align="center">
+  <img src="assets/ara.png" alt="RAG Pipeline" width="800">
+  <p><i>Figure 2: Multi-modal RAG Pipeline Workflow</i></p>
+</div>
 
 ---
 
 ## Quick Start
 
-**Prerequisites:** Rust 1.75+, Python 3.11+, [uv](https://github.com/astral-sh/uv)
+### Prerequisites
 
-```bash
-# Clone and install dependencies
-git clone https://github.com/HakimIno/seahorse.git
-cd seahorse
-uv sync
+- **Rust** 1.75+
+- **Python** 3.11+
+- **uv** (Ultra-fast package manager)
 
-# Build FFI core
-uv run maturin develop -m crates/seahorse-ffi/Cargo.toml
+### Installation
 
-# Start server
-./dev.sh
-```
+1. **Clone & Sync**
 
----
+   ```bash
+   git clone https://github.com/HakimIno/seahorse.git
+   cd seahorse
+   uv sync
+   ```
 
-## Testing
+2. **Build FFI Core**
 
-```bash
-# Rust core
-cargo nextest run
+   ```bash
+   uv run maturin develop -m crates/seahorse-ffi/Cargo.toml
+   ```
 
-# Python layer
-uv run pytest python/tests/
-```
-
----
-
-## Contributing
-
-Contributions are welcome. Please follow these guidelines before opening a PR.
-
-**Branching**
-Use descriptive branch names: `feat/`, `fix/`, `docs/`, `chore/` prefixes.
-
-**Code Style**
-
-- Rust: `cargo fmt` + `cargo clippy --all-targets` must pass with no warnings
-- Python: `ruff check` + `mypy` must pass clean
-
-**Commits**
-Follow [Conventional Commits](https://www.conventionalcommits.org/). Keep commits atomic and focused.
-
-**Pull Requests**
-
-- Link the relevant issue if applicable
-- Include tests for new behavior
-- Update documentation if the public API changes
-
-For significant changes, open an issue first to discuss the approach before investing in implementation.
+3. **Run Server**
+   ```bash
+   ./dev.sh
+   ```
 
 ---
 
-<p align="center">
-  Built for the next wave of autonomous agents.
-</p>
+## Enterprise Verification
+
+Seahorse maintains a rigorous testing standard across both layers:
+
+- **Core Performance:** `cargo nextest run`
+- **Intelligence Layer:** `uv run pytest python/tests/`
+
+---
+
+<div align="center">
+  <p>Built for the next wave of autonomous agents.</p>
+  <img src="https://img.shields.io/badge/Built%20With-Advanced%20Agentic%20AI-00d9ff?style=flat-square&labelColor=1a1a2e" alt="Built With">
+</div>
