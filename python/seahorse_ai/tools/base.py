@@ -1,21 +1,19 @@
-"""Tool base — @tool decorator and ToolRegistry."""
-
 from __future__ import annotations
 
-import asyncio
 import inspect
 import logging
 from collections.abc import Callable
 from typing import Any, TypeVar
 
-from pydantic import BaseModel
+import anyio
+from msgspec import Struct
 
 logger = logging.getLogger(__name__)
 
 F = TypeVar("F", bound=Callable[..., Any])
 
 
-class ToolSpec(BaseModel):
+class ToolSpec(Struct):
     """Metadata for a registered tool."""
 
     name: str
@@ -104,9 +102,8 @@ class SeahorseToolRegistry:
                 result = await fn(**args)
             else:
                 # Run synchronous tools (like matplotlib) in a thread pool
-                # to prevent blocking the main asyncio event loop
-                loop = asyncio.get_running_loop()
-                result = await loop.run_in_executor(None, lambda: fn(**args))
+                # to prevent blocking the main event loop
+                result = await anyio.to_thread.run_sync(lambda: fn(**args))
 
             return str(result)
         except TypeError as exc:

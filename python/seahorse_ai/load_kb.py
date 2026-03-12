@@ -21,7 +21,7 @@ standalone batch job for offline document ingestion.
 from __future__ import annotations
 
 import argparse
-import asyncio
+import anyio
 import logging
 import sys
 from pathlib import Path
@@ -72,4 +72,5 @@ if __name__ == "__main__":
         print(f"Error: {args.source} is not a directory", file=sys.stderr)
         sys.exit(1)
 
-    sys.exit(asyncio.run(main(args.source)))
+    import anyio
+    sys.exit(anyio.run(main, args.source))

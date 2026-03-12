@@ -13,6 +13,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+import anyio
+
 from seahorse_ai.planner import LLMBackend, ReActPlanner, ToolRegistry
 from seahorse_ai.schemas import AgentRequest
 from seahorse_ai.skills.base import SeahorseSkill
@@ -211,58 +213,47 @@ class SwarmOrchestrator:
         if not self._bus:
             return
 
-        import asyncio
-
         topic = f"agent_{agent.name.lower()}"
         receiver = self._bus.subscribe(topic)
         logger.info("Swarm: %s listening on topic '%s'", agent.name, topic)
 
-        while True:
-            try:
-                # Yield control to allow other tasks to run
-                await asyncio.sleep(0.1)
+        async with anyio.create_task_group() as tg:
+            while True:
+                try:
+                    msg = await anyio.to_thread.run_sync(receiver.recv)
 
-                # The PyO3 recv() method internally uses `allow_threads` to drop the GIL
-                # and timeouts so it won't block forever. Thus we don't need `to_thread`.
-                msg = receiver.recv()
+                    if msg is not None:
+                        logger.info(
+                            "Swarm [%s] INBOX: from %s -> %s", agent.name, msg["sender"], msg["content"]
+                        )
 
-                if msg is not None:
-                    logger.info(
-                        "Swarm [%s] INBOX: from %s -> %s", agent.name, msg["sender"], msg["content"]
-                    )
+                        # Context injection for real-time reactivity
+                        inbound_prompt = f"INBOUND MESSAGE from {msg['sender']}:\n{msg['content']}\nPlease acknowledge or act on this."
+                        request = AgentRequest(prompt=inbound_prompt, agent_id=f"crew_{agent.name}_rx")
 
-                    # Context injection for real-time reactivity
-                    inbound_prompt = f"INBOUND MESSAGE from {msg['sender']}:\n{msg['content']}\nPlease acknowledge or act on this."
-                    request = AgentRequest(prompt=inbound_prompt, agent_id=f"crew_{agent.name}_rx")
+                        # Start reagent task in group
+                        tg.start_soon(agent.planner.run, request)
 
-                    # Fire and forget the plan execution
-                    asyncio.create_task(agent.planner.run(request))
-
-            except StopAsyncIteration:
-                logger.debug("Swarm [%s] receiver channel closed.", agent.name)
-                break
-            except Exception as e:
-                # If there's a timeout panic or another rust-side cancel, just retry.
-                if "timeout" not in str(e).lower() and "panic" not in str(e).lower():
-                    logger.error("Swarm [%s] listener trapped: %s", agent.name, e)
+                except Exception as e:
+                    # Ignore common Rust bridge timeouts
+                    if "timeout" not in str(e).lower() and "panic" not in str(e).lower():
+                        logger.error("Swarm [%s] listener trapped: %s", agent.name, e)
 
     async def run(self, prompt: str) -> str:
-        """Run the swarm asynchronously."""
-        import asyncio
-
-        # Start listeners for all agents
-        listeners = []
-        for agent in self._agents.values():
-            listeners.append(asyncio.create_task(self._run_agent_listener(agent)))
-
+        """Run the swarm asynchronously using AnyIO TaskGroup."""
         if self._master is None:
             self._master = ReActPlanner(llm=self._llm, tools=self._shared_registry)
 
-        request = AgentRequest(prompt=prompt)
-        response = await self._master.run(request)
+        async with anyio.create_task_group() as tg:
+            # Start listeners for all agents in the task group
+            for agent in self._agents.values():
+                tg.start_soon(self._run_agent_listener, agent)
 
-        # Cleanup listeners
-        for listener in listeners:
-            listener.cancel()
+            # Use msgspec-ready AgentRequest
+            request = AgentRequest(prompt=prompt)
+            response = await self._master.run(request)
+
+            # Signal task group to shut down
+            tg.cancel_scope.cancel()
 
         return response.content

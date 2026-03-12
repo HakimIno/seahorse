@@ -330,15 +330,12 @@ class RAGPipeline:
 
     async def _embed(self, text: str) -> np.ndarray:
         """Call LiteLLM embedding API and return a numpy float32 array."""
-        import asyncio
-
+        import anyio
         import litellm  # local import to avoid top-level cost
 
         try:
-            response = await asyncio.wait_for(
-                litellm.aembedding(model=self._embed_model, input=text),
-                timeout=_EMBED_TIMEOUT,
-            )
+            with anyio.fail_after(_EMBED_TIMEOUT):
+                response = await litellm.aembedding(model=self._embed_model, input=text)
         except TimeoutError as err:
             raise RuntimeError(
                 f"Embedding API timed out after {_EMBED_TIMEOUT}s. "

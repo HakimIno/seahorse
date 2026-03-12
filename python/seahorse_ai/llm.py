@@ -8,12 +8,14 @@ Phase 3 improvements:
 
 from __future__ import annotations
 
-import asyncio
+import json
 import logging
 import random
 from collections.abc import AsyncIterator
 
+import anyio
 import litellm
+import msgspec
 
 from seahorse_ai.schemas import LLMConfig, Message
 
@@ -65,7 +67,7 @@ class LLMClient:
             try:
                 response = await litellm.acompletion(
                     model=model,
-                    messages=[m.model_dump(exclude_none=True) for m in messages],
+                    messages=[msgspec.to_builtins(m) for m in messages],
                     temperature=self._config.temperature,
                     max_tokens=self._config.max_tokens,
                     stream=True,
@@ -87,7 +89,7 @@ class LLMClient:
                         total_backoff,
                         retries - attempt,
                     )
-                    await asyncio.sleep(total_backoff)
+                    await anyio.sleep(total_backoff)
                     backoff *= 2
                 else:
                     logger.error("LLM stream failed after %d retries: %s", retries, exc)
@@ -125,7 +127,7 @@ class LLMClient:
         timeout_sec = 180.0 if tier in ("thinker", "strategist", "worker") else 30.0
         kwargs: dict = {
             "model": model,
-            "messages": [m.model_dump(exclude_none=True) for m in messages],
+            "messages": [msgspec.to_builtins(m) for m in messages],
             "temperature": self._config.temperature,
             "max_tokens": self._config.max_tokens,
             "timeout": timeout_sec,
@@ -136,7 +138,14 @@ class LLMClient:
         try:
             response = await litellm.acompletion(**kwargs)
             message = response.choices[0].message
-            return message.model_dump(exclude_none=True)
+            # LiteLLM message objects often contain nested Pydantic models (like tool_calls).
+            # We MUST perform a deep conversion to plain dicts for msgspec compatibility.
+            if hasattr(message, "model_dump_json"):  # Pydantic v2
+                return json.loads(message.model_dump_json(exclude_none=True))
+            if hasattr(message, "json"):  # Pydantic v1 / Legacy LiteLLM
+                return json.loads(message.json())
+            # Fallback to standard dict conversion (may not be deep)
+            return dict(message)
 
         except _RETRYABLE as exc:
             if retries > 0:
@@ -148,7 +157,7 @@ class LLMClient:
                     total_backoff,
                     retries,
                 )
-                await asyncio.sleep(total_backoff)
+                await anyio.sleep(total_backoff)
                 return await self._complete_with_retry(
                     messages, tools=tools, retries=retries - 1, backoff=backoff * 2
                 )
@@ -174,7 +183,7 @@ def get_llm(tier: str = "worker") -> LLMClient:
     model = os.environ.get("SEAHORSE_WORKER_MODEL", "openrouter/z-ai/glm-5")
     if tier == "thinker":
         model = os.environ.get(
-            "SEAHORSE_THINKER_MODEL", "openrouter/google/gemini-2.0-flash-lite-preview-02-05"
+            "SEAHORSE_THINKER_MODEL", "openrouter/google/gemini-3.1-flash-lite-preview"
         )
 
     return LLMClient(config=LLMConfig(model=model))

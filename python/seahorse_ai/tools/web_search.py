@@ -81,11 +81,10 @@ async def web_search(query: str, max_results: int = 5) -> str:
     max_results = int(max_results)
     logger.info("web_search: query=%r max_results=%d", query, max_results)
 
-    # Run synchronous network call in executor to avoid blocking async loop
-    import asyncio
+    # Run synchronous network call in worker thread to avoid blocking async loop
+    import anyio
 
-    loop = asyncio.get_running_loop()
-    results = await loop.run_in_executor(None, _search_ddg_lite, query, max_results)
+    results = await anyio.to_thread.run_sync(_search_ddg_lite, query, max_results)
 
     if not results:
         return (

@@ -25,7 +25,7 @@ The API is identical to the legacy planner.py for full backward compatibility.
 
 from __future__ import annotations
 
-import asyncio
+import anyio
 import logging
 import os
 import uuid
@@ -179,14 +179,12 @@ class ReActPlanner:
                 si = StructuredIntent(intent="GENERAL", action="CHAT", complexity=3)
             else:
                 try:
-                    si = await asyncio.wait_for(
-                        classify_structured_intent(
+                    with anyio.fail_after(15.0):
+                        si = await classify_structured_intent(
                             request.prompt,
                             self._llm,
                             request.history,
-                        ),
-                        timeout=15.0,  # Reduced timeout for fast worker
-                    )
+                        )
                 except TimeoutError:
                     logger.warning(
                         "agent.run intent classification timed out — falling back to GENERAL"
@@ -332,8 +330,8 @@ class ReActPlanner:
                         request.prompt,
                     )
 
-                # 8. Background memory (rate-limited, non-blocking)
-                asyncio.create_task(self._memory.record(messages, agent_id=request.agent_id))
+                # 8. Background memory (rate-limited)
+                await self._memory.record(messages, agent_id=request.agent_id)
 
                 _set_span(
                     span,
@@ -401,7 +399,8 @@ class ReActPlanner:
         try:
             conn = await asyncpg.connect(pg_uri)
             try:
-                hist_json = json.dumps([h.model_dump() for h in history]) if history else None
+                import msgspec
+                hist_json = json.dumps([msgspec.to_builtins(h) for h in history]) if history else None
                 await conn.execute(
                     """
                     INSERT INTO seahorse_executions (id, agent_id, prompt, history, status)
@@ -431,7 +430,8 @@ class ReActPlanner:
         try:
             conn = await asyncpg.connect(pg_uri)
             try:
-                msgs_json = json.dumps([m.model_dump() for m in messages])
+                import msgspec
+                msgs_json = json.dumps([msgspec.to_builtins(m) for m in messages])
                 await conn.execute(
                     """
                     UPDATE seahorse_executions 

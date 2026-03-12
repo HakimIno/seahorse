@@ -1,54 +1,55 @@
-"""Pydantic v2 schemas for the Seahorse Agent framework."""
+"""msgspec schemas for the Seahorse Agent framework."""
 
 from __future__ import annotations
 
 import os
+from typing import Any
 
-from pydantic import BaseModel, Field
+from msgspec import Struct, field
 
 
-class Message(BaseModel):
+class Message(Struct, omit_defaults=True):
     """A single LLM conversation message."""
 
     role: str
     content: str | None = None
     name: str | None = None
-    tool_calls: list[dict[str, object]] | None = None
+    tool_calls: list[dict[str, Any]] | None = None
     tool_call_id: str | None = None
 
 
-class LLMConfig(BaseModel):
+class LLMConfig(Struct, omit_defaults=True):
     """LLM provider configuration with tier support."""
 
-    model: str = Field(
+    model: str = field(
         default_factory=lambda: os.environ.get(
             "SEAHORSE_MODEL_WORKER", "openrouter/google/gemini-3-flash-preview"
         )
     )
-    thinker_model: str = Field(
+    thinker_model: str = field(
         default_factory=lambda: os.environ.get(
             "SEAHORSE_MODEL_THINKER", "openrouter/google/gemini-3-flash-preview"
         )
     )
-    fast_path_model: str = Field(
+    fast_path_model: str = field(
         default_factory=lambda: os.environ.get(
             "SEAHORSE_FAST_PATH_MODEL", "openrouter/google/gemini-3.1-flash-lite-preview"
         )
     )
-    temperature: float = Field(default=0.7, ge=0.0, le=2.0)
-    max_tokens: int = Field(default=4096, ge=1, le=128_000)
+    temperature: float = 0.7
+    max_tokens: int = 4096
 
 
-class AgentRequest(BaseModel):
+class AgentRequest(Struct, omit_defaults=True):
     """Incoming request to the Seahorse Agent."""
 
     prompt: str
     agent_id: str = "default"
-    config: LLMConfig = Field(default_factory=LLMConfig)
-    history: list[Message] = Field(default_factory=list)
+    config: LLMConfig = field(default_factory=LLMConfig)
+    history: list[Message] = field(default_factory=list)
 
 
-class AgentResponse(BaseModel):
+class AgentResponse(Struct, omit_defaults=True):
     """Agent's final response after completing its reasoning loop."""
 
     content: str

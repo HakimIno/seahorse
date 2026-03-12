@@ -12,7 +12,7 @@ Usage:
 
 from __future__ import annotations
 
-import asyncio
+import anyio
 import logging
 import os
 import re
@@ -326,9 +326,9 @@ class SeahorseDiscordClient(discord.Client):
                             for i, chunk in enumerate(chunks):
                                 # Attach files only to the first chunk to avoid sending duplicates
                                 if i == 0 and files:
-                                    await message.channel.send(chunk, files=files)
+                                     await message.channel.send(chunk, files=files)
                                 else:
-                                    await message.channel.send(chunk)
+                                     await message.channel.send(chunk)
                         else:
                             await message.channel.send(content, files=files if files else None)
 
@@ -369,13 +369,14 @@ async def main() -> None:
     interval = int(os.environ.get("SEAHORSE_ALERTS_INTERVAL", "300"))
 
     async with client:
-        # Start watcher in the background
-        asyncio.create_task(watcher.start(interval_seconds=interval))
-        await client.start(token)
+        # Start watcher and client in parallel using AnyIO TaskGroup
+        async with anyio.create_task_group() as tg:
+            tg.start_soon(watcher.start, interval)
+            tg.start_soon(client.start, token)
 
 
 if __name__ == "__main__":
     try:
-        asyncio.run(main())
+        anyio.run(main)
     except KeyboardInterrupt:
         logger.info("Discord bot stopped.")

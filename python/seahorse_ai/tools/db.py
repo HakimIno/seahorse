@@ -102,9 +102,11 @@ async def database_query(query: str) -> str:
     # ── 1. Basic Security Guard ───────────────────────────────────────────────
     q_lower = query.strip().lower()
 
-    # Block destructive commands
+    import re
     forbidden = ["insert", "update", "delete", "drop", "truncate", "alter", "create", "replace"]
-    if any(cmd in q_lower for cmd in forbidden) or not (
+    # Use regex with word boundaries to avoid matching keywords inside column names (e.g., 'created_at')
+    pattern = r"\b(" + "|".join(forbidden) + r")\b"
+    if re.search(pattern, q_lower) or not (
         q_lower.startswith("select") or q_lower.startswith("with")
     ):
         logger.warning("database_query: blocked potentially destructive query: %r", query)

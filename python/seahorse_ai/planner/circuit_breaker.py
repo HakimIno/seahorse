@@ -1,3 +1,4 @@
+import anyio
 import logging
 
 logger = logging.getLogger(__name__)
@@ -26,16 +27,14 @@ class CircuitBreaker:
         """Reset consecutive error counter after any successful tool call."""
         self._consecutive_errors = 0
 
-    def record_error(self, tool_name: str | None, is_crash: bool = False) -> None:
+    async def record_error(self, tool_name: str | None, is_crash: bool = False) -> None:
         """Record a tool error. Increments both global and per-tool counters."""
         self._consecutive_errors += 1
         if tool_name:
             self._tool_errors[tool_name] = self._tool_errors.get(tool_name, 0) + 1
 
-        # Track globally as well
-        import asyncio
-
-        asyncio.create_task(record_global_failure())
+        # Track globally as well via FFI
+        await record_global_failure()
 
         if is_crash:
             logger.error("circuit_breaker: SYSTEM_CRASH in tool=%s", tool_name)
@@ -70,7 +69,7 @@ async def record_global_failure() -> None:
     try:
         import seahorse_ffi
 
-        seahorse_ffi.record_global_failure()
+        await anyio.to_thread.run_sync(seahorse_ffi.record_global_failure)
     except ImportError:
         logger.warning("seahorse_ffi not found. Global Circuit Breaker ignored.")
     except Exception as e:
@@ -82,7 +81,7 @@ async def is_system_healthy() -> bool:
     try:
         import seahorse_ffi
 
-        healthy = seahorse_ffi.is_system_healthy()
+        healthy = await anyio.to_thread.run_sync(seahorse_ffi.is_system_healthy)
         if not healthy:
             logger.critical("Global Circuit Breaker TRIPPED via FFI.")
         return healthy

@@ -12,8 +12,7 @@ Usage:
 
 from __future__ import annotations
 
-import asyncio
-import contextlib
+import anyio
 import logging
 import os
 import re
@@ -21,6 +20,7 @@ import sys
 from collections import defaultdict, deque
 
 import httpx
+import msgspec
 from telegram import (
     InlineKeyboardButton,
     InlineKeyboardMarkup,
@@ -38,7 +38,7 @@ from telegram.ext import (
 )
 
 from seahorse_ai.router import ModelRouter
-from seahorse_ai.schemas import AgentRequest, Message
+from seahorse_ai.schemas import AgentRequest, AgentResponse, Message
 
 # Setup logging
 logging.basicConfig(
@@ -59,6 +59,14 @@ def _extract_choices(text: str) -> list[str]:
     matches = _CHOICE_PATTERN.findall(text)
     choices = [m.strip() for m in matches if len(m.strip()) < 80]
     return choices if 2 <= len(choices) <= 5 else []
+
+
+def _escape_markdown(text: str) -> str:
+    """Escape special characters for Telegram Markdown (V1)."""
+    # Telegram Markdown (V1) only needs escaping for characters that start an entity
+    # if they are not intended to be one.
+    # We focus on the big ones that usually break things: _, *, `
+    return text.replace("_", "\\_").replace("*", "\\*").replace("`", "\\`")
 
 
 class TelegramAdapter:
@@ -145,7 +153,6 @@ class TelegramAdapter:
         """Core logic for processing user input and generating responses."""
         try:
             # Clean history: Merge consecutive messages with the same role
-            # This is required by some providers like Z-AI (GLM)
             raw_history = list(self._history[user_id])
             cleaned_history = []
             for msg in raw_history:
@@ -164,97 +171,87 @@ class TelegramAdapter:
                 try:
                     while True:
                         await context.bot.send_chat_action(chat_id=chat_id, action="typing")
-                        await asyncio.sleep(3.0)
-                except asyncio.CancelledError:
+                        await anyio.sleep(3.0)
+                except Exception:
                     pass
 
-            typing_task = asyncio.create_task(keep_typing())
-            await asyncio.sleep(0)
+            async with anyio.create_task_group() as tg:
+                tg.start_soon(keep_typing)
 
-            try:
-                # UNIFIED: Redirect to Rust Router instead of local ReActPlanner
-                async with httpx.AsyncClient(timeout=300.0) as client:
-                    # Optimization: Send only a small window of history (e.g., last 5 messages)
-                    # to the Router for Fast Path checks to save tokens on every turn.
-                    fast_path_history = (
-                        list(cleaned_history)[-5:]
-                        if len(cleaned_history) > 5
-                        else list(cleaned_history)
-                    )
-
-                    resp = await client.post(
-                        f"{self.router_url}/v1/agent/run",
-                        json={
-                            "prompt": text,
-                            "agent_id": agent_id,
-                            "history": [m.model_dump() for m in fast_path_history],
-                        },
-                    )
-                    resp.raise_for_status()
-                    data = resp.json()
-
-                    # Wrap internal response format
-                    from seahorse_ai.schemas import AgentResponse
-
-                    # If Fast Path handled it, we get content directly
-                    if data.get("status") == "completed" and data.get("content"):
-                        response = AgentResponse(
-                            content=data["content"], steps=0, agent_id=agent_id, elapsed_ms=0
+                try:
+                    # UNIFIED: Redirect to Rust Router instead of local ReActPlanner
+                    async with httpx.AsyncClient(timeout=300.0) as client:
+                        fast_path_history = (
+                            list(cleaned_history)[-5:]
+                            if len(cleaned_history) > 5
+                            else list(cleaned_history)
                         )
-                    else:
-                        # If not Fast Path, fall back to local planner for immediate response
-                        logger.info("FastPath: [FALLBACK] or Queued. Using local ReActPlanner.")
-                        from seahorse_ai.planner import ReActPlanner
-                        from seahorse_ai.router import ModelRouter
 
-                        internal_router = ModelRouter(
-                            worker_model=os.environ.get(
-                                "SEAHORSE_MODEL_WORKER", "openrouter/google/gemini-3-flash-preview"
-                            ),
-                            thinker_model=os.environ.get(
-                                "SEAHORSE_MODEL_THINKER", "openrouter/google/gemini-3-flash-preview"
-                            ),
-                            strategist_model=os.environ.get(
-                                "SEAHORSE_MODEL_STRATEGIST",
-                                "openrouter/google/gemini-3-flash-preview",
-                            ),
-                            fast_path_model=os.environ.get(
-                                "SEAHORSE_FAST_PATH_MODEL",
-                                "openrouter/google/gemini-2.0-flash-lite-preview-02-05",
-                            ),
+                        resp = await client.post(
+                            f"{self.router_url}/v1/agent/run",
+                            json={
+                                "prompt": text,
+                                "agent_id": agent_id,
+                                "history": [msgspec.to_builtins(m) for m in fast_path_history],
+                            },
                         )
-                        local_planner = ReActPlanner(llm=internal_router)
-                        response = await local_planner.run(request)
+                        resp.raise_for_status()
+                        data = resp.json()
 
-            except Exception as e:
-                logger.error(
-                    "Failed to connect to Rust Router: %s. Falling back to internal planner…", e
-                )
-                # Fallback to local planner if router is down
-                from seahorse_ai.planner import ReActPlanner
-                from seahorse_ai.router import ModelRouter
+                        if data.get("status") == "completed" and data.get("content"):
+                            response = AgentResponse(
+                                content=data["content"], steps=0, agent_id=agent_id, elapsed_ms=0
+                            )
+                        else:
+                            logger.info("FastPath: [FALLBACK] or Queued. Using local ReActPlanner.")
+                            from seahorse_ai.planner import ReActPlanner
+                            from seahorse_ai.router import ModelRouter
 
-                internal_router = ModelRouter(
-                    worker_model=os.environ.get(
-                        "SEAHORSE_MODEL_WORKER", "openrouter/google/gemini-3-flash-preview"
-                    ),
-                    thinker_model=os.environ.get(
-                        "SEAHORSE_MODEL_THINKER", "openrouter/google/gemini-3-flash-preview"
-                    ),
-                    strategist_model=os.environ.get(
-                        "SEAHORSE_MODEL_STRATEGIST", "openrouter/google/gemini-3-flash-preview"
-                    ),
-                    fast_path_model=os.environ.get(
-                        "SEAHORSE_FAST_PATH_MODEL",
-                        "openrouter/google/gemini-2.0-flash-lite-preview-02-05",
-                    ),
-                )
-                local_planner = ReActPlanner(llm=internal_router)
-                response = await local_planner.run(request)
-            finally:
-                typing_task.cancel()
-                with contextlib.suppress(asyncio.CancelledError):
-                    await typing_task
+                            internal_router = ModelRouter(
+                                worker_model=os.environ.get(
+                                    "SEAHORSE_MODEL_WORKER", "openrouter/google/gemini-3-flash-preview"
+                                ),
+                                thinker_model=os.environ.get(
+                                    "SEAHORSE_MODEL_THINKER", "openrouter/google/gemini-3-flash-preview"
+                                ),
+                                strategist_model=os.environ.get(
+                                    "SEAHORSE_MODEL_STRATEGIST",
+                                    "openrouter/google/gemini-3-flash-preview",
+                                ),
+                                fast_path_model=os.environ.get(
+                                    "SEAHORSE_FAST_PATH_MODEL",
+                                    "openrouter/google/gemini-3.1-flash-lite-preview",
+                                ),
+                            )
+                            local_planner = ReActPlanner(llm=internal_router)
+                            response = await local_planner.run(request)
+
+                except Exception as e:
+                    logger.error(
+                        "Failed to connect to Rust Router: %s. Falling back to internal planner…", e
+                    )
+                    from seahorse_ai.planner import ReActPlanner
+                    from seahorse_ai.router import ModelRouter
+
+                    internal_router = ModelRouter(
+                        worker_model=os.environ.get(
+                            "SEAHORSE_MODEL_WORKER", "openrouter/google/gemini-3-flash-preview"
+                        ),
+                        thinker_model=os.environ.get(
+                            "SEAHORSE_MODEL_THINKER", "openrouter/google/gemini-3-flash-preview"
+                        ),
+                        strategist_model=os.environ.get(
+                            "SEAHORSE_MODEL_STRATEGIST", "openrouter/google/gemini-3-flash-preview"
+                        ),
+                        fast_path_model=os.environ.get(
+                            "SEAHORSE_FAST_PATH_MODEL",
+                            "openrouter/google/gemini-3.1-flash-lite-preview",
+                        ),
+                    )
+                    local_planner = ReActPlanner(llm=internal_router)
+                    response = await local_planner.run(request)
+                finally:
+                    tg.cancel_scope.cancel()
 
             self._history[user_id].append(Message(role="user", content=text))
             self._history[user_id].append(Message(role="assistant", content=response.content))
@@ -312,9 +309,7 @@ class TelegramAdapter:
 
         except Exception as e:
             logger.exception("Error processing Telegram input in %s:", agent_id)
-            clean_error = str(e).split(":")[0]
-            # Escape error text to avoid Markdown issues in error reporting
-            clean_error = clean_error.replace("_", "\\_").replace("*", "\\*").replace("`", "\\`")
+            clean_error = _escape_markdown(str(e).split(":")[0])
             await context.bot.send_message(
                 chat_id=chat_id, text=f"❌ ผมพบปัญหาขัดข้องชั่วคราว: {clean_error}"
             )
@@ -340,7 +335,6 @@ class TelegramAdapter:
                 context, chat_id, f"_{choice}_", parse_mode=ParseMode.MARKDOWN
             )
 
-            # Simulate trigger without modifying update.message
             user_id = update.effective_user.id if update.effective_user else chat_id
             agent_id = f"telegram_{user_id}"
             await self._process_text_input(update, context, choice, chat_id, user_id, agent_id)
@@ -424,7 +418,7 @@ def main() -> None:
             "SEAHORSE_MODEL_STRATEGIST", "openrouter/google/gemini-3-flash-preview"
         ),
         fast_path_model=os.environ.get(
-            "SEAHORSE_FAST_PATH_MODEL", "openrouter/google/gemini-2.0-flash-lite-preview-02-05"
+            "SEAHORSE_FAST_PATH_MODEL", "openrouter/google/gemini-3.1-flash-lite-preview"
         ),
     )
 
@@ -454,6 +448,7 @@ def main() -> None:
 
     async def post_init(application: any) -> None:
         interval = int(os.environ.get("SEAHORSE_ALERTS_INTERVAL", "300"))
+        import asyncio
         asyncio.create_task(watcher.start(interval_seconds=interval))
         logger.info("Telegram: AnomalyWatcher task started via post_init.")
 

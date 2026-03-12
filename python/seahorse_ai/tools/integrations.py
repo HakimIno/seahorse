@@ -72,14 +72,12 @@ async def google_calendar_add_event(
             "end": {"dateTime": end_time, "timeZone": "UTC"},
         }
 
-        import asyncio
-
-        loop = asyncio.get_running_loop()
+        import anyio
 
         def func():
             return service.events().insert(calendarId="primary", body=event).execute()
 
-        created_event = await loop.run_in_executor(None, func)
+        created_event = await anyio.to_thread.run_sync(func)
 
         return f"Successfully created event: {created_event.get('htmlLink')}"
     except Exception as exc:

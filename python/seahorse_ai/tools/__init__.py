@@ -12,18 +12,31 @@ from seahorse_ai.tools.auto_architect import auto_architect
 from seahorse_ai.tools.auto_seahorse import execute_auto_seahorse
 from seahorse_ai.tools.base import SeahorseToolRegistry, ToolSpec, tool
 from seahorse_ai.tools.browser import browser_scan
-from seahorse_ai.tools.business_math import calculate_margin, calculate_promo_impact
+from seahorse_ai.tools.business_math import (
+    calculate_margin,
+    calculate_promo_impact,
+)
 from seahorse_ai.tools.competitor_radar import competitor_radar
 from seahorse_ai.tools.db import database_query, database_schema
+from seahorse_ai.tools.duckdb_analyst import duckdb_sql, sql_to_polars
 from seahorse_ai.tools.filesystem import list_files, read_file, write_file
 from seahorse_ai.tools.forecaster import forecast_sales
-from seahorse_ai.tools.integrations import google_calendar_add_event, slack_send_message
+from seahorse_ai.tools.integrations import (
+    google_calendar_add_event,
+    slack_send_message,
+)
 from seahorse_ai.tools.mcp_client import load_mcp_tools
 from seahorse_ai.tools.memory import (
     memory_clear,
     memory_delete,
     memory_search,
     memory_store,
+)
+from seahorse_ai.tools.polars_analyst import (
+    convert_to_parquet,
+    polars_inspect_join,
+    polars_profile,
+    polars_query,
 )
 from seahorse_ai.tools.python_interpreter import python_interpreter
 from seahorse_ai.tools.strategy_engine import war_room
@@ -59,6 +72,12 @@ __all__ = [
     "create_custom_chart",
     "forecast_sales",
     "execute_auto_seahorse",
+    "polars_query",
+    "polars_profile",
+    "polars_inspect_join",
+    "convert_to_parquet",
+    "duckdb_sql",
+    "sql_to_polars",
 ]
 
 
@@ -88,6 +107,12 @@ def make_default_registry() -> SeahorseToolRegistry:
         calculate_margin,
         create_custom_chart,
         forecast_sales,
+        polars_query,
+        polars_profile,
+        polars_inspect_join,
+        convert_to_parquet,
+        duckdb_sql,
+        sql_to_polars,
     ):
         registry.register(fn)
     return registry

@@ -1,18 +1,11 @@
-"""seahorse_ai.planner.memory_recorder — Rate-limited background memory summarization.
-
-Extracts key facts from conversations and stores them in the HNSW memory index.
-Includes rate limiting and deduplication to prevent API cost spikes.
-"""
-
 from __future__ import annotations
 
-import asyncio
 import logging
 import time
-from typing import TYPE_CHECKING
 
-if TYPE_CHECKING:
-    from seahorse_ai.schemas import Message
+import anyio
+
+from seahorse_ai.schemas import Message
 
 logger = logging.getLogger(__name__)
 
@@ -53,13 +46,7 @@ class MemoryRecorder:
         self._is_syncing: bool = False
 
     async def record(self, messages: list[Message], agent_id: str | None = None) -> None:
-        """Analyze conversation and store key facts. Rate-limited and non-blocking."""
-        # ... (previous implementation)
-        # ── 1. Start outbox processing if not already running ──────────────────
-        if not self._is_syncing:
-            asyncio.create_task(self.process_outbox())
-            self._is_syncing = True
-
+        """Analyze conversation and store key facts. Rate-limited."""
         # Rate limit check
         now = time.monotonic()
         if now - self._last_run < self.MIN_INTERVAL_SECONDS:
@@ -72,14 +59,12 @@ class MemoryRecorder:
             return
 
         self._last_run = now
-
         history_text = "\n".join(f"{m.role}: {m.content}" for m in non_system)
-        try:
-            from seahorse_ai.schemas import Message as Msg
 
+        try:
             response = await self._llm.complete(
                 [  # type: ignore[union-attr]
-                    Msg(role="system", content=self.SUMMARY_SYSTEM_PROMPT + history_text)
+                    Message(role="system", content=self.SUMMARY_SYSTEM_PROMPT + history_text)
                 ]
             )
             raw = str(response.get("content", "") if isinstance(response, dict) else response)
@@ -87,19 +72,19 @@ class MemoryRecorder:
             if "NONE" in raw.upper() or len(raw.strip()) < 5:
                 return
 
-            storage_tasks = []
-            for line in raw.split("\n"):
-                line = line.strip("-* ").strip()
-                if not line or len(line) < 5:
-                    continue
+            async with anyio.create_task_group() as tg:
+                for line in raw.split("\n"):
+                    line = line.strip("-* ").strip()
+                    if not line or len(line) < 5:
+                        continue
 
-                if line.startswith("[REL]"):
-                    import re
+                    if line.startswith("[REL]"):
+                        import re
 
-                    match = re.search(r"\((.+)\)\s*--\[(.+)\]-->\s*\((.+)\)", line)
-                    if match:
-                        storage_tasks.append(
-                            self._tools.call(
+                        match = re.search(r"\((.+)\)\s*--\[(.+)\]-->\s*\((.+)\)", line)
+                        if match:
+                            tg.start_soon(
+                                self._tools.call,
                                 "graph_store_triple",
                                 {
                                     "subject": match.group(1),
@@ -107,17 +92,11 @@ class MemoryRecorder:
                                     "object_entity": match.group(3),
                                 },
                             )
-                        )
-                else:
-                    importance, fact = self._parse_fact_line(line)
-                    storage_tasks.append(self._store_fact(fact, importance, agent_id))
+                    else:
+                        importance, fact = self._parse_fact_line(line)
+                        tg.start_soon(self._store_fact, fact, importance, agent_id)
 
-            if storage_tasks:
-                await asyncio.gather(*storage_tasks)
-
-            logger.info(
-                "memory_recorder: processed %d facts for agent_id=%s", len(storage_tasks), agent_id
-            )
+            logger.info("memory_recorder: processed extraction for agent_id=%s", agent_id)
 
         except Exception as exc:  # noqa: BLE001
             logger.error("memory_recorder: failed: %s", exc)
@@ -150,7 +129,7 @@ class MemoryRecorder:
                     """)
 
                     if not rows:
-                        await asyncio.sleep(5)
+                        await anyio.sleep(5)
                         continue
 
                     pipeline = get_pipeline()
@@ -195,7 +174,7 @@ class MemoryRecorder:
 
             except Exception as e:
                 logger.error("outbox worker: connection error: %s", e)
-                await asyncio.sleep(10)
+                await anyio.sleep(10)
 
     # ── Private helpers ────────────────────────────────────────────────────────
 
@@ -221,14 +200,13 @@ class MemoryRecorder:
                 temp = temp.replace(marker, "SPLIT_TOKEN")
             parts = [p.strip() for p in temp.split("SPLIT_TOKEN") if len(p.strip()) > 3]
 
-            tasks = [
-                self._tools.call(
-                    "memory_store",
-                    {"text": part, "importance": importance, "agent_id": agent_id},
-                )
-                for part in parts
-            ]
-            await asyncio.gather(*tasks)
+            async with anyio.create_task_group() as tg:
+                for part in parts:
+                    tg.start_soon(
+                        self._tools.call,
+                        "memory_store",
+                        {"text": part, "importance": importance, "agent_id": agent_id},
+                    )
         else:
             await self._tools.call(  # type: ignore[union-attr]
                 "memory_store",

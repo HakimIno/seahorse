@@ -29,7 +29,7 @@ class ModelRouter:
         # Default to worker if fast_path_model not provided
         self.fast = LLMClient(
             config=LLMConfig(
-                model=fast_path_model or "openrouter/google/gemini-2.0-flash-lite-preview-02-05"
+                model=fast_path_model or "openrouter/google/gemini-3.1-flash-lite-preview"
             )
         )
 

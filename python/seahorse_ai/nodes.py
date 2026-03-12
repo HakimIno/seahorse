@@ -18,6 +18,7 @@ from __future__ import annotations
 import json
 import logging
 
+import msgspec
 from seahorse_ai.schemas import Message
 
 logger = logging.getLogger(__name__)
@@ -28,7 +29,7 @@ logger = logging.getLogger(__name__)
 
 def _serialize_messages(messages: list[Message]) -> list[dict]:
     """Convert Message objects to plain dicts for JSON serialization."""
-    return [msg.model_dump(exclude_none=True) for msg in messages]
+    return [msgspec.to_builtins(msg) for msg in messages]
 
 
 def _deserialize_messages(msgs_data: list[dict]) -> list[Message]:
