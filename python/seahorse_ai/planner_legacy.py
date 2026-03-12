@@ -523,7 +523,7 @@ class ReActPlanner:
             args: dict[str, object] = json.loads(args_str) if args_str else {}
             logger.info("tool.call step=%d tool=%s", step, tool_name)
 
-            with getattr(tracer, "start_as_current_span", lambda n: _nullctx())(
+            with getattr(tracer, "start_as_current_span", lambda n: _NullContext())(
                 f"tool.{tool_name}"
             ) as tool_span:
                 self._set_span_attrs(
@@ -570,10 +570,10 @@ class ReActPlanner:
 # ── Null context manager for when OTel is absent ─────────────────────────────
 
 
-class _nullctx:
+class _NullContext:
     """No-op context manager — used when tracer.start_as_current_span is unavailable."""
 
-    def __enter__(self) -> _nullctx:
+    def __enter__(self) -> _NullContext:
         return self
 
     def __exit__(self, *_: object) -> None:

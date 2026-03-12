@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+
 from pydantic import BaseModel, Field
 
 
@@ -13,9 +15,6 @@ class Message(BaseModel):
     name: str | None = None
     tool_calls: list[dict[str, object]] | None = None
     tool_call_id: str | None = None
-
-
-import os
 
 
 class LLMConfig(BaseModel):

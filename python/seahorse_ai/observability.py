@@ -13,6 +13,7 @@ OTEL_DISABLE_TRACES            Set to "1" to completely disable tracing (e.g. un
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import os
 from collections.abc import Generator
@@ -111,11 +112,8 @@ def span(name: str, **attrs: Any) -> Generator[Any, None, None]:
             yield s
         finally:
             s.end()
-            try:
+            with contextlib.suppress(ValueError):
                 trace.context.detach(token)
-            except ValueError:
-                # Silently ignore token mismatch during cancellation
-                pass
     except (ImportError, Exception):
         yield None
 

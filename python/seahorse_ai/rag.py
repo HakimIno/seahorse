@@ -73,9 +73,9 @@ class RAGPipeline:
         self._dim = dim
         self._next_id = 0
 
-        PyAgentMemory = _try_import_ffi_memory()
-        if PyAgentMemory is not None:
-            self._memory = PyAgentMemory(dim=dim, max_elements=_MAX_DOCS)
+        py_agent_memory = _try_import_ffi_memory()
+        if py_agent_memory is not None:
+            self._memory = py_agent_memory(dim=dim, max_elements=_MAX_DOCS)
             self._use_rust = True
             logger.info("RAGPipeline: using Rust HNSW index (dim=%d)", dim)
         else:
@@ -320,9 +320,9 @@ class RAGPipeline:
         self._next_id = 0
         if self._use_rust and self._memory is not None:
             # Re-initialize the Rust memory index (clears it)
-            PyAgentMemory = _try_import_ffi_memory()
-            if PyAgentMemory is not None:
-                self._memory = PyAgentMemory(dim=self._dim, max_elements=_MAX_DOCS)
+            py_agent_memory = _try_import_ffi_memory()
+            if py_agent_memory is not None:
+                self._memory = py_agent_memory(dim=self._dim, max_elements=_MAX_DOCS)
         else:
             self._texts.clear()
             self._vectors.clear()
@@ -339,11 +339,11 @@ class RAGPipeline:
                 litellm.aembedding(model=self._embed_model, input=text),
                 timeout=_EMBED_TIMEOUT,
             )
-        except TimeoutError:
+        except TimeoutError as err:
             raise RuntimeError(
                 f"Embedding API timed out after {_EMBED_TIMEOUT}s. "
                 f"Check {self._embed_model!r} and your API key."
-            )
+            ) from err
         return np.array(response.data[0]["embedding"], dtype=np.float32)
 
     def save_to_disk(self, directory: str) -> None:
@@ -388,10 +388,10 @@ class RAGPipeline:
             instance = cls(embed_model=cfg["embed_model"], dim=cfg["dim"])
             instance._next_id = cfg["next_id"]
 
-            PyAgentMemory = _try_import_ffi_memory()
-            if PyAgentMemory is not None:
+            py_agent_memory = _try_import_ffi_memory()
+            if py_agent_memory is not None:
                 index_path = os.path.join(directory, "hnsw_index")
-                instance._memory = PyAgentMemory.load(index_path, dim=cfg["dim"])
+                instance._memory = py_agent_memory.load(index_path, dim=cfg["dim"])
                 instance._use_rust = True
                 logger.info("rag.load_from_disk: loaded Rust HNSW index from %s", index_path)
             return instance
