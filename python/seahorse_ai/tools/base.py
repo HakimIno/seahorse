@@ -1,9 +1,10 @@
 """Tool base — @tool decorator and ToolRegistry."""
+
 from __future__ import annotations
 
+import asyncio
 import inspect
 import logging
-import asyncio
 from collections.abc import Callable
 from typing import Any, TypeVar
 
@@ -50,17 +51,20 @@ class ToolError(Exception):
         super().__init__(message)
         self.is_system_error = is_system_error
 
+
 class ToolInputError(ToolError):
     """Error caused by invalid model inputs/arguments."""
 
     def __init__(self, message: str) -> None:
         super().__init__(message, is_system_error=False)
 
+
 class ToolSystemError(ToolError):
     """Error caused by internal code bugs or environment issues."""
 
     def __init__(self, message: str) -> None:
         super().__init__(message, is_system_error=True)
+
 
 class SeahorseToolRegistry:
     """Registry that stores tools and dispatches calls by name."""
@@ -103,7 +107,7 @@ class SeahorseToolRegistry:
                 # to prevent blocking the main asyncio event loop
                 loop = asyncio.get_running_loop()
                 result = await loop.run_in_executor(None, lambda: fn(**args))
-                
+
             return str(result)
         except TypeError as exc:
             # TypeErrors are usually internal code bugs (like the slice error)

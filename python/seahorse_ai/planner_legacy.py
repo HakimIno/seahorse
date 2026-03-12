@@ -12,6 +12,7 @@ ReActPlanner
 Prompt templates and keyword lists live in `prompts.py`.
 Tracing lives in `observability.py`.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -36,6 +37,7 @@ logger = logging.getLogger(__name__)
 
 # ── Protocols ─────────────────────────────────────────────────────────────────
 
+
 class LLMBackend(Protocol):
     """Any object that can complete a list of messages with tier support."""
 
@@ -52,6 +54,7 @@ class ToolRegistry(Protocol):
 
 
 # ── Planner ───────────────────────────────────────────────────────────────────
+
 
 class ReActPlanner:
     """Execute an agent reasoning loop up to `max_steps` iterations using native tool calling.
@@ -90,11 +93,14 @@ class ReActPlanner:
         wall_start = time.monotonic()
 
         with tracer.start_as_current_span("agent.run") as span:
-            self._set_span_attrs(span, {
-                "agent.id": request.agent_id,
-                "agent.prompt_len": len(request.prompt),
-                "agent.max_steps": self._max_steps,
-            })
+            self._set_span_attrs(
+                span,
+                {
+                    "agent.id": request.agent_id,
+                    "agent.prompt_len": len(request.prompt),
+                    "agent.max_steps": self._max_steps,
+                },
+            )
 
             messages: list[Message] = [
                 Message(role="system", content=build_system_prompt()),
@@ -106,7 +112,7 @@ class ReActPlanner:
 
             # 2) Classify intent with two-tier system (keyword → LLM fallback)
             intent = await classify_intent(request.prompt, self._llm)
-            
+
             # Apply nudge based on refined intent
             prompt_content = request.prompt
             if intent == "PUBLIC_REALTIME":
@@ -120,36 +126,38 @@ class ReActPlanner:
 
             logger.info(
                 "agent.run start agent_id=%s max_steps=%d prompt_len=%d",
-                request.agent_id, self._max_steps, len(request.prompt),
+                request.agent_id,
+                self._max_steps,
+                len(request.prompt),
             )
 
-            current_tier = getattr(
-                self._llm, "classify_intent", lambda p: self._default_tier
-            )(request.prompt)
+            current_tier = getattr(self._llm, "classify_intent", lambda p: self._default_tier)(
+                request.prompt
+            )
             if current_tier == "strategist":
                 # Strategist is for final summaries, use Thinker for the intermediate steps
                 current_tier = "thinker"
 
             # Pre-compute the OpenAI tool definitions
-            openai_tools = getattr(
-                self._tools, "to_openai_tools", lambda: []
-            )()
+            openai_tools = getattr(self._tools, "to_openai_tools", lambda: [])()
 
             # 2. Generate Strategy Plan for complex intents
             if current_tier in ("thinker", "strategist"):
                 strategy_plan = await self._generate_strategy_plan(request.prompt)
-                messages.insert(1, Message(
-                    role="system", 
-                    content=f"{strategy_plan}\n\n{STRATEGY_NUDGE}"
-                ))
+                messages.insert(
+                    1, Message(role="system", content=f"{strategy_plan}\n\n{STRATEGY_NUDGE}")
+                )
 
             for step in range(self._max_steps):
                 # Check global timeout
                 if time.monotonic() - wall_start > self._global_timeout_seconds:
-                    logger.error("agent.run terminating due to global timeout (%ds)", self._global_timeout_seconds)
+                    logger.error(
+                        "agent.run terminating due to global timeout (%ds)",
+                        self._global_timeout_seconds,
+                    )
                     return AgentResponse(
                         content="[TERMINATED] The agent took too long to complete the task. "
-                                "I am stopping to prevent wasting resources.",
+                        "I am stopping to prevent wasting resources.",
                         steps=step,
                         agent_id=request.agent_id,
                     )
@@ -161,27 +169,31 @@ class ReActPlanner:
                     tier = "thinker" if step >= 3 else "worker"
                 else:
                     tier = "thinker"
-                
+
                 # Normalize response to a Message object
                 try:
                     # Enforce per-step timeout
                     response_data, step_ms = await asyncio.wait_for(
                         self._run_step(messages, openai_tools, step, tier=tier),
-                        timeout=self._step_timeout_seconds
+                        timeout=self._step_timeout_seconds,
                     )
                 except TimeoutError:
-                    logger.error("agent.run step=%d timed out after %ds", step, self._step_timeout_seconds)
-                    messages.append(Message(
-                        role="user",
-                        content=f"[SYSTEM: Your previous step took too long (> {self._step_timeout_seconds}s) and timed out. "
-                                "Please provide a shorter, faster response or take a different action.]"
-                    ))
+                    logger.error(
+                        "agent.run step=%d timed out after %ds", step, self._step_timeout_seconds
+                    )
+                    messages.append(
+                        Message(
+                            role="user",
+                            content=f"[SYSTEM: Your previous step took too long (> {self._step_timeout_seconds}s) and timed out. "
+                            "Please provide a shorter, faster response or take a different action.]",
+                        )
+                    )
                     self._consecutive_errors += 1
                     if self._consecutive_errors >= 3:
                         logger.error("agent.run terminating due to multiple step timeouts")
                         return AgentResponse(
                             content="[TERMINATED] Multiple steps timed out. "
-                                    "I am stopping to prevent wasting resources.",
+                            "I am stopping to prevent wasting resources.",
                             steps=step + 1,
                             agent_id=request.agent_id,
                         )
@@ -189,7 +201,7 @@ class ReActPlanner:
                 except Exception as exc:
                     logger.error("agent.run step=%d failed: %s", step, exc)
                     raise
-                
+
                 # Normalize response to a Message object
                 if isinstance(response_data, str):
                     response_msg = Message(role="assistant", content=response_data)
@@ -200,10 +212,12 @@ class ReActPlanner:
                     response_msg = Message(
                         **response_data  # type: ignore[arg-type]
                     )
-                
+
                 messages.append(response_msg)
 
-                logger.debug("step=%d ms=%d preview=%r", step, step_ms, str(response_msg.content)[:100])
+                logger.debug(
+                    "step=%d ms=%d preview=%r", step, step_ms, str(response_msg.content)[:100]
+                )
 
                 tool_calls = response_msg.tool_calls
                 content = response_msg.content
@@ -220,43 +234,42 @@ class ReActPlanner:
 
                         tasks.append(
                             self._execute_action(
-                                action_name, 
-                                action_args_str, 
-                                step, 
-                                tracer, 
-                                call_id, 
-                                agent_id=request.agent_id
+                                action_name,
+                                action_args_str,
+                                step,
+                                tracer,
+                                call_id,
+                                agent_id=request.agent_id,
                             )
                         )
-                    
+
                     # Execute all tools concurrently
                     results = await asyncio.gather(*tasks, return_exceptions=True)
-                    
+
                     found_system_crash = False
                     # Append observations
                     for tool_call, result in zip(tool_calls, results, strict=False):
                         func_call = tool_call.get("function", {})
                         action_name = func_call.get("name")
                         call_id = tool_call.get("id")
-                        
+
                         observation_str = (
                             str(result) if not isinstance(result, Exception) else f"Error: {result}"
                         )
                         self._total_obs_chars += len(observation_str)
 
                         is_error = isinstance(result, Exception) or (
-                            isinstance(result, str) and (
-                                result.startswith("Error") or result.startswith("SYSTEM_CRASH")
-                            )
+                            isinstance(result, str)
+                            and (result.startswith("Error") or result.startswith("SYSTEM_CRASH"))
                         )
-                        
+
                         if is_error:
                             self._consecutive_errors += 1
                             if "SYSTEM_CRASH" in observation_str:
                                 found_system_crash = True
                         else:
-                            # We don't reset here because multiple tools can run. 
-                            # We reset if we get content later or if any tool succeeds? 
+                            # We don't reset here because multiple tools can run.
+                            # We reset if we get content later or if any tool succeeds?
                             # Actually, let's reset if AT LEAST one tool succeeds in this batch.
                             self._consecutive_errors = 0
 
@@ -272,27 +285,29 @@ class ReActPlanner:
                                     "your plan. Try a different tool or approach.]"
                                 )
 
-                        messages.append(Message(
-                            role="tool", 
-                            content=observation_str,
-                            tool_call_id=call_id,
-                            name=action_name,
-                        ))
-                    
+                        messages.append(
+                            Message(
+                                role="tool",
+                                content=observation_str,
+                                tool_call_id=call_id,
+                                name=action_name,
+                            )
+                        )
+
                     if found_system_crash:
                         logger.error("agent.run terminating due to SYSTEM_CRASH")
                         return AgentResponse(
                             content="[TERMINATED] An internal technical error occurred in a tool. "
-                                    "Please report this bug.",
+                            "Please report this bug.",
                             steps=step + 1,
                             agent_id=request.agent_id,
                         )
-                    
+
                     if self._consecutive_errors >= 3:
                         logger.error("agent.run terminating due to too many consecutive errors")
                         return AgentResponse(
                             content="[TERMINATED] Too many consecutive tool errors. "
-                                    "I am stopping to prevent wasting tokens.",
+                            "I am stopping to prevent wasting tokens.",
                             steps=step + 1,
                             agent_id=request.agent_id,
                         )
@@ -300,18 +315,20 @@ class ReActPlanner:
                     # Token Burn Guard: Monitor context size
                     if self._total_obs_chars > 30000:
                         logger.warning("Token Burn Guard: context size > 30k. Nudging synthesis.")
-                        messages.append(Message(
-                            role="user",
-                            content="[SYSTEM: You have gathered 30,000+ characters of data. "
-                                    "This is enough. Please STOP researching and synthesize "
-                                    "your final answer now.]"
-                        ))
-                    
+                        messages.append(
+                            Message(
+                                role="user",
+                                content="[SYSTEM: You have gathered 30,000+ characters of data. "
+                                "This is enough. Please STOP researching and synthesize "
+                                "your final answer now.]",
+                            )
+                        )
+
                     if self._total_obs_chars > 50000:
                         logger.error("Token Burn Guard: hard limit reached (50k). Terminating.")
                         return AgentResponse(
                             content="[TERMINATED] Information limit reached (50k chars). "
-                                    "To prevent excessive costs, I am summarizing now.",
+                            "To prevent excessive costs, I am summarizing now.",
                             steps=step + 1,
                             agent_id=request.agent_id,
                         )
@@ -322,32 +339,34 @@ class ReActPlanner:
                     total_ms = int((time.monotonic() - wall_start) * 1000)
                     logger.info(
                         "agent.run done agent_id=%s steps=%d ms=%d",
-                        request.agent_id, step + 1, total_ms,
+                        request.agent_id,
+                        step + 1,
+                        total_ms,
                     )
-                    self._set_span_attrs(span, {
-                        "agent.steps_taken": step + 1,
-                        "agent.total_ms": total_ms,
-                        "agent.status": "done",
-                    })
+                    self._set_span_attrs(
+                        span,
+                        {
+                            "agent.steps_taken": step + 1,
+                            "agent.total_ms": total_ms,
+                            "agent.status": "done",
+                        },
+                    )
                     # 3) Before returning, trigger background memory summarization
                     asyncio.create_task(
                         self._auto_summarize_memory(messages, agent_id=request.agent_id)
                     )
-                    
+
                     # Final synthesis tier
-                    final_tier = getattr(
-                        self._llm, "classify_intent", lambda p: "strategist"
-                    )(request.prompt)
+                    final_tier = getattr(self._llm, "classify_intent", lambda p: "strategist")(
+                        request.prompt
+                    )
                     if final_tier == "strategist":
                         logger.info("Synthesizing final response with strategist model")
                         synth_msgs = messages + [Message(role="assistant", content=content)]
-                        synth_msgs.append(Message(
-                            role="user",
-                            content="สรุปคำตอบให้เป็นภาษากลยุทธ์ทางธุรกิจที่น่าสนใจ"
-                        ))
-                        response_data = await self._llm.complete(
-                            synth_msgs, tier="strategist"
+                        synth_msgs.append(
+                            Message(role="user", content="สรุปคำตอบให้เป็นภาษากลยุทธ์ทางธุรกิจที่น่าสนใจ")
                         )
+                        response_data = await self._llm.complete(synth_msgs, tier="strategist")
                         if isinstance(response_data, dict):
                             content = str(response_data.get("content", content))
                         else:
@@ -362,11 +381,9 @@ class ReActPlanner:
             # Max steps reached
             logger.warning("agent.run max_steps agent_id=%s", request.agent_id)
             self._set_span_attrs(span, {"agent.status": "max_steps_reached"})
-            
+
             # Still try to summarize what we found before failing
-            asyncio.create_task(
-                self._auto_summarize_memory(messages, agent_id=request.agent_id)
-            )
+            asyncio.create_task(self._auto_summarize_memory(messages, agent_id=request.agent_id))
 
             return AgentResponse(
                 content="[Agent reached the maximum number of reasoning steps]",
@@ -376,7 +393,9 @@ class ReActPlanner:
 
     # ── memory ────────────────────────────────────────────────────────────────
 
-    async def _auto_summarize_memory(self, messages: list[Message], agent_id: str | None = None) -> None:
+    async def _auto_summarize_memory(
+        self, messages: list[Message], agent_id: str | None = None
+    ) -> None:
         """Background task: Analyze the conversation, extract key facts, and store them."""
         # Lowered threshold to ensure even brief interactions are captured
         if len(messages) < 2:
@@ -398,22 +417,20 @@ class ReActPlanner:
             "If no new facts are found, return 'NONE'.\n\n"
             "### Conversation History ###\n"
         )
-        
-        history_text = "\n".join(
-            [f"{m.role}: {m.content}" for m in messages if m.role != "system"]
-        )
-        
+
+        history_text = "\n".join([f"{m.role}: {m.content}" for m in messages if m.role != "system"])
+
         try:
-            response_data = await self._llm.complete([
-                Message(role="system", content=summary_prompt + history_text)
-            ])
-            
+            response_data = await self._llm.complete(
+                [Message(role="system", content=summary_prompt + history_text)]
+            )
+
             # Normalize response to a string if it's a dict (expected from LLMClient)
             if isinstance(response_data, dict):
                 raw_summary = str(response_data.get("content", ""))
             else:
                 raw_summary = str(response_data)
-            
+
             if "NONE" in raw_summary.upper() or len(raw_summary.strip()) < 5:
                 return
 
@@ -425,13 +442,13 @@ class ReActPlanner:
 
                 importance = 3  # Default
                 fact_text = line
-                
+
                 # Check for [N] pattern
                 if line.startswith("[") and "]" in line[:5]:
                     try:
-                        imp_str = line[1:line.index("]")]
+                        imp_str = line[1 : line.index("]")]
                         importance = int(imp_str)
-                        fact_text = line[line.index("]") + 1:].strip()
+                        fact_text = line[line.index("]") + 1 :].strip()
                     except (ValueError, IndexError):
                         pass
 
@@ -444,18 +461,18 @@ class ReActPlanner:
                     parts = [p.strip() for p in temp.split("SPLIT_TOKEN") if len(p.strip()) > 3]
                     for p in parts:
                         await self._tools.call(
-                            "memory_store", 
-                            {"text": p, "importance": importance, "agent_id": agent_id}
+                            "memory_store",
+                            {"text": p, "importance": importance, "agent_id": agent_id},
                         )
                 else:
                     await self._tools.call(
-                        "memory_store", 
-                        {"text": fact_text, "importance": importance, "agent_id": agent_id}
+                        "memory_store",
+                        {"text": fact_text, "importance": importance, "agent_id": agent_id},
                     )
-                    
+
             logger.info("auto_summarize_memory: processed background facts")
-            
-        except Exception as exc: # noqa: BLE001
+
+        except Exception as exc:  # noqa: BLE001
             logger.error("auto_summarize_memory failed: %s", exc)
 
     # ── private helpers ───────────────────────────────────────────────────────
@@ -501,7 +518,7 @@ class ReActPlanner:
         """Parse arguments, call tool, return Observation string."""
         if not tool_name:
             return "Error: Tool name missing from tool_call."
-            
+
         try:
             args: dict[str, object] = json.loads(args_str) if args_str else {}
             logger.info("tool.call step=%d tool=%s", step, tool_name)
@@ -509,11 +526,14 @@ class ReActPlanner:
             with getattr(tracer, "start_as_current_span", lambda n: _nullctx())(
                 f"tool.{tool_name}"
             ) as tool_span:
-                self._set_span_attrs(tool_span, {
-                    "tool.name": tool_name,
-                    "tool.step": step,
-                    "tool.args": args_str[:200],
-                })
+                self._set_span_attrs(
+                    tool_span,
+                    {
+                        "tool.name": tool_name,
+                        "tool.step": step,
+                        "tool.args": args_str[:200],
+                    },
+                )
                 # We do this by checking if the registry can inject it or just adding it to args.
                 if agent_id and tool_name in ["memory_store", "memory_search", "memory_delete"]:
                     args["agent_id"] = agent_id
@@ -543,14 +563,21 @@ class ReActPlanner:
     @staticmethod
     def _default_tools() -> ToolRegistry:
         from seahorse_ai.tools import make_default_registry
+
         return make_default_registry()
 
 
 # ── Null context manager for when OTel is absent ─────────────────────────────
 
+
 class _nullctx:
     """No-op context manager — used when tracer.start_as_current_span is unavailable."""
 
-    def __enter__(self) -> _nullctx: return self
-    def __exit__(self, *_: object) -> None: pass
-    def set_attribute(self, *_: object) -> None: pass
+    def __enter__(self) -> _nullctx:
+        return self
+
+    def __exit__(self, *_: object) -> None:
+        pass
+
+    def set_attribute(self, *_: object) -> None:
+        pass

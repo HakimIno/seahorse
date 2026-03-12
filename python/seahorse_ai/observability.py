@@ -10,6 +10,7 @@ OTEL_SERVICE_NAME              Service name that appears in Jaeger (default: sea
 OTEL_TRACES_SAMPLER            head-based sampler (default: parentbased_always_on)
 OTEL_DISABLE_TRACES            Set to "1" to completely disable tracing (e.g. unit tests)
 """
+
 from __future__ import annotations
 
 import logging
@@ -65,7 +66,9 @@ def setup_telemetry() -> None:
     except Exception as exc:
         # If gRPC or OTel packages fail, or collector is missing, silence the spam
         logging.getLogger("opentelemetry").setLevel(logging.CRITICAL)
-        logging.getLogger("opentelemetry.exporter.otlp.proto.grpc.exporter").setLevel(logging.CRITICAL)
+        logging.getLogger("opentelemetry.exporter.otlp.proto.grpc.exporter").setLevel(
+            logging.CRITICAL
+        )
         logger.warning("Tracing disabled (Collector unreachable or OTel error): %s", exc)
         _tracer_provider = "DISABLED"
 
@@ -74,12 +77,14 @@ def get_tracer(name: str = "seahorse") -> Any:
     """Return an OTel Tracer (or a no-op tracer if OTel is not set up)."""
     try:
         from opentelemetry import trace
+
         return trace.get_tracer(name)
     except ImportError:
         return _NoopTracer()
 
 
 # ── High-level helpers ─────────────────────────────────────────────────────────
+
 
 @contextmanager
 def span(name: str, **attrs: Any) -> Generator[Any, None, None]:
@@ -96,6 +101,7 @@ def span(name: str, **attrs: Any) -> Generator[Any, None, None]:
     tracer = get_tracer()
     try:
         from opentelemetry import trace
+
         # Use a more explicit span management to avoid Context mismatch during async cancel
         s = tracer.start_span(name)
         token = trace.context.attach(trace.set_span_in_context(s))
@@ -123,6 +129,7 @@ def trace_async(span_name: str | None = None, **extra_attrs: Any):
         async def web_search(query: str) -> str:
             ...
     """
+
     def decorator(fn):  # type: ignore[no-untyped-def]
         name = span_name or fn.__qualname__
 
@@ -137,6 +144,7 @@ def trace_async(span_name: str | None = None, **extra_attrs: Any):
 
 
 # ── No-op fallback ────────────────────────────────────────────────────────────
+
 
 class _NoopSpan:
     def set_attribute(self, *_: Any, **__: Any) -> None:

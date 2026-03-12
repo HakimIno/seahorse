@@ -21,6 +21,7 @@ Usage::
     await kb.load_into(pipeline)   # embeds + indexes all docs
     # pipeline is now ready for semantic search
 """
+
 from __future__ import annotations
 
 import json
@@ -119,9 +120,7 @@ class KnowledgeBase:
                         if text:
                             yield from _chunk(text)
                     except json.JSONDecodeError:
-                        logger.warning(
-                            "KnowledgeBase: skipping bad JSON at %s:%d", path, line_no
-                        )
+                        logger.warning("KnowledgeBase: skipping bad JSON at %s:%d", path, line_no)
         except OSError as exc:
             logger.error("KnowledgeBase: cannot read %s: %s", path, exc)
 
@@ -156,17 +155,17 @@ class KnowledgeBase:
                     chunk_data = f.read(chunk_size)
                     if not chunk_data:
                         break
-                    
+
                     buffer += chunk_data
                     paragraphs = buffer.split("\n\n")
-                    
+
                     # Keep the last partial paragraph in the buffer
                     buffer = paragraphs.pop()
-                    
+
                     for para in paragraphs:
                         if para.strip():
                             yield from _chunk(para.strip())
-                
+
                 # Yield the final paragraph
                 if buffer.strip():
                     yield from _chunk(buffer.strip())
@@ -175,6 +174,7 @@ class KnowledgeBase:
 
 
 # ── helpers ──────────────────────────────────────────────────────────────────
+
 
 def _chunk(text: str, max_chars: int = _CHUNK_MAX_CHARS) -> typing.Iterator[str]:
     """Split text into chunks of at most `max_chars` characters.
@@ -190,7 +190,7 @@ def _chunk(text: str, max_chars: int = _CHUNK_MAX_CHARS) -> typing.Iterator[str]
     sentences = text.replace("\n", " ").split(". ")
     current = []
     current_len = 0
-    
+
     for sent in sentences:
         sent_with_sep = sent + ". "
         if current_len + len(sent_with_sep) <= max_chars:
@@ -199,7 +199,7 @@ def _chunk(text: str, max_chars: int = _CHUNK_MAX_CHARS) -> typing.Iterator[str]
         else:
             if current:
                 yield "".join(current).strip()
-            
+
             # If a single sentence is longer than max_chars, split it by characters
             if len(sent_with_sep) > max_chars:
                 # Avoid infinite recursion or massive memory spikes

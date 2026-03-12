@@ -1,4 +1,5 @@
 """seahorse_ai.prompts.tool_rules — Clear, non-conflicting tool selection rules."""
+
 from __future__ import annotations
 
 TOOL_RULES = """\

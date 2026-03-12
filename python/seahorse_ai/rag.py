@@ -14,6 +14,7 @@ Usage::
 The RAGPipeline also functions as an agent tool: `memory_store` and
 `memory_search` are @tool-decorated coroutines that wrap this class.
 """
+
 from __future__ import annotations
 
 import contextlib
@@ -50,6 +51,7 @@ def _try_import_ffi_memory() -> type | None:
     """
     try:
         import seahorse_ffi
+
         return seahorse_ffi.PyAgentMemory
     except ImportError:
         logger.warning(
@@ -84,9 +86,13 @@ class RAGPipeline:
             self._texts: dict[int, dict] = {}  # doc_id -> {"text": str, "metadata": dict}
 
     async def store(
-        self, text: str, doc_id: int | None = None, metadata: dict | None = None
+        self,
+        text: str,
+        doc_id: int | None = None,
+        metadata: dict | None = None,
+        knowledge_triples: list[dict] | None = None,
     ) -> int:
-        """Embed `text` and store it in the HNSW index along with metadata.
+        """Embed `text` and store it in the HNSW index along with metadata and Knowledge Graph triples.
 
         Returns the assigned doc_id.
         """
@@ -105,12 +111,23 @@ class RAGPipeline:
             embedding = await self._embed(text)
 
             if self._use_rust and self._memory is not None:
-                self._memory.insert(
-                    doc_id,
-                    embedding.tobytes(),
-                    text,
-                    json.dumps(metadata or {})
-                )
+                self._memory.insert(doc_id, embedding.tobytes(), text, json.dumps(metadata or {}))
+
+                # Push extracted Triples into Knowledge Graph
+                if knowledge_triples:
+                    for triple in knowledge_triples:
+                        subj, pred, obj = (
+                            triple.get("subject"),
+                            triple.get("predicate"),
+                            triple.get("object"),
+                        )
+                        if subj and pred and obj:
+                            # Default weight 1.0, assign edge to doc_id so we can trace back
+                            self._memory.add_node(subj, "Entity", doc_id)
+                            self._memory.add_node(obj, "Entity", None)
+                            self._memory.add_edge(subj, obj, pred, 1.0)
+                            logger.debug("rag.store: graph edge [%s] -(%s)-> [%s]", subj, pred, obj)
+
                 logger.debug("rag.store: rust insert doc_id=%d", doc_id)
             else:
                 self._texts[doc_id] = {
@@ -142,24 +159,24 @@ class RAGPipeline:
 
             if self._use_rust and self._memory is not None:
                 import seahorse_ffi
+
                 raw = seahorse_ffi.search_memory(self._memory, embedding.tobytes(), top_k)
                 results = []
                 for _i, (doc_id, dist, text, meta_json) in enumerate(raw):
                     metadata = json.loads(meta_json)
                     if filter_metadata:
-                        matches = all(
-                            metadata.get(key) == v
-                            for key, v in filter_metadata.items()
-                        )
+                        matches = all(metadata.get(key) == v for key, v in filter_metadata.items())
                         if not matches:
                             continue
 
-                    results.append({
-                        "text": text,
-                        "metadata": metadata,
-                        "distance": dist,
-                        "doc_id": doc_id,
-                    })
+                    results.append(
+                        {
+                            "text": text,
+                            "metadata": metadata,
+                            "distance": dist,
+                            "doc_id": doc_id,
+                        }
+                    )
             else:
                 if not self._texts:
                     return []
@@ -178,35 +195,36 @@ class RAGPipeline:
                     entry = self._texts[vid]
                     if filter_metadata:
                         matches = all(
-                            entry["metadata"].get(k) == v 
-                            for k, v in filter_metadata.items()
+                            entry["metadata"].get(k) == v for k, v in filter_metadata.items()
                         )
                         if not matches:
                             continue
-                    results.append({
-                        "text": entry["text"], 
-                        "metadata": entry["metadata"], 
-                        "distance": dist, 
-                        "doc_id": vid
-                    })
+                    results.append(
+                        {
+                            "text": entry["text"],
+                            "metadata": entry["metadata"],
+                            "distance": dist,
+                            "doc_id": vid,
+                        }
+                    )
 
             # ── Adaptive RAG: Re-ranking ──
             if rerank and len(results) > 1:
                 results = await self._rerank_results(query, results, k)
-            
+
             return results[:k]
 
     async def _rerank_results(self, query: str, results: list[dict], k: int) -> list[dict]:
         """Use LiteLLM rerank API to re-order candidates."""
         import litellm
-        
+
         # Extract texts for re-ranking
         documents = [r["text"] for r in results]
         try:
             # Note: Requires a rerank-capable model/provider (e.g. Jina, Cohere, Mixedbread)
             # Default fallback could be a cheap LLM call if no dedicated reranker
             rerank_model = os.environ.get("SEAHORSE_RERANK_MODEL", "cohere/rerank-v3.0")
-            
+
             # Skip if no Cohere key is provided (default reranker)
             if "cohere" in rerank_model.lower() and not os.environ.get("COHERE_API_KEY"):
                 logger.debug("rag.rerank: skipping (COHERE_API_KEY not set)")
@@ -219,7 +237,7 @@ class RAGPipeline:
                 documents=documents,
                 top_n=k,
             )
-            
+
             # Map back to original result objects
             new_results = []
             for item in response.results:
@@ -227,10 +245,10 @@ class RAGPipeline:
                 orig = results[idx]
                 orig["rerank_score"] = item.relevance_score
                 new_results.append(orig)
-            
+
             # Since arerank already returns top_n, we just return them sorted
             return new_results
-            
+
         except Exception as e:
             logger.warning("rag.rerank failed: %s. Falling back to vector search order.", e)
             return results
@@ -251,6 +269,7 @@ class RAGPipeline:
             if self._use_rust and self._memory is not None:
                 # Search across all (k=1)
                 import seahorse_ffi
+
                 raw = seahorse_ffi.search_memory(self._memory, embedding.tobytes(), 1)
                 if raw:
                     best_id, best_dist, best_text, best_metadata_json = raw[0]
@@ -266,8 +285,10 @@ class RAGPipeline:
                         best_id = vid
 
             logger.info(
-                "rag.delete: query=%r best_dist=%.4f threshold=%.2f", 
-                query[:50], best_dist, threshold
+                "rag.delete: query=%r best_dist=%.4f threshold=%.2f",
+                query[:50],
+                best_dist,
+                threshold,
             )
 
             if best_id is not None and best_dist < threshold:
@@ -277,17 +298,16 @@ class RAGPipeline:
                         # Success, removed from Rust map (soft delete)
                         deleted_entry = {
                             "text": best_text,
-                            "metadata": json.loads(best_metadata_json or "{}")
+                            "metadata": json.loads(best_metadata_json or "{}"),
                         }
                     else:
                         return None
                 else:
                     deleted_entry = self._texts.pop(best_id)
                     self._vectors.pop(best_id, None)
-                
+
                 logger.info(
-                    "rag.delete: removed doc_id=%d text=%r", 
-                    best_id, deleted_entry["text"][:50]
+                    "rag.delete: removed doc_id=%d text=%r", best_id, deleted_entry["text"][:50]
                 )
                 with contextlib.suppress(Exception):
                     span.set_attribute("rag.deleted_id", best_id)
@@ -313,6 +333,7 @@ class RAGPipeline:
         import asyncio
 
         import litellm  # local import to avoid top-level cost
+
         try:
             response = await asyncio.wait_for(
                 litellm.aembedding(model=self._embed_model, input=text),
@@ -328,7 +349,7 @@ class RAGPipeline:
     def save_to_disk(self, directory: str) -> None:
         """Save the memory index. Rust side handles metadata."""
         import json
-        
+
         if not os.path.exists(directory):
             os.makedirs(directory)
 
@@ -338,17 +359,20 @@ class RAGPipeline:
             # Save only the next_id and config
             meta_path = os.path.join(directory, "rag_config.json")
             with open(meta_path, "w") as f:
-                json.dump({
-                    "next_id": self._next_id,
-                    "dim": self._dim,
-                    "embed_model": self._embed_model,
-                }, f)
+                json.dump(
+                    {
+                        "next_id": self._next_id,
+                        "dim": self._dim,
+                        "embed_model": self._embed_model,
+                    },
+                    f,
+                )
         else:
             # Python fallback saving (legacy)
             meta_path = os.path.join(directory, "meta_legacy.json")
             with open(meta_path, "w") as f:
                 json.dump({"texts": self._texts, "next_id": self._next_id}, f)
-        
+
         logger.info("rag.save_to_disk: saved to %s", directory)
 
     @classmethod
@@ -363,7 +387,7 @@ class RAGPipeline:
                 cfg = json.load(f)
             instance = cls(embed_model=cfg["embed_model"], dim=cfg["dim"])
             instance._next_id = cfg["next_id"]
-            
+
             PyAgentMemory = _try_import_ffi_memory()
             if PyAgentMemory is not None:
                 index_path = os.path.join(directory, "hnsw_index")

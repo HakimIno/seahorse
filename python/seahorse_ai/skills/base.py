@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Callable
+from typing import Any
+
 from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
+
 
 class SeahorseSkill(BaseModel):
     """A collection of tools and prompt rules that define a specific agent capability."""
@@ -18,11 +20,12 @@ class SeahorseSkill(BaseModel):
         """Return the formatted prompt rules for this skill."""
         if not self.rules:
             return ""
-        
+
         snippet = f"### Skill: {self.name}\n"
         for i, rule in enumerate(self.rules, 1):
             snippet += f"{i}. {rule}\n"
         return snippet
+
 
 class SkillRegistry:
     """A registry for managing and discovering SeahorseSkills."""
@@ -39,6 +42,7 @@ class SkillRegistry:
 
     def list_skills(self) -> list[str]:
         return list(self._skills.keys())
+
 
 # Global registry instance
 registry = SkillRegistry()

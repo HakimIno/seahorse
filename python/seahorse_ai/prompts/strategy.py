@@ -1,4 +1,5 @@
 """seahorse_ai.prompts.strategy — Strategy planning prompt for Seahorse Agent."""
+
 from __future__ import annotations
 
 STRATEGY_GENERATION_PROMPT = """\

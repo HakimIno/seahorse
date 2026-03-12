@@ -17,6 +17,7 @@ After indexing, the docs are stored in the RAGPipeline singleton via memory_stor
 This script is intended as a pre-flight step before starting the server, or as a
 standalone batch job for offline document ingestion.
 """
+
 from __future__ import annotations
 
 import argparse

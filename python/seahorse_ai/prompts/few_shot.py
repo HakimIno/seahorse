@@ -1,4 +1,5 @@
 """seahorse_ai.prompts.few_shot — High-quality tool selection examples."""
+
 from __future__ import annotations
 
 FEW_SHOT_TOOL_EXAMPLES = """\

@@ -7,12 +7,12 @@ Fixed issues (Phase 2):
 - Closure bug: delegate_tool now captures name/planner by value via default args
 - Master planner is now cached and not re-created on every request
 """
+
 from __future__ import annotations
 
 import logging
-
 from typing import Any
- 
+
 from seahorse_ai.planner import LLMBackend, ReActPlanner, ToolRegistry
 from seahorse_ai.schemas import AgentRequest
 from seahorse_ai.skills.base import SeahorseSkill
@@ -96,10 +96,9 @@ class SeahorseCrew:
 
             # Build specialized prompt for this task
             context_snippet = (
-                f"\n\nContext from previous steps:\n{overall_context}"
-                if overall_context else ""
+                f"\n\nContext from previous steps:\n{overall_context}" if overall_context else ""
             )
-            
+
             task_prompt = (
                 f"TASK DESCRIPTION: {task.description}\n"
                 f"EXPECTED OUTPUT: {task.expected_output}\n"
@@ -107,42 +106,52 @@ class SeahorseCrew:
             )
 
             logger.info("Crew: Agent '%s' starting task: %s", agent.name, task.description[:50])
-            
+
             # Temporary override of system prompt via history injection if needed
             # For now, we rely on the agent's planner already being configured
             request = AgentRequest(
                 prompt=task_prompt,
                 agent_id=f"crew_{agent.name}_task_{i}",
             )
-            
+
             response = await agent.planner.run(request)
             last_output = response.content
             task.output = last_output
-            
+
             # Collect image paths
             if response.image_paths:
                 all_image_paths.extend(response.image_paths)
 
             # Accumulate context (with truncation to avoid token bloat)
             overall_context += f"\n--- Result of Task {i} ({agent.role}) ---\n{last_output}\n"
-            
-            # Simple truncation: Keep only the last ~4000 chars of context 
+
+            # Simple truncation: Keep only the last ~4000 chars of context
             if len(overall_context) > 4000:
                 overall_context = "..." + overall_context[-4000:]
 
-        return {
-            "content": last_output,
-            "image_paths": all_image_paths if all_image_paths else None
-        }
+        return {"content": last_output, "image_paths": all_image_paths if all_image_paths else None}
+
 
 class SwarmOrchestrator:
-    """Manages a collection of agents and provides a unified entry point."""
+    """Manages a collection of agents communicating asynchronously via Rust MessageBus."""
 
     def __init__(self, llm: LLMBackend) -> None:
         self._llm = llm
         self._agents: dict[str, CrewAgent] = {}
         self._shared_registry = SeahorseToolRegistry()
         self._master: ReActPlanner | None = None
+
+        # Initialize Rust PyMessageBus
+        try:
+            from seahorse_ffi import PyMessageBus
+
+            self._bus = PyMessageBus(1024)
+            logger.info("SwarmOrchestrator: Rust PyMessageBus initialized.")
+        except ImportError:
+            logger.warning(
+                "SwarmOrchestrator: PyMessageBus not found. Run `uv run maturin develop`. Falling back to dummy."
+            )
+            self._bus = None
 
     def add_agent(
         self,
@@ -152,34 +161,108 @@ class SwarmOrchestrator:
         backstory: str,
         tools: ToolRegistry,
     ) -> None:
-        """Register a new specialized CrewAgent in the swarm."""
-        # Inject backstory into a custom prompt for this planner's system message
+        """Register a new specialized CrewAgent equipped with real-time Pub/Sub tools."""
         agent_identity = (
             f"\n\n## Your Identity\n"
             f"Role: {role}\n"
             f"Goal: {goal}\n"
             f"Backstory: {backstory}\n"
+            f"\n## Communication Directive\n"
+            f"You are part of a real-time multi-agent swarm. Do NOT wait for blocking responses. "
+            f"Use `send_message` to communicate directly with other agents or `broadcast` for general alerts.\n"
         )
-        planner = ReActPlanner(llm=self._llm, tools=tools, identity_prompt=agent_identity)
+
+        # Merge specific tools with communication tools
+        agent_tools = SeahorseToolRegistry()
+        for fn, _ in tools._tools.values():
+            agent_tools.register(fn)
+
+        @tool(
+            f"Send a direct message to a specific agent in the swarm. Available: {list(self._agents.keys())}"
+        )
+        async def send_message(recipient: str, message: str) -> str:
+            if not self._bus:
+                return "Message failed: Bus offline."
+            self._bus.publish(f"agent_{recipient.lower()}", name, message)
+            logger.info("Swarm: %s sent message to %s", name, recipient)
+            return f"Message queued to {recipient}."
+
+        @tool(
+            "Broadcast a general message to all agents listening to a specific topic (e.g., 'system', 'data')."
+        )
+        async def broadcast(topic: str, message: str) -> str:
+            if not self._bus:
+                return "Broadcast failed: Bus offline."
+            self._bus.publish(topic, name, message)
+            logger.info("Swarm: %s broadcasted to topic '%s'", name, topic)
+            return f"Broadcasted to {topic}."
+
+        agent_tools.register(send_message)
+        agent_tools.register(broadcast)
+
+        planner = ReActPlanner(llm=self._llm, tools=agent_tools, identity_prompt=agent_identity)
         agent = CrewAgent(name, role, goal, backstory, planner)
         self._agents[name] = agent
-
-        @tool(f"Delegate to {name} ({role}). Goal: {goal}")
-        async def delegate_tool(query: str, _name: str = name, _agent: CrewAgent = agent) -> str:
-            logger.info("Crew: delegating to %s", _name)
-            request = AgentRequest(prompt=query, agent_id=f"crew_{_name}")
-            response = await _agent.planner.run(request)
-            return response.content
-
-        self._shared_registry.register(delegate_tool)
         self._master = None
-        logger.info("Crew: added agent '%s' as %s", name, role)
+        logger.info("Swarm: added agent '%s' as %s", name, role)
+
+    async def _run_agent_listener(self, agent: CrewAgent):
+        """Background task for an agent to listen for direct messages on the Bus."""
+        if not self._bus:
+            return
+
+        import asyncio
+
+        topic = f"agent_{agent.name.lower()}"
+        receiver = self._bus.subscribe(topic)
+        logger.info("Swarm: %s listening on topic '%s'", agent.name, topic)
+
+        while True:
+            try:
+                # Yield control to allow other tasks to run
+                await asyncio.sleep(0.1)
+
+                # The PyO3 recv() method internally uses `allow_threads` to drop the GIL
+                # and timeouts so it won't block forever. Thus we don't need `to_thread`.
+                msg = receiver.recv()
+
+                if msg is not None:
+                    logger.info(
+                        "Swarm [%s] INBOX: from %s -> %s", agent.name, msg["sender"], msg["content"]
+                    )
+
+                    # Context injection for real-time reactivity
+                    inbound_prompt = f"INBOUND MESSAGE from {msg['sender']}:\n{msg['content']}\nPlease acknowledge or act on this."
+                    request = AgentRequest(prompt=inbound_prompt, agent_id=f"crew_{agent.name}_rx")
+
+                    # Fire and forget the plan execution
+                    asyncio.create_task(agent.planner.run(request))
+
+            except StopAsyncIteration:
+                logger.debug("Swarm [%s] receiver channel closed.", agent.name)
+                break
+            except Exception as e:
+                # If there's a timeout panic or another rust-side cancel, just retry.
+                if "timeout" not in str(e).lower() and "panic" not in str(e).lower():
+                    logger.error("Swarm [%s] listener trapped: %s", agent.name, e)
 
     async def run(self, prompt: str) -> str:
-        """Run the main coordinator."""
+        """Run the swarm asynchronously."""
+        import asyncio
+
+        # Start listeners for all agents
+        listeners = []
+        for agent in self._agents.values():
+            listeners.append(asyncio.create_task(self._run_agent_listener(agent)))
+
         if self._master is None:
             self._master = ReActPlanner(llm=self._llm, tools=self._shared_registry)
-        
+
         request = AgentRequest(prompt=prompt)
         response = await self._master.run(request)
+
+        # Cleanup listeners
+        for listener in listeners:
+            listener.cancel()
+
         return response.content

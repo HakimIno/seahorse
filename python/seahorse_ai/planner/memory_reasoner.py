@@ -16,6 +16,9 @@ logger = logging.getLogger(__name__)
 _REASONER_PROMPT = """\
 You are an intelligent memory assistant for the Seahorse AI agent.
 The user asked a question about their past interactions or stored knowledge.
+
+Today's date: {today}
+
 Read the retrieved facts (memories) below and answer the user's specific question naturally and accurately.
 
 Retrieved Facts (Vector Search):
@@ -67,10 +70,12 @@ class MemoryReasoner:
             relevant_facts = []
             if isinstance(search_result, list):
                 relevant_facts = [f for f in search_result if f.get("distance", 1.0) < 0.5]
-            
+
             # Short-circuit: If we have 1 very strong match (< 0.1), skip synthesis
             if len(relevant_facts) == 1 and relevant_facts[0].get("distance", 1.0) < 0.1:
-                logger.info("memory_reasoner: high-confidence match (dist < 0.1) — short-circuiting")
+                logger.info(
+                    "memory_reasoner: high-confidence match (dist < 0.1) — short-circuiting"
+                )
                 return AgentResponse(
                     content=relevant_facts[0]["text"],
                     steps=1,
@@ -97,10 +102,16 @@ class MemoryReasoner:
                 history_str = "\n".join([f"- {m.role}: {m.content}" for m in window])
 
             # 3. Synthesize answer using LLM
-            # [OPTIMIZATION] We remove the separate 'Reranker' LLM call to reduce latency.
-            # Instead, we pass ALL facts to the Synthesis prompt and let it filter internally.
+            import datetime
+
+            today = datetime.date.today().strftime("%A, %B %d, %Y")
+
             prompt = _REASONER_PROMPT.format(
-                facts=vector_facts, graph_context=graph_context, history=history_str, query=query
+                facts=vector_facts,
+                graph_context=graph_context,
+                history=history_str,
+                query=query,
+                today=today,
             )
 
             result = await self._llm.complete([Message(role="user", content=prompt)], tier="worker")

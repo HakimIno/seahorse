@@ -7,8 +7,9 @@ Supports two backends (set via env var SEAHORSE_VECTOR_DB):
 Tools:
   - memory_store  → embed text and save it in the vector index
   - memory_search → embed a query and retrieve the k most similar stored texts
-  - memory_delete → remove a specific memory entry  
+  - memory_delete → remove a specific memory entry
 """
+
 from __future__ import annotations
 
 import json
@@ -36,18 +37,19 @@ def get_pipeline() -> object:
         if backend == "qdrant":
             try:
                 from seahorse_ai.rag_qdrant import QdrantRAGPipeline
+
                 url = os.environ.get("QDRANT_URL", "http://localhost:6333")
                 collection = os.environ.get("QDRANT_COLLECTION", "seahorse_memory")
                 _pipeline = QdrantRAGPipeline(url=url, collection=collection)
                 logger.info("memory: using Qdrant backend url=%s", url)
             except Exception as exc:
-                logger.error(
-                    "memory: Qdrant unavailable (%s) — falling back to HNSW", exc
-                )
+                logger.error("memory: Qdrant unavailable (%s) — falling back to HNSW", exc)
                 from seahorse_ai.rag import RAGPipeline
+
                 _pipeline = RAGPipeline()
         else:
             from seahorse_ai.rag import RAGPipeline
+
             _pipeline = RAGPipeline()
             logger.info("memory: using in-memory HNSW backend")
     return _pipeline
@@ -60,8 +62,6 @@ def set_pipeline(pipeline: object) -> None:
     logger.info("memory: pipeline replaced with %r", pipeline)
 
 
-
-
 @tool(
     "Save a specific piece of information into long-term memory for future use. "
     "CRITICAL: Store ONLY ONE independent fact at a time. "
@@ -72,7 +72,7 @@ async def memory_store(text: str, importance: int = 3, agent_id: str | None = No
     """Save text into memory. Automatically splits grouped facts and injects metadata."""
     pipeline = get_pipeline()
     import datetime
-    
+
     timestamp = datetime.datetime.now().isoformat()
     metadata = {
         "created_at": timestamp,
@@ -85,14 +85,14 @@ async def memory_store(text: str, importance: int = 3, agent_id: str | None = No
     # Force splitting by common conjunctions or newlines to ensure atomic facts
     split_markers = [" และ ", " and ", "\n", " ทั้งยัง ", " รวมถึง "]
     needs_split = any(m in text for m in split_markers) and len(text) > 25
-    
+
     if needs_split:
         temp_text = text
         for m in split_markers:
             temp_text = temp_text.replace(m, "SPLIT_TOKEN")
-        
+
         parts = [p.strip() for p in temp_text.split("SPLIT_TOKEN") if len(p.strip()) > 3]
-        
+
         if len(parts) > 1:
             stored = []
             for p in parts:
@@ -106,17 +106,17 @@ async def memory_store(text: str, importance: int = 3, agent_id: str | None = No
     results = await pipeline.search(
         text, k=1, filter_metadata={"agent_id": agent_id} if agent_id else None
     )
-    
+
     if results:
         best = results[0]
         best_text = best["text"]
         best_dist = best["distance"]
-        
+
         # Duplicate Check: If distance is < 0.08, it's effectively the same fact.
         if best_dist < 0.08:
             logger.info("memory_store: skipping duplicate (dist=%.4f) text=%r", best_dist, text)
             return f"Memory already contains this information: {best_text!r}"
-            
+
         # Conflict/Update Check: distance < 0.12 = same topic, updated value.
         # NOTE: 0.25 was too aggressive — "Packet A ราคา 1200" and
         # "Packet B ราคา 5000" had dist ~0.2 (both contain "ราคา")
@@ -132,15 +132,20 @@ async def memory_store(text: str, importance: int = 3, agent_id: str | None = No
     if backend == "qdrant":
         # Phase 2: Transactional Outbox Pattern
         import asyncpg
+
         pg_uri = os.environ.get("SEAHORSE_PG_URI")
         if pg_uri:
             try:
                 conn = await asyncpg.connect(pg_uri)
                 try:
-                    await conn.execute("""
+                    await conn.execute(
+                        """
                         INSERT INTO seahorse_outbox (event_type, payload)
                         VALUES ($1, $2)
-                    """, "MEMORY_STORE", json.dumps({"text": text, "metadata": metadata}))
+                    """,
+                        "MEMORY_STORE",
+                        json.dumps({"text": text, "metadata": metadata}),
+                    )
                     logger.info("memory_store: queued to outbox text_len=%d", len(text))
                     return f"บันทึกข้อมูลเข้าคิวเรียบร้อยครับ (Transactional Outbox) ✅: {text[:50]}..."
                 finally:
@@ -149,11 +154,32 @@ async def memory_store(text: str, importance: int = 3, agent_id: str | None = No
                 logger.error("memory_store outbox error: %s — falling back to direct sync", e)
 
     # 3. Default: Store as a new fact (Direct Sync / Fallback)
-    pipeline = get_pipeline()
-    doc_id = await pipeline.store(text, metadata=metadata)
-    logger.info("memory_store: stored new doc_id=%d text_len=%d", doc_id, len(text))
+    from seahorse_ai.llm import get_llm
+    from seahorse_ai.tools.memory_extractor import MemoryExtractor
+
+    # Extract distinct facts and relationships before saving
+    extractor = MemoryExtractor(get_llm("worker"))
+    facts = await extractor.extract(text)
+
+    stored_ids = []
+    for fact in facts:
+        # Merge semantic fact type into metadata
+        fact_meta = dict(metadata)
+        fact_meta["fact_type"] = fact.fact_type
+
+        doc_id = await pipeline.store(
+            fact.text, metadata=fact_meta, knowledge_triples=fact.knowledge_triples
+        )
+        stored_ids.append(str(doc_id))
+        logger.info(
+            "memory_store: stored doc_id=%d text=%r triples=%d",
+            doc_id,
+            fact.text[:50],
+            len(fact.knowledge_triples),
+        )
+
     return (
-        f"Stored in long-term memory (doc_id={doc_id}). "
+        f"Stored {len(stored_ids)} semantic facts in long-term memory (IDs={','.join(stored_ids)}). "
         f"Memory now contains {pipeline.size} document(s)."
     )
 
@@ -163,7 +189,9 @@ async def memory_store(text: str, importance: int = 3, agent_id: str | None = No
     "Returns the top-k most semantically similar stored texts. "
     "Use this before answering questions that may have been discussed before."
 )
-async def memory_search(query: str, k: int = 10, agent_id: str | None = None, min_similarity: float = 0.1) -> list[dict] | str:
+async def memory_search(
+    query: str, k: int = 10, agent_id: str | None = None, min_similarity: float = 0.1
+) -> list[dict] | str:
     """Search memory index. Returns dicts for planner or string for LLM."""
     k = int(k)
     pipeline = get_pipeline()
@@ -172,7 +200,7 @@ async def memory_search(query: str, k: int = 10, agent_id: str | None = None, mi
 
     filter_metadata = {"agent_id": agent_id} if agent_id else None
     results = await pipeline.search(query, k=k, filter_metadata=filter_metadata)
-    
+
     if not results:
         return []
 
@@ -185,8 +213,7 @@ async def memory_search(query: str, k: int = 10, agent_id: str | None = None, mi
 
     # 2. Prioritize by importance + similarity
     results.sort(
-        key=lambda x: (x["metadata"].get("importance", 3), 1 - x["distance"]), 
-        reverse=True
+        key=lambda x: (x["metadata"].get("importance", 3), 1 - x["distance"]), reverse=True
     )
 
     # 3. Decision: Return raw for planner OR string for LLM
@@ -205,15 +232,20 @@ async def memory_delete(query: str) -> str:
     backend = os.environ.get("SEAHORSE_VECTOR_DB", "hnsw").lower()
     if backend == "qdrant":
         import asyncpg
+
         pg_uri = os.environ.get("SEAHORSE_PG_URI")
         if pg_uri:
             try:
                 conn = await asyncpg.connect(pg_uri)
                 try:
-                    await conn.execute("""
+                    await conn.execute(
+                        """
                         INSERT INTO seahorse_outbox (event_type, payload)
                         VALUES ($1, $2)
-                    """, "MEMORY_DELETE", json.dumps({"query": query}))
+                    """,
+                        "MEMORY_DELETE",
+                        json.dumps({"query": query}),
+                    )
                     logger.info("memory_delete: queued to outbox query=%r", query)
                     return f"ส่งคำขอลบข้อมูลเข้าคิวเรียบร้อยครับ (Transactional Outbox) 🗑️: {query}"
                 finally:

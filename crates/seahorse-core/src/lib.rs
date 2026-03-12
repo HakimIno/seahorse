@@ -9,6 +9,7 @@
 #![allow(clippy::must_use_candidate, clippy::module_name_repetitions)]
 
 pub mod agent;
+pub mod bus;
 pub mod config;
 pub mod error;
 pub mod fast_path;
@@ -19,6 +20,7 @@ pub mod wasm;
 pub mod worker;
 
 pub use agent::RigAgent;
+pub use bus::MessageBus;
 pub use config::Config;
 pub use error::{CoreError, CoreResult};
 pub use memory::AgentMemory;
@@ -35,6 +37,7 @@ pub struct SeahorseCore {
     pub memory: Arc<AgentMemory>,
     pub scheduler: Arc<AgentScheduler>,
     pub fast_path: Arc<FastPath>,
+    pub bus: Arc<MessageBus>,
 }
 
 impl SeahorseCore {
@@ -53,11 +56,14 @@ impl SeahorseCore {
             config.openrouter_api_key.clone(),
         ));
 
+        let bus = Arc::new(MessageBus::new(1024)); // 1024 default capacity
+
         let core = Self {
             config,
             memory,
             scheduler: Arc::new(scheduler),
             fast_path,
+            bus,
         };
 
         info!("SeahorseCore initialised");

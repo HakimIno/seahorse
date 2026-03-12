@@ -4,7 +4,7 @@ Drop-in replacement for RAGPipeline backed by Qdrant instead of in-memory HNSW.
 
 Key benefits:
 - Data persists across bot restarts
-- Per-agent collection isolation (multi-user safe)  
+- Per-agent collection isolation (multi-user safe)
 - Native payload filtering (no Python-side scanning)
 - Scales to millions of documents
 
@@ -12,6 +12,7 @@ Usage:
     Set SEAHORSE_VECTOR_DB=qdrant in .env
     Qdrant must be running (docker run -d -p 6333:6333 qdrant/qdrant)
 """
+
 from __future__ import annotations
 
 import logging
@@ -60,7 +61,9 @@ class QdrantRAGPipeline:
 
         logger.info(
             "QdrantRAGPipeline: url=%s collection=%s dim=%d",
-            url, collection, dim,
+            url,
+            collection,
+            dim,
         )
 
     def _collection_name(self, agent_id: str | None) -> str:
@@ -96,6 +99,7 @@ class QdrantRAGPipeline:
     async def _embed(self, text: str) -> np.ndarray:
         """Embed text using the configured model via LiteLLM."""
         import litellm
+
         resp = await litellm.aembedding(
             model=self._embed_model,
             input=[text],
@@ -126,15 +130,19 @@ class QdrantRAGPipeline:
 
         await self._client.upsert(
             collection_name=collection,
-            points=[PointStruct(
-                id=numeric_id,
-                vector=embedding.tolist(),
-                payload=payload,
-            )],
+            points=[
+                PointStruct(
+                    id=numeric_id,
+                    vector=embedding.tolist(),
+                    payload=payload,
+                )
+            ],
         )
         logger.debug(
             "qdrant.store: collection=%s id=%d text_len=%d",
-            collection, numeric_id, len(text),
+            collection,
+            numeric_id,
+            len(text),
         )
         return numeric_id
 
@@ -184,12 +192,14 @@ class QdrantRAGPipeline:
             # Qdrant cosine score is in [-1, 1] where 1 = identical
             # Convert to distance: distance = 1 - score (lower = more similar)
             distance = 1.0 - float(hit.score)
-            formatted.append({
-                "text": text,
-                "distance": distance,
-                "metadata": payload,
-                "id": hit.id,
-            })
+            formatted.append(
+                {
+                    "text": text,
+                    "distance": distance,
+                    "metadata": payload,
+                    "id": hit.id,
+                }
+            )
 
         return formatted
 
@@ -205,9 +215,7 @@ class QdrantRAGPipeline:
                     collection_name=collection,
                     points_selector=FilterSelector(
                         filter=Filter(
-                            must=[FieldCondition(
-                                key="text", match=MatchValue(value=text)
-                            )]
+                            must=[FieldCondition(key="text", match=MatchValue(value=text))]
                         )
                     ),
                 )
@@ -216,7 +224,10 @@ class QdrantRAGPipeline:
         return False
 
     async def delete_by_text_in_collection(
-        self, text: str, agent_id: str | None, threshold: float = 0.1,
+        self,
+        text: str,
+        agent_id: str | None,
+        threshold: float = 0.1,
     ) -> bool:
         """Delete text from a specific agent's collection."""
         collection = self._collection_name(agent_id)
@@ -229,14 +240,14 @@ class QdrantRAGPipeline:
                     collection_name=collection,
                     points_selector=FilterSelector(
                         filter=Filter(
-                            must=[FieldCondition(
-                                key="text", match=MatchValue(value=r["text"])
-                            )]
+                            must=[FieldCondition(key="text", match=MatchValue(value=r["text"]))]
                         )
                     ),
                 )
                 logger.info(
-                    "qdrant.delete: collection=%s removed=%r", collection, r["text"],
+                    "qdrant.delete: collection=%s removed=%r",
+                    collection,
+                    r["text"],
                 )
                 return True
         return False

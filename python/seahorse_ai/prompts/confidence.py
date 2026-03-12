@@ -1,4 +1,5 @@
 """seahorse_ai.prompts.confidence — Confidence calibration and anti-hallucination guards."""
+
 from __future__ import annotations
 
 CONFIDENCE_RULES = """\

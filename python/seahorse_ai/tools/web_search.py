@@ -3,6 +3,7 @@
 Uses a custom HTML scraper for `lite.duckduckgo.com` which is extremely
 resilient to bot-blocking and requires zero external dependencies.
 """
+
 from __future__ import annotations
 
 import logging
@@ -73,17 +74,16 @@ def _search_ddg_lite(query: str, max_results: int = 5) -> list[dict[str, str]]:
         return []
 
 
-@tool(
-    "Search the web for up-to-date information. Returns top search results."
-)
+@tool("Search the web for up-to-date information. Returns top search results.")
 async def web_search(query: str, max_results: int = 5) -> str:
     """Perform a web search and return formatted results."""
     # Cast early to prevent logging and indexing errors
     max_results = int(max_results)
     logger.info("web_search: query=%r max_results=%d", query, max_results)
-    
+
     # Run synchronous network call in executor to avoid blocking async loop
     import asyncio
+
     loop = asyncio.get_running_loop()
     results = await loop.run_in_executor(None, _search_ddg_lite, query, max_results)
 

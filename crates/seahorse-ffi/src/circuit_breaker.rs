@@ -1,5 +1,4 @@
 use pyo3::prelude::*;
-use once_cell::sync::Lazy;
 use std::sync::atomic::{AtomicUsize, AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 

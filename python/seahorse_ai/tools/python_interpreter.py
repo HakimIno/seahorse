@@ -3,6 +3,7 @@
 Uses subprocess isolation to prevent the agent from affecting the host process.
 Only allows a curated set of safe imports.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -22,13 +23,32 @@ _TIMEOUT_SECONDS = 30
 
 # Allowed stdlib modules inside the sandbox
 _ALLOWED_IMPORTS = {
-    "math", "statistics", "decimal", "fractions",
-    "json", "re", "string", "textwrap",
-    "datetime", "calendar", "time",
-    "collections", "itertools", "functools",
-    "random", "hashlib", "base64", "uuid",
-    "typing", "dataclasses", "enum", "abc", "_io",
-    "pandas", "numpy", "matplotlib",
+    "math",
+    "statistics",
+    "decimal",
+    "fractions",
+    "json",
+    "re",
+    "string",
+    "textwrap",
+    "datetime",
+    "calendar",
+    "time",
+    "collections",
+    "itertools",
+    "functools",
+    "random",
+    "hashlib",
+    "base64",
+    "uuid",
+    "typing",
+    "dataclasses",
+    "enum",
+    "abc",
+    "_io",
+    "pandas",
+    "numpy",
+    "matplotlib",
 }
 
 _SANDBOX_HEADER = textwrap.dedent(f"""\
@@ -52,8 +72,8 @@ _SANDBOX_HEADER = textwrap.dedent(f"""\
 
 def _get_python_executable() -> str:
     """Find the real Python interpreter.
-    
-    When running inside a Rust binary (Pyo3), sys.executable points to the 
+
+    When running inside a Rust binary (Pyo3), sys.executable points to the
     host binary, not the Python interpreter. We need the real one for the sandbox.
     """
     # 1. Try to find .venv/bin/python relative to this file
@@ -64,11 +84,11 @@ def _get_python_executable() -> str:
     venv_python = os.path.join(base_dir, ".venv", "bin", "python3")
     if os.path.exists(venv_python):
         return venv_python
-        
+
     # 2. Fallback to standard sys.executable if it looks like a python binary
     if "python" in sys.executable.lower():
         return sys.executable
-        
+
     # 3. Last resort: use whatever 'python3' is in the PATH
     return "python3"
 
@@ -83,9 +103,7 @@ async def python_interpreter(code: str) -> str:
     logger.info("python_interpreter: executing %d chars of code", len(code))
 
     # Write code to a temp file and run in a fresh subprocess
-    with tempfile.NamedTemporaryFile(
-        mode="w", suffix=".py", delete=False, encoding="utf-8"
-    ) as f:
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False, encoding="utf-8") as f:
         f.write(_SANDBOX_HEADER)
         f.write("\n")
         f.write("# --- user code ---\n")
@@ -101,7 +119,7 @@ async def python_interpreter(code: str) -> str:
             "HOME": os.environ.get("HOME", ""),
             "LANG": os.environ.get("LANG", "en_US.UTF-8"),
         }
-        
+
         process = await asyncio.create_subprocess_exec(
             _get_python_executable(),
             tmp_path,
@@ -109,7 +127,7 @@ async def python_interpreter(code: str) -> str:
             stderr=asyncio.subprocess.PIPE,
             env=safe_env,
         )
-        
+
         try:
             stdout_bytes, stderr_bytes = await asyncio.wait_for(
                 process.communicate(), timeout=_TIMEOUT_SECONDS

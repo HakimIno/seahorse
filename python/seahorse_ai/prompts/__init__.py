@@ -10,6 +10,7 @@ Usage:
     from seahorse_ai.prompts import build_system_prompt, classify_intent
     from seahorse_ai.prompts import MEMORY_KEYWORDS, REALTIME_KEYWORDS
 """
+
 from __future__ import annotations
 
 from seahorse_ai.prompts.core import build_system_prompt

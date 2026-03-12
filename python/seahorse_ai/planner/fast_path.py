@@ -57,13 +57,11 @@ Fields:
     - 4-5: Multi-step objectives, deep research, or projects (Specialized Crew required).
 
 Rules:
-- Simple greetings/casual talk → {{"action":"GREET","complexity":1}}
+- Simple greetings, names, or basic chat → {{"action":"GREET","complexity":1}}
+- "What time/day/date is it?" → {{"action":"CHAT","complexity":1}}
 - "Save/Remember X" → {{"action":"STORE","complexity":2}}
-- "What is X" (simple facts) → {{"action":"QUERY","complexity":2}}
-- Database/SQL queries → {{"action":"SQL","complexity":3}}
-- "Research X", "Summarize X", "Write a report about X", "Explain complex Y" 
-  → **STRICTLY** {{"action":"CHAT","complexity":4}} or 5.
-- Multi-step requests or deep analysis → {{"complexity":5}}
+- "What is [internal fact]" (memory check) → {{"action":"QUERY","complexity":2}}
+- Database analysis or multi-agent tasks → {{"complexity":3+}}
 
 
 Conversation history (if any):
@@ -92,6 +90,7 @@ async def classify_structured_intent(
         return StructuredIntent(
             intent="GENERAL",
             action="GREET",
+            complexity=1,
             raw_category="GENERAL",
         )
 
@@ -224,21 +223,26 @@ class FastPathRouter:
         self, prompt: str, history: list[Message] | None, start_t: float, tone: str = "PROFESSIONAL"
     ) -> AgentResponse:
         """Process greetings and simple chat queries fully via the fast model."""
+        import datetime
         import time
 
         from seahorse_ai.schemas import Message
+
+        today = datetime.date.today().strftime("%A, %B %d, %Y")
 
         # Select persona based on tone
         if tone == "CASUAL":
             system_msg = (
                 "You are Seahorse AI, but in a friendly, casual, and slightly humorous mode. "
                 "You are chatting with a friend. Use emojis, be warm, and keep it light. "
+                f"Today's date: {today}. "
                 "Reply in the user's language."
             )
         else:
             system_msg = (
                 "You are Seahorse AI, an intelligent business agent. "
                 "You are professional, precise, and helpful. "
+                f"Today's date: {today}. "
                 "Answer politely, concisely, and naturally in the user's language."
             )
 
@@ -269,34 +273,48 @@ class FastPathRouter:
         """Fast-path for simple web searches bypassing full planner."""
         try:
             import time
+
             from seahorse_ai.schemas import Message
-            
+
             # Execute tool directly
             raw_result = await self._tools.call("web_search", {"query": search_term})
-            
+
+            import datetime
+
+            today = datetime.date.today().strftime("%A, %B %d, %Y")
+
             # Synthesize answer using fast model
             msgs = [
                 Message(
-                    role="system", 
-                    content="You are Seahorse AI, an expert news anchor and researcher. Read the provided search results carefully. Synthesize a comprehensive, accurate, and engaging summary. Do NOT just copy the bullet points. Add context where necessary. Reply in the same language as the user."
+                    role="system",
+                    content=(
+                        "You are Seahorse AI, an expert news anchor and researcher. "
+                        f"Today's date: {today}. "
+                        "Read the provided search results carefully. Synthesize a comprehensive, accurate, and engaging summary. "
+                        "Do NOT just copy the bullet points. Add context where necessary. Reply in the same language as the user."
+                    ),
                 )
             ]
             if history:
-                 msgs.extend(history[-2:]) # Context
-            msgs.append(Message(role="user", content=f"User Query: {prompt}\n\nSearch Results:\n{raw_result}"))
-            
+                msgs.extend(history[-2:])  # Context
+            msgs.append(
+                Message(
+                    role="user", content=f"User Query: {prompt}\n\nSearch Results:\n{raw_result}"
+                )
+            )
+
             res = await self._llm.complete(msgs, tier="fast")
             content = str(res.get("content", res) if isinstance(res, dict) else res)
-            
+
             return AgentResponse(
                 content=content,
-                steps=1, # Tool call counts as 1 step
+                steps=1,  # Tool call counts as 1 step
                 elapsed_ms=int((time.perf_counter() - start_t) * 1000),
             )
-            
+
         except Exception as e:
             logger.error(f"Fast web search error: {e}")
-            return None # Fallback to ReAct on failure
+            return None  # Fallback to ReAct on failure
 
     async def _handle_store(
         self,

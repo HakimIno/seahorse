@@ -175,6 +175,7 @@ class ReActPlanner:
             is_crew = request.agent_id.startswith("crew_")
             if is_crew:
                 from seahorse_ai.planner.fast_path import StructuredIntent
+
                 si = StructuredIntent(intent="GENERAL", action="CHAT", complexity=3)
             else:
                 try:
@@ -191,8 +192,9 @@ class ReActPlanner:
                         "agent.run intent classification timed out — falling back to GENERAL"
                     )
                     from seahorse_ai.planner.fast_path import StructuredIntent
+
                     si = StructuredIntent(intent="GENERAL", action="CHAT")
-            
+
             intent = si.raw_category or si.intent
             logger.info(
                 "agent.run intent=%s action=%s entity=%r agent_id=%s (crew=%s)",
@@ -234,7 +236,7 @@ class ReActPlanner:
                 from seahorse_ai.tools.auto_seahorse import execute_auto_seahorse
 
                 crew_result = await execute_auto_seahorse(request.prompt, team_hint=si.intent)
-                
+
                 # Unpack if execute_auto_seahorse returns a dict (content, image_paths)
                 is_str = isinstance(crew_result, str)
                 content = crew_result if is_str else crew_result.get("content", "")
@@ -252,7 +254,7 @@ class ReActPlanner:
                 )
 
             # ── 3. Build system messages (full ReAct path) ─────────────────
-            sys_prompt = build_system_prompt(skills=self._skills, tone=si.tone)
+            sys_prompt = build_system_prompt(skills=self._skills, tone=si.tone, intent=intent)
             if self._identity_prompt:
                 sys_prompt += f"\n\n{self._identity_prompt}"
 
@@ -271,7 +273,7 @@ class ReActPlanner:
 
             # 4. Strategy plan (cached) for complex intents
             # Only use strategy for complex reasoning tasks to save latency
-            current_tier = _classify_tier(
+            current_tier = await _classify_tier(
                 self._llm,
                 request.prompt,
                 self._default_tier,
@@ -316,7 +318,7 @@ class ReActPlanner:
                 # OPTIMIZATION: Skip synthesis if is_direct OR if current agent is already a thinker/strategist
                 skip_synthesis = getattr(result, "is_direct", False)
                 is_elite_already = current_tier in ("thinker", "strategist")
-                
+
                 if (
                     not result.terminated
                     and not skip_synthesis
@@ -456,11 +458,16 @@ class ReActPlanner:
 # ── Module-level helpers ───────────────────────────────────────────────────────
 
 
-def _classify_tier(llm: object, prompt: str, default: str) -> str:
+async def _classify_tier(llm: object, prompt: str, default: str) -> str:
     # Ensure we handle potential attribute errors or signature mismatches in mocks
     try:
         if hasattr(llm, "classify_intent"):
-            tier = llm.classify_intent(prompt)  # type: ignore
+            import inspect
+
+            if inspect.iscoroutinefunction(llm.classify_intent):
+                tier = await llm.classify_intent(prompt)  # type: ignore
+            else:
+                tier = llm.classify_intent(prompt)  # type: ignore
         else:
             tier = default
     except Exception:

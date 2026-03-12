@@ -10,6 +10,7 @@ Intent Categories:
   PRIVATE_MEMORY    → Internal products, past conversations, personal data
   DATABASE          → Corporate database queries
 """
+
 from __future__ import annotations
 
 # ── Tier 0: Greeting / chit-chat fast-path ────────────────────────────────────
@@ -17,12 +18,30 @@ from __future__ import annotations
 # "Hi", "Hello" etc. are pure greetings, never real-time data requests.
 
 GREETING_PATTERNS: tuple[str, ...] = (
-    "hi", "hello", "hey", "howdy", "greetings",
-    "สวัสดี", "หวัดดี", "ดีจ้า", "ดีครับ", "ดีค่ะ",
-    "ขอบคุณ", "thank you", "thanks", "good morning",
-    "good afternoon", "good evening", "good night",
-    "ลาก่อน", "bye", "goodbye", "see you",
-    "เป็นยังไงบ้าง", "how are you", "what's up",
+    "hi",
+    "hello",
+    "hey",
+    "howdy",
+    "greetings",
+    "สวัสดี",
+    "หวัดดี",
+    "ดีจ้า",
+    "ดีครับ",
+    "ดีค่ะ",
+    "ขอบคุณ",
+    "thank you",
+    "thanks",
+    "good morning",
+    "good afternoon",
+    "good evening",
+    "good night",
+    "ลาก่อน",
+    "bye",
+    "goodbye",
+    "see you",
+    "เป็นยังไงบ้าง",
+    "how are you",
+    "what's up",
 )
 
 # ── Tier 1: Fast keyword pre-screening ────────────────────────────────────────
@@ -30,27 +49,63 @@ GREETING_PATTERNS: tuple[str, ...] = (
 
 REALTIME_KEYWORDS: tuple[str, ...] = (
     # Thai — unambiguously public real-time data
-    "ข่าว", "ราคาหุ้น", "ดัชนีหุ้น", "อากาศ", "ล่าสุด",
-    "บิทคอยน์", "คริปโต", "ดัชนี", "ทองคำวันนี้", "น้ำมันวันนี้",
-    "ทองวันนี้", "หุ้นวันนี้",
+    "ข่าว",
+    "ราคาหุ้น",
+    "ดัชนีหุ้น",
+    "อากาศ",
+    "ล่าสุด",
+    "บิทคอยน์",
+    "คริปโต",
+    "ดัชนี",
+    "ทองคำวันนี้",
+    "น้ำมันวันนี้",
+    "ทองวันนี้",
+    "หุ้นวันนี้",
     # English — unambiguously public real-time data
-    "breaking news", "stock price", "market price", "weather forecast",
-    "cryptocurrency", "bitcoin price", "nba score", "premier league",
-    "today's news", "latest news",
-    "stock market", "stock performance",
+    "breaking news",
+    "stock price",
+    "market price",
+    "weather forecast",
+    "cryptocurrency",
+    "bitcoin price",
+    "nba score",
+    "premier league",
+    "today's news",
+    "latest news",
+    "stock market",
+    "stock performance",
 )
 
 # Note: "วันนี้" removed — too ambiguous ("วันนี้ฉันมีนัด" is NOT realtime)
 
 MEMORY_KEYWORDS: tuple[str, ...] = (
     # Thai — clearly referring to private/stored context
-    "ที่เคยคุย", "ที่บอกไป", "ก่อนหน้า", "ครั้งที่แล้ว", "จำได้ไหม",
-    "ที่เก็บไว้", "เดิม", "แก้ไข", "อัปเดต", "เปลี่ยนข้อมูล",
-    "เมื่อวาน", "ที่เราคุย", "เปลี่ยนราคา", "เปลี่ยน", "จำไว้",
+    "ที่เคยคุย",
+    "ที่บอกไป",
+    "ก่อนหน้า",
+    "ครั้งที่แล้ว",
+    "จำได้ไหม",
+    "ที่เก็บไว้",
+    "เดิม",
+    "แก้ไข",
+    "อัปเดต",
+    "เปลี่ยนข้อมูล",
+    "เมื่อวาน",
+    "ที่เราคุย",
+    "เปลี่ยนราคา",
+    "เปลี่ยน",
+    "จำไว้",
     # English — clearly referring to private/stored context
-    "we discussed", "you remember", "last time", "previously discussed",
-    "stored memory", "update the price", "change the record",
-    "update price", "change price", "internal",
+    "we discussed",
+    "you remember",
+    "last time",
+    "previously discussed",
+    "stored memory",
+    "update the price",
+    "change the record",
+    "update price",
+    "change price",
+    "internal",
 )
 
 # ── Tier 2: LLM Semantic Intent Classification ─────────────────────────────────
@@ -119,6 +174,7 @@ async def classify_intent(query: str, llm_backend: object | None = None) -> str:
     if llm_backend is not None:
         try:
             from seahorse_ai.schemas import Message
+
             prompt = INTENT_CLASSIFY_PROMPT.format(query=query)
             result = await llm_backend.complete(  # type: ignore[union-attr]
                 [Message(role="user", content=prompt)], tier="worker"

@@ -101,6 +101,34 @@ impl PyAgentMemory {
         })
     }
 
+    /// Add a Node to the Knowledge Graph
+    pub fn add_node(&self, id: String, label: String, doc_id: Option<usize>) -> PyResult<()> {
+        let mut graph = self.inner.graph.write().map_err(|e| {
+            PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!("Graph Lock Error: {e}"))
+        })?;
+        graph.add_node(id, label, doc_id);
+        Ok(())
+    }
+
+    /// Add an Edge to the Knowledge Graph
+    pub fn add_edge(&self, source: String, target: String, predicate: String, weight: f32) -> PyResult<()> {
+        let mut graph = self.inner.graph.write().map_err(|e| {
+            PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!("Graph Lock Error: {e}"))
+        })?;
+        graph.add_edge(source, target, predicate, weight);
+        Ok(())
+    }
+
+    /// Get outgoing edges from a specific node
+    pub fn get_outgoing_edges(&self, source_id: &str) -> PyResult<Vec<(String, String, f32)>> {
+        let graph = self.inner.graph.read().map_err(|e| {
+            PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!("Graph Lock Error: {e}"))
+        })?;
+        let edges = graph.get_outgoing_edges(source_id);
+        let result = edges.into_iter().map(|e| (e.target.clone(), e.predicate.clone(), e.weight)).collect();
+        Ok(result)
+    }
+
     pub fn __repr__(&self) -> String {
         format!("PyAgentMemory(dim={})", self.inner.dim())
     }

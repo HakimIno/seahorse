@@ -45,7 +45,7 @@ async def database_schema() -> str:
                 ORDER BY table_name, ordinal_position;
             """
             rows = await conn.fetch(query)
-            
+
             if not rows:
                 return "The database is empty (no tables found)."
 
@@ -59,10 +59,12 @@ async def database_schema() -> str:
             conn = await aiosqlite.connect(_SQLITE_PATH)
             conn.row_factory = aiosqlite.Row
             # SQLite introspection
-            query = "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%';"
+            query = (
+                "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%';"
+            )
             async with conn.execute(query) as cursor:
                 rows = await cursor.fetchall()
-            
+
             if not rows:
                 return "The database is empty (no tables found)."
 
@@ -77,7 +79,7 @@ async def database_schema() -> str:
         output = [f"Found {len(schema_dict)} tables in the database:\n"]
         for table, cols in schema_dict.items():
             output.append(f"- **{table}**: {', '.join(cols)}")
-        
+
         return "\n".join(output)
 
     except Exception as e:
@@ -99,10 +101,12 @@ async def database_query(query: str) -> str:
     """Execute a read-only SQL query against the corporate database."""
     # ── 1. Basic Security Guard ───────────────────────────────────────────────
     q_lower = query.strip().lower()
-    
+
     # Block destructive commands
     forbidden = ["insert", "update", "delete", "drop", "truncate", "alter", "create", "replace"]
-    if any(cmd in q_lower for cmd in forbidden) or not (q_lower.startswith("select") or q_lower.startswith("with")):
+    if any(cmd in q_lower for cmd in forbidden) or not (
+        q_lower.startswith("select") or q_lower.startswith("with")
+    ):
         logger.warning("database_query: blocked potentially destructive query: %r", query)
         return "Error: ONLY 'SELECT' or 'WITH' queries are allowed for security reasons."
 
@@ -128,7 +132,7 @@ async def database_query(query: str) -> str:
             async with conn.execute(query) as cursor:
                 rows = await cursor.fetchall()
                 results = [dict(row) for row in rows]
-        
+
         if not results:
             return "Query executed successfully, but no rows were returned."
 
@@ -139,7 +143,7 @@ async def database_query(query: str) -> str:
             f"[DATA CONFIDENCE: Total {total_count} records found in database]\n"
             f"Showing top {max_rows} results:\n"
         )
-        
+
         formatted = json.dumps(results[:max_rows], indent=2, ensure_ascii=False, cls=DataEncoder)
         return f"{header}{formatted}"
 
@@ -159,7 +163,7 @@ def create_demo_database() -> None:
     os.makedirs(os.path.dirname(_SQLITE_PATH), exist_ok=True)
     conn = sqlite3.connect(_SQLITE_PATH)
     cursor = conn.cursor()
-    
+
     # Create tables
     cursor.execute(
         "CREATE TABLE products (id INTEGER PRIMARY KEY, name TEXT, price REAL, stock INTEGER)"
@@ -167,7 +171,7 @@ def create_demo_database() -> None:
     cursor.execute(
         "CREATE TABLE sales (id INTEGER PRIMARY KEY, product_id INTEGER, quantity INTEGER, date TEXT)"
     )
-    
+
     # Insert demo data
     products = [
         (1, "Seahorse Pro Controller", 2500.0, 15),
@@ -175,7 +179,7 @@ def create_demo_database() -> None:
         (3, "Coral Gaming Mouse", 1200.0, 8),
     ]
     cursor.executemany("INSERT INTO products VALUES (?, ?, ?, ?)", products)
-    
+
     conn.commit()
     conn.close()
     logger.info("Demo database created at %s", _SQLITE_PATH)
@@ -184,7 +188,7 @@ def create_demo_database() -> None:
 def _lint_sql(query: str) -> str | None:
     """Perform a basic lint of the SQL to catch common errors like ambiguity."""
     q_upper = query.upper()
-    
+
     # 1. Check for ambiguous 'id' or 'name' when joining
     if "JOIN" in q_upper:
         # Heuristic: if SELECT contains " id" or ",id" or " name" without a dot prefix

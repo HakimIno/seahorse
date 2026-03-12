@@ -1,7 +1,4 @@
-import json
 import logging
-import os
-import time
 
 logger = logging.getLogger(__name__)
 
@@ -72,6 +69,7 @@ async def record_global_failure() -> None:
     """Increment global failure counter via FFI."""
     try:
         import seahorse_ffi
+
         seahorse_ffi.record_global_failure()
     except ImportError:
         logger.warning("seahorse_ffi not found. Global Circuit Breaker ignored.")
@@ -83,6 +81,7 @@ async def is_system_healthy() -> bool:
     """Check if the global circuit breaker has tripped via FFI."""
     try:
         import seahorse_ffi
+
         healthy = seahorse_ffi.is_system_healthy()
         if not healthy:
             logger.critical("Global Circuit Breaker TRIPPED via FFI.")

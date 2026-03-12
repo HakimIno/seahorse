@@ -4,6 +4,7 @@
 #![allow(clippy::must_use_candidate)]
 
 pub mod agent;
+pub mod bus;
 pub mod circuit_breaker;
 pub mod graph_runner;
 pub mod memory;
@@ -20,6 +21,8 @@ fn seahorse_ffi(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(agent::make_py_runner, m)?)?;
     m.add_function(wrap_pyfunction!(circuit_breaker::record_global_failure, m)?)?;
     m.add_function(wrap_pyfunction!(circuit_breaker::is_system_healthy, m)?)?;
+    m.add_class::<bus::PyMessageBus>()?;
+    m.add_class::<bus::PyMessageReceiver>()?;
     wasm::register(m)?;
     Ok(())
 }

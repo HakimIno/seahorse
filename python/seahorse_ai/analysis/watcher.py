@@ -1,4 +1,5 @@
 """seahorse_ai.analysis.watcher — Background service for detecting anomalies."""
+
 from __future__ import annotations
 
 import asyncio
@@ -17,9 +18,10 @@ logger = logging.getLogger(__name__)
 # Load from environment
 PG_URI = os.environ.get("SEAHORSE_PG_URI")
 
+
 class AnomalyWatcher:
     """Service that periodically scans the DB for business-critical changes."""
-    
+
     def __init__(self, llm_backend: object) -> None:
         self._llm = llm_backend
         self._is_running = False
@@ -34,7 +36,7 @@ class AnomalyWatcher:
 
         self._is_running = True
         logger.info("AnomalyWatcher: starting background loop (interval: %ds)", interval_seconds)
-        
+
         # Ensure persistence table exists
         await self._init_db()
 
@@ -62,16 +64,19 @@ class AnomalyWatcher:
             # Load existing alerts into memory cache
             rows = await conn.fetch("SELECT alert_title FROM processed_alerts")
             for r in rows:
-                self._sent_alerts.add(r['alert_title'])
+                self._sent_alerts.add(r["alert_title"])
             await conn.close()
-            logger.info("AnomalyWatcher: Persistence layer initialized (loaded %d alerts)", len(self._sent_alerts))
+            logger.info(
+                "AnomalyWatcher: Persistence layer initialized (loaded %d alerts)",
+                len(self._sent_alerts),
+            )
         except Exception as e:
             logger.error("AnomalyWatcher: Failed to initialize persistence table: %s", e)
 
     async def _check_for_anomalies(self) -> None:
         """Execute health-check queries and use LLM to decide if it's an anomaly."""
         logger.info("AnomalyWatcher: running health checks...")
-        
+
         # 1. Gather data: Compare last 24h vs previous 24h
         stats = await self._get_comparison_data()
         if not stats:
@@ -84,42 +89,41 @@ class AnomalyWatcher:
             "Business Rules:\n"
             "- CRITICAL: Ignore 100% drops or massive drops on weekends (Saturday/Sunday) for branches located in office buildings (e.g., Silom Complex, All Seasons Place, Sathorn Square, Empire Tower, Interchange 21). This is expected behavior because offices are closed.\n"
             "- Focus only on severe and unexpected drops on weekdays or for non-office branches.\n"
-            "Return JSON: { \"is_anomaly\": bool, \"severity\": \"low\"|\"high\", \"title\": \"Short Title\", \"reason\": \"Explanation\" }\n"
+            'Return JSON: { "is_anomaly": bool, "severity": "low"|"high", "title": "Short Title", "reason": "Explanation" }\n'
             f"DATA: {json.dumps(stats, indent=2)}"
         )
-        
+
         try:
-            result = await self._llm.complete( # type: ignore
-                [Message(role="user", content=prompt)],
-                tier="fast"
+            result = await self._llm.complete(  # type: ignore
+                [Message(role="user", content=prompt)], tier="fast"
             )
-            
+
             content = ""
             content = result.get("content", "") if isinstance(result, dict) else str(result)
-            
+
             clean_content = content.replace("```json", "").replace("```", "").strip()
             data = json.loads(clean_content)
-            
+
             if data.get("is_anomaly"):
                 title = data.get("title", "Unknown Anomaly")
-                
+
                 if title not in self._sent_alerts:
                     # Persist to DB immediately
                     await self._persist_alert(title)
                     self._sent_alerts.add(title)
-                    
+
                     logger.warning("🚨 ANOMALY DETECTED: %s - %s", title, data.get("reason"))
-                    
+
                     image_path = None
                     try:
                         worst_branch = None
                         max_drop = -1.0
                         for s in stats:
-                            drop = s['revenue_prev_24h'] - s['revenue_24h']
+                            drop = s["revenue_prev_24h"] - s["revenue_24h"]
                             if drop > max_drop:
                                 max_drop = drop
-                                worst_branch = s['name']
-                        
+                                worst_branch = s["name"]
+
                         if worst_branch:
                             trend_data = await self._get_historical_trend(worst_branch)
                             if trend_data:
@@ -148,10 +152,9 @@ for label in ax.get_yticklabels():
 ax.get_yaxis().set_major_formatter(plt.FuncFormatter(lambda x, loc: "{{:,}}".format(int(x))))
 """
                                 image_path = create_custom_chart(
-                                    python_code=watcher_chart_code,
-                                    data_json=json.dumps(trend_data)
+                                    python_code=watcher_chart_code, data_json=json.dumps(trend_data)
                                 )
-                                
+
                                 forecast = forecast_sales(trend_data)
                                 if "error" not in forecast:
                                     risk_amount = forecast.get("total_predicted_revenue", 0)
@@ -161,17 +164,17 @@ ax.get_yaxis().set_major_formatter(plt.FuncFormatter(lambda x, loc: "{{:,}}".for
                                     )
                     except Exception as e:
                         logger.error("Failed to generate anomaly visuals/forecast: %s", e)
-                    
+
                     if image_path:
                         data["image_paths"] = [image_path]
-                        
+
                     await self._notify(data)
                 else:
                     logger.info("Skipping persistent duplicate alert: %s", title)
             else:
                 # Optional: clear if everything returns to normal for a long duration
                 pass
-                
+
         except Exception as e:
             logger.error("AnomalyWatcher LLM analysis failed: %s", e)
 
@@ -179,7 +182,10 @@ ax.get_yaxis().set_major_formatter(plt.FuncFormatter(lambda x, loc: "{{:,}}".for
         """Save alert title to DB to prevent duplicate notifications after restart."""
         try:
             conn = await asyncpg.connect(PG_URI)
-            await conn.execute("INSERT INTO processed_alerts (alert_title) VALUES ($1) ON CONFLICT DO NOTHING", title)
+            await conn.execute(
+                "INSERT INTO processed_alerts (alert_title) VALUES ($1) ON CONFLICT DO NOTHING",
+                title,
+            )
             await conn.close()
         except Exception as e:
             logger.error("Failed to persist alert in DB: %s", e)
@@ -207,12 +213,12 @@ ax.get_yaxis().set_major_formatter(plt.FuncFormatter(lambda x, loc: "{{:,}}".for
             """
             rows = await conn.fetch(query)
             await conn.close()
-            
+
             results = []
             for r in rows:
                 d = dict(r)
-                d['revenue_24h'] = float(d['revenue_24h'] or 0)
-                d['revenue_prev_24h'] = float(d['revenue_prev_24h'] or 0)
+                d["revenue_24h"] = float(d["revenue_24h"] or 0)
+                d["revenue_prev_24h"] = float(d["revenue_prev_24h"] or 0)
                 results.append(d)
             return results
         except Exception as e:
@@ -236,8 +242,8 @@ ax.get_yaxis().set_major_formatter(plt.FuncFormatter(lambda x, loc: "{{:,}}".for
             """
             rows = await conn.fetch(query, branch_name)
             await conn.close()
-            
-            return [{"date": str(r['date']), "revenue": float(r['revenue'] or 0)} for r in rows]
+
+            return [{"date": str(r["date"]), "revenue": float(r["revenue"] or 0)} for r in rows]
         except Exception as e:
             logger.error("Watcher trend query failed for %s: %s", branch_name, e)
             return []

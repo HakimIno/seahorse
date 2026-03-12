@@ -1,6 +1,7 @@
 mod io;
 #[cfg(test)]
 mod tests;
+pub mod graph;
 
 use dashmap::DashMap;
 use hnsw_rs::prelude::*;
@@ -13,6 +14,8 @@ pub struct AgentMemory {
     pub(crate) index: Arc<Hnsw<'static, f32, DistCosine>>,
     // Concurrent map for doc_id -> (text, json_metadata)
     pub(crate) metadata: Arc<DashMap<usize, (String, String)>>,
+    // Concurrent Directed Knowledge Graph
+    pub graph: Arc<std::sync::RwLock<graph::KnowledgeGraph>>,
     pub(crate) dim: usize,
 }
 
@@ -33,6 +36,7 @@ impl AgentMemory {
         Self {
             index: Arc::new(index),
             metadata: Arc::new(DashMap::new()),
+            graph: Arc::new(std::sync::RwLock::new(graph::KnowledgeGraph::new())),
             dim,
         }
     }

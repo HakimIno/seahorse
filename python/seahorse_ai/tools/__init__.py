@@ -7,6 +7,7 @@ ToolSpec               : tool metadata model
 tool                   : @tool decorator
 make_default_registry  : returns a registry with all built-in tools registered
 """
+
 from seahorse_ai.tools.auto_architect import auto_architect
 from seahorse_ai.tools.auto_seahorse import execute_auto_seahorse
 from seahorse_ai.tools.base import SeahorseToolRegistry, ToolSpec, tool

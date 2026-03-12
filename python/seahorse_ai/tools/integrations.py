@@ -4,6 +4,7 @@ Requires environment variables:
 - SLACK_BOT_TOKEN
 - GOOGLE_APPLICATION_CREDENTIALS (JSON path)
 """
+
 from __future__ import annotations
 
 import logging
@@ -15,6 +16,7 @@ logger = logging.getLogger(__name__)
 
 # ── Slack ─────────────────────────────────────────────────────────────────────
 
+
 @tool(
     "Send a message to a Slack channel. "
     "Requires SLACK_BOT_TOKEN in environment. "
@@ -25,9 +27,10 @@ async def slack_send_message(channel: str, text: str) -> str:
     token = os.environ.get("SLACK_BOT_TOKEN")
     if not token:
         return "Error: SLACK_BOT_TOKEN not found in environment."
-        
+
     try:
         from slack_sdk.web.async_client import AsyncWebClient
+
         client = AsyncWebClient(token=token)
         response = await client.chat_postMessage(channel=channel, text=text)
         if response["ok"]:
@@ -37,7 +40,9 @@ async def slack_send_message(channel: str, text: str) -> str:
         logger.error("Slack integration failed: %s", exc)
         return f"Error: {exc}"
 
+
 # ── Google Calendar ───────────────────────────────────────────────────────────
+
 
 @tool(
     "Add an event to Google Calendar. "
@@ -55,30 +60,35 @@ async def google_calendar_add_event(
     try:
         from google.oauth2 import service_account
         from googleapiclient.discovery import build
-        
-        SCOPES = ['https://www.googleapis.com/auth/calendar']
+
+        SCOPES = ["https://www.googleapis.com/auth/calendar"]
         creds = service_account.Credentials.from_service_account_file(creds_path, scopes=SCOPES)
-        service = build('calendar', 'v3', credentials=creds)
-        
+        service = build("calendar", "v3", credentials=creds)
+
         event = {
-            'summary': summary,
-            'description': description,
-            'start': {'dateTime': start_time, 'timeZone': 'UTC'},
-            'end': {'dateTime': end_time, 'timeZone': 'UTC'},
+            "summary": summary,
+            "description": description,
+            "start": {"dateTime": start_time, "timeZone": "UTC"},
+            "end": {"dateTime": end_time, "timeZone": "UTC"},
         }
-        
+
         import asyncio
+
         loop = asyncio.get_running_loop()
+
         def func():
-            return service.events().insert(calendarId='primary', body=event).execute()
+            return service.events().insert(calendarId="primary", body=event).execute()
+
         created_event = await loop.run_in_executor(None, func)
-        
+
         return f"Successfully created event: {created_event.get('htmlLink')}"
     except Exception as exc:
         logger.error("Google Calendar integration failed: %s", exc)
         return f"Error: {exc}"
 
+
 # ── Discord ───────────────────────────────────────────────────────────────────
+
 
 @tool(
     "Send a message to a Discord channel. "
@@ -93,17 +103,18 @@ async def discord_send_message(channel_id: str, text: str) -> str:
 
     try:
         import discord
+
         intents = discord.Intents.default()
         client = discord.Client(intents=intents)
 
-        # Since discord.py is usually used in a persistent loop, we use a 
+        # Since discord.py is usually used in a persistent loop, we use a
         # temporary connection for this one-off tool call.
         # Note: For high frequency, a persistent client in the registry is better.
         async with client:
             await client.login(token)
             channel = await client.fetch_channel(int(channel_id))
             if channel and hasattr(channel, "send"):
-                await channel.send(text) # type: ignore
+                await channel.send(text)  # type: ignore
                 return f"Successfully sent Discord message to channel {channel_id}."
             return f"Error: Channel {channel_id} not found or not a text channel."
     except Exception as exc:

@@ -2,6 +2,7 @@
 
 Powered by Neo4j. Stores Subject-Predicate-Object relationships.
 """
+
 from __future__ import annotations
 
 import logging
@@ -15,6 +16,7 @@ logger = logging.getLogger(__name__)
 
 _driver = None
 
+
 async def get_driver():
     global _driver
     if _driver is None:
@@ -23,6 +25,7 @@ async def get_driver():
         _driver = AsyncGraphDatabase.driver(uri, auth=auth)
         logger.info("graph_memory: connected to Neo4j at %s", uri)
     return _driver
+
 
 @tool(
     "Store a relationship between two entities. "
@@ -33,48 +36,49 @@ async def graph_store_triple(subject: str, predicate: str, object_entity: str) -
     """Upsert two nodes and create a directed relationship between them."""
     driver = await get_driver()
     predicate = predicate.upper().replace(" ", "_")
-    
+
     async with driver.session() as session:
         # Ensure index for performance
         await session.run("CREATE INDEX entity_name_idx IF NOT EXISTS FOR (e:Entity) ON (e.name)")
-        
+
         await session.execute_write(
             lambda tx: tx.run(
                 "MERGE (s:Entity {name: $subj}) "
                 "MERGE (o:Entity {name: $obj}) "
                 f"MERGE (s)-[r:{predicate}]->(o) "
                 "RETURN s, r, o",
-                subj=subject, obj=object_entity
+                subj=subject,
+                obj=object_entity,
             ).consume()
         )
     logger.info("graph_store: (%s)--[%s]-->(%s)", subject, predicate, object_entity)
     return f"Successfully stored graph relationship: ({subject}) {predicate} ({object_entity})"
 
-@tool(
-    "Search for entities related to a given starting entity in the knowledge graph."
-)
+
+@tool("Search for entities related to a given starting entity in the knowledge graph.")
 async def graph_search_neighbors(entity: str) -> str:
     """Find all one-hop neighbors of an entity."""
     driver = await get_driver()
-    
+
     async with driver.session() as session:
         result = await session.execute_read(
             lambda tx: tx.run(
                 "MATCH (e:Entity {name: $name})-[r*1..2]-(neighbor) "
                 "RETURN labels(neighbor) as labels, neighbor.name as name",
-                name=entity
+                name=entity,
             ).data()
         )
-    
+
     if not result:
         return f"No graph relationships found for entity: {entity}"
-        
+
     lines = [f"Graph relationships (up to 2-hops) for '{entity}':"]
     seen = set()
     for res in result:
-        n_name = res['name']
-        if n_name == entity or n_name in seen: continue
+        n_name = res["name"]
+        if n_name == entity or n_name in seen:
+            continue
         seen.add(n_name)
         lines.append(f"- Related to: {n_name}")
-        
+
     return "\n".join(lines)

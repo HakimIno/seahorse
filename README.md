@@ -1,184 +1,121 @@
 <p align="center">
-  <img src="assets/logo-icon-rounded.png" alt="Seahorse Logo" width="100">
+  <img src="assets/logo-icon-rounded.png" alt="Seahorse Logo" width="120">
 </p>
 
 <h1 align="center">Seahorse Agent</h1>
 
 <p align="center">
-  <strong>High-Performance Enterprise AI Agent Framework — Rust Core + Python Intelligence.</strong>
+  <strong>The High-Performance, Real-Time Multi-Agent Orchestration Framework.</strong>
 </p>
 
 <p align="center">
-  <a href="https://www.rust-lang.org/"><img src="https://img.shields.io/badge/rust-v1.75+-orange.svg" alt="Rust"></a>
-  <a href="https://www.python.org/"><img src="https://img.shields.io/badge/python-v3.11+-blue.svg" alt="Python"></a>
-  <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
+  <a href="https://www.rust-lang.org/"><img src="https://img.shields.io/badge/rust-v1.75+-orange.svg?style=flat-square" alt="Rust"></a>
+  <a href="https://www.python.org/"><img src="https://img.shields.io/badge/python-v3.11+-blue.svg?style=flat-square" alt="Python"></a>
+  <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-yellow.svg?style=flat-square" alt="License: MIT"></a>
 </p>
 
 ---
 
-Seahorse is a hybrid AI agent framework engineered for speed, safety, and enterprise scalability. It combines the raw performance and memory safety of **Rust** with the rich AI tooling ecosystem of **Python** via a zero-cost PyO3 FFI bridge.
+## 🌊 Overview
 
-## Key Features
+Seahorse is a next-generation AI agent framework engineered for **enterprise-grade performance, safety, and scalability**. By bridging the raw speed of **Rust** with the rich intelligence of **Python**, Seahorse enables true parallel collaboration among agents in a real-time, event-driven architecture.
 
-- **Blazing Fast Routing**: Sub-1ms agent routing latency powered by Tokio and Axum.
-- **Native Vector Memory**: Rust-powered HNSW (Hierarchical Navigable Small World) index for lightning-fast RAG (< 5ms search latency).
-- **Business Intelligence & Visualization**: Integrated robust tools for SQL analysis, predictive forecasting, and automated data visualization.
-- **Secure Tooling**: Memory-safe tool execution using **Wasmtime** sandboxing.
-- **Multi-Agent Orchestration**: Out-of-the-box support for Planner, Thinker, and Worker architectures via **LiteLLM**.
-- **Native Streaming**: End-to-end async text and tool execution streaming from Rust core to your UI or Discord bot.
-- **Proactive Anomaly Detection**: Built-in `AnomalyWatcher` pattern for autonomous monitoring and alert generation.
-- **Industrial Grade**: Type-safe FFI using PyO3 and deterministic dependency management with `uv`.
+Unlike traditional hierarchical agents, Seahorse uses a high-performance Pub/Sub message bus to facilitate asynchronous swarm collaboration, eliminating blocking bottlenecks and maximizing throughput.
+
+## 🚀 Key Pillars of Performance
+
+### ⚡ Real-Time Swarm Orchestration
+
+Move beyond synchronous delegation. Seahorse agents communicate over a **Rust-powered event-driven bus**, allowing scouts, commanders, and workers to collaborate in parallel.
+
+- **Sub-ms Latency:** Native message routing with zero-copy communication.
+- **Event-Driven:** Reactive architecture that responds to environment changes in real-time.
+
+### 🧠 Hybrid RAG & Long-Term Memory
+
+Experience intelligence that never forgets. Seahorse integrates a dual-memory system for superior retrieval accuracy.
+
+- **Vector Search (HNSW):** Blazing fast similarity search powered by Rust.
+- **Knowledge Graph:** Capture complex relationships (Subject-Predicate-Object) for deep contextual reasoning.
+
+### 🛡️ Secure Tool Sandboxing
+
+Deploy with confidence. Seahorse executes untrusted tool code (e.g., generated Python snippets) within a **Wasmtime-sandboxed environment**, ensuring host isolation and memory safety.
+
+### 📊 Professional Analytics & Visualization
+
+Turn raw data into insights. Integrated tools for SQL analytics, predictive forecasting, and automated, analyst-grade chart generation (Bar, Line, Pie) with full multi-language support.
 
 ---
 
-## Architecture
+## 🏗️ Technical Architecture
 
-Seahorse uses a multi-layered architecture to maximize both developer productivity and runtime performance.
+Seahorse leverages a hybrid stack designed for speed and flexibility.
 
 ```mermaid
 graph TD
-    subgraph Python ["Python AI Layer (Intelligence)"]
-        direction TB
-        A[LiteLLM / AI Models] --> B[Multi-Agent ReAct Planner]
-        B --> C[Tool Registry: SQL, Viz, Forecast]
-        C --> D[RAG Knowledge Pipeline]
+    subgraph Python ["Python Intelligence Layer"]
+        A[Swarm Manager] --> B[RAG Pipeline]
+        B --> C[Hybrid Memory]
+        A --> D[Tool Registry]
     end
 
-    subgraph Bridge ["PyO3 / Maturin (FFI)"]
-        direction TB
-        B <-->|Zero-Copy Messaging| E["FFI Bridge"]
+    subgraph Bridge ["PyO3 FFI Bridge"]
+        E[Native Bindings]
     end
 
-    subgraph Rust ["Rust Core Layer (Performance)"]
-        direction TB
-        E <--> F[Tokio Async Runtime]
-        F --> G[HNSW Vector Memory]
-        F --> H[Axum / WebSockets Gateway]
-        F --> I[Wasmtime Secure Sandbox]
+    subgraph Rust ["Rust Core Layer"]
+        F[Tokio Pub/Sub Bus]
+        G[HNSW Vector Index]
+        H[Wasm Sandbox]
+        I[Axum Gateway]
     end
+
+    Python <--> Bridge <--> Rust
 ```
 
 ---
 
-## Project Structure
-
-```text
-seahorse/
-├── crates/             # Rust Workspace
-│   ├── seahorse-core   # Core task scheduling, HNSW memory, Wasm runtime
-│   ├── seahorse-router # Axum-based API gateway and streaming logic
-│   └── seahorse-ffi    # PyO3 bindings for zero-copy communication
-├── python/             # Python Workspace (Managed by `uv`)
-│   ├── seahorse_ai     # The "brain" — LLM orchestration, planning, tools, and watchers
-│   ├── seahorse_api    # FastAPI controllers and REST endpoints
-│   └── tests           # Unit tests
-├── .env.example        # Environment variable template
-├── discord.sh          # Quickstart script for the Discord Bot
-└── pyproject.toml      # Dependency management via `uv`
-```
-
----
-
-## Getting Started
+## 🛠️ Quick Start
 
 ### Prerequisites
 
-- **Rust**: 1.75+ (via `rustup`)
-- **Python**: 3.11+
-- **uv**: The ultra-fast Python package installer and resolver (`pip install uv` or `curl -LsSf https://astral.sh/uv/install.sh | sh`)
-- **PostgreSQL**: For database querying tools (optional, but recommended for BI capabilities)
+- **Rust** 1.75+
+- **Python** 3.11+
+- **uv** (Ultra-fast package manager)
 
-### Local Setup & Installation
+### Installation
 
-1. **Clone the repository**:
+1.  **Clone & Sync:**
 
-   ```bash
-   git clone https://github.com/HakimIno/seahorse.git
-   cd seahorse
-   ```
+    ```bash
+    git clone https://github.com/HakimIno/seahorse.git
+    cd seahorse
+    uv sync
+    ```
 
-2. **Configure Environment Variables**:
-   Copy the example config and add your API keys.
+2.  **Build FFI Core:**
 
-   ```bash
-   cp .env.example .env
-   ```
+    ```bash
+    uv run maturin develop -m crates/seahorse-ffi/Cargo.toml
+    ```
 
-   _Make sure to configure your LLM Provider keys (e.g., `OPENROUTER_API_KEY`) and Database URIs._
-
-3. **Install Python Dependencies**:
-
-   ```bash
-   uv sync
-   ```
-
-4. **Build the Rust FFI Bridge**:
-   Compile the Rust bindings into a native Python module.
-   ```bash
-   uv run maturin develop --features pyo3/extension-module
-   ```
+3.  **Run Server:**
+    ```bash
+    ./dev.sh
+    ```
 
 ---
 
-## Usage
+## 🧪 Enterprise Verification
 
-### Running the API Server
+Seahorse maintains a rigorous testing standard across both layers:
 
-Launch the high-performance backend:
-
-```bash
-uv run uvicorn seahorse_api.main:app --reload
-```
-
-### Running the Discord Bot
-
-Seahorse includes a fully-featured Discord integration with interactive multi-chart rendering and stream-like responses.
-
-```bash
-# Ensure DISCORD_BOT_TOKEN is set in your .env
-./discord.sh
-```
-
----
-
-## Core AI Tools Overview
-
-Seahorse comes pre-equipped with an extensible suite of tools under `seahorse_ai/tools`:
-
-- **Database Expert** (`db.py`): Connects to PostgreSQL to run automated exploratory queries and pull aggregate data safely.
-- **Memory Store** (`memory.py`): In-memory RAG pipeline backed by Rust's HNSW vector search to remember long-term interactions.
-- **Visual Intelligence** (`viz.py`): Generates professional, data-analyst grade Matplotlib charts (Bar, Line, Pie) with full multi-language support.
-- **Predictive Analytics** (`forecaster.py`): Uses basic statistical modeling inside Python to forecast future trends based on historical DB data.
-- **Background Watcher** (`watcher.py`): An asynchronous Daemon that monitors data periodically and sends proactive anomalies straight to your Discord channels.
-
----
-
-## Testing
-
-### Rust Core Tests
-
-```bash
-cargo nextest run --workspace
-```
-
-### Python AI Tests
-
-```bash
-uv run pytest python/tests/
-```
-
----
-
-## Contributing
-
-Contributions are welcome! Please open an issue or submit a Pull Request.
-
-## License
-
-Seahorse is released under the [MIT License](LICENSE).
+- **Core Performance:** `cargo nextest run`
+- **Intelligence Layer:** `uv run pytest python/tests/`
 
 ---
 
 <p align="center">
-  Built with the Seahorse Community.
+  Built for the next wave of autonomous agents.
 </p>

@@ -1,4 +1,5 @@
 """seahorse_ai.analysis.feeder — Real-time sales simulator for Seahorse."""
+
 import asyncio
 import contextlib
 import logging
@@ -8,11 +9,12 @@ from datetime import datetime
 
 import asyncpg
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] FEEDS: %(message)s')
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] FEEDS: %(message)s")
 logger = logging.getLogger(__name__)
 
 # Load from environment
 PG_URI = os.environ.get("SEAHORSE_PG_URI")
+
 
 class RealTimeFeeder:
     def __init__(self) -> None:
@@ -20,9 +22,9 @@ class RealTimeFeeder:
         self.branches = []
         self.products = []
         self.customers = []
-        
+
         # Anomaly simulation state
-        self.anomaly_branch_id = 1 # Silom Complex (Default test)
+        self.anomaly_branch_id = 1  # Silom Complex (Default test)
         self.anomaly_end_time = 0
 
     async def _init_db(self) -> bool | None:
@@ -33,20 +35,24 @@ class RealTimeFeeder:
 
         try:
             self.conn = await asyncpg.connect(PG_URI)
-            
+
             # Load branches
             rows = await self.conn.fetch("SELECT id, name FROM branches;")
             self.branches = [dict(r) for r in rows]
-            
+
             # Load products
             rows = await self.conn.fetch("SELECT id, name, base_price FROM products;")
             self.products = [dict(r) for r in rows]
-            
+
             # Load customers
             rows = await self.conn.fetch("SELECT id FROM customers LIMIT 1000;")
-            self.customers = [r['id'] for r in rows]
-            
-            logger.info("Feeder: Reference data loaded (%d branches, %d products)", len(self.branches), len(self.products))
+            self.customers = [r["id"] for r in rows]
+
+            logger.info(
+                "Feeder: Reference data loaded (%d branches, %d products)",
+                len(self.branches),
+                len(self.products),
+            )
             return True
         except Exception as e:
             logger.error("Feeder DB Init Error: %s", e)
@@ -57,16 +63,21 @@ class RealTimeFeeder:
         if not self.branches:
             return
         branch = random.choice(self.branches)
-        self.anomaly_branch_id = branch['id']
+        self.anomaly_branch_id = branch["id"]
         self.anomaly_end_time = asyncio.get_event_loop().time() + duration_sec
-        logger.warning("🚨 SIMULATING ANOMALY: Branch '%s' (ID: %s) has stopped selling for %ds!", branch['name'], branch['id'], duration_sec)
+        logger.warning(
+            "🚨 SIMULATING ANOMALY: Branch '%s' (ID: %s) has stopped selling for %ds!",
+            branch["name"],
+            branch["id"],
+            duration_sec,
+        )
 
     async def run(self) -> None:
         if not await self._init_db():
             return
 
         logger.info("Real-time feeder started. Inserting 1-4 transactions every 15-30s.")
-        
+
         # Initial anomaly for testing context
         logger.warning("🚨 TEST MODE: Forcing initial anomaly for branch ID 1 (Silom Complex)")
         self.anomaly_end_time = asyncio.get_event_loop().time() + 1800
@@ -75,31 +86,42 @@ class RealTimeFeeder:
             try:
                 # 1. Decide how many sales in this tick
                 num_sales = random.randint(1, 4)
-                
+
                 current_loop_time = asyncio.get_event_loop().time()
 
                 for _ in range(num_sales):
                     branch = random.choice(self.branches)
-                    
+
                     # Skip if this branch is currently in an anomaly
-                    if self.anomaly_branch_id == branch['id'] and current_loop_time < self.anomaly_end_time:
+                    if (
+                        self.anomaly_branch_id == branch["id"]
+                        and current_loop_time < self.anomaly_end_time
+                    ):
                         continue
-                    elif self.anomaly_branch_id == branch['id'] and current_loop_time >= self.anomaly_end_time:
-                        logger.info("✅ Anomaly ended for branch ID: %s", branch['id'])
+                    elif (
+                        self.anomaly_branch_id == branch["id"]
+                        and current_loop_time >= self.anomaly_end_time
+                    ):
+                        logger.info("✅ Anomaly ended for branch ID: %s", branch["id"])
                         self.anomaly_branch_id = None
 
                     product = random.choice(self.products)
                     customer_id = random.choice(self.customers)
                     qty = random.randint(1, 3)
-                    total = float(product['base_price']) * qty
-                    
+                    total = float(product["base_price"]) * qty
+
                     await self.conn.execute(
                         "INSERT INTO transactions (branch_id, product_id, customer_id, quantity, total_amount, transaction_date) "
                         "VALUES ($1, $2, $3, $4, $5, $6)",
-                        branch['id'], product['id'], customer_id, qty, total, datetime.now()
+                        branch["id"],
+                        product["id"],
+                        customer_id,
+                        qty,
+                        total,
+                        datetime.now(),
                     )
-                    logger.info("🛒 Sale: %s แก้ว (%s) @ %s", qty, product['name'], branch['name'])
-                
+                    logger.info("🛒 Sale: %s แก้ว (%s) @ %s", qty, product["name"], branch["name"])
+
                 # Proactive anomaly trigger (2% chance)
                 if random.random() < 0.02:
                     self.trigger_anomaly()
@@ -114,9 +136,11 @@ class RealTimeFeeder:
                 with contextlib.suppress(BaseException):
                     await self._init_db()
 
+
 async def main() -> None:
     feeder = RealTimeFeeder()
     await feeder.run()
+
 
 if __name__ == "__main__":
     try:

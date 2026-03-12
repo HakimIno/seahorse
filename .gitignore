@@ -36,5 +36,10 @@ workspace/hello.txt
 # Qdrant Database Storage (Phase 1)
 qdrant_data/
 
-# Compiled Rust/PyO3 Binaries
+# Compiled Rust/PyO3 Binaries and Debug Symbols
+*.so
+*.dylib
+*.dll
+*.dSYM/
 python/seahorse_ffi/seahorse_ffi.abi3.so
+python/seahorse_ffi/libseahorse_ffi.dylib

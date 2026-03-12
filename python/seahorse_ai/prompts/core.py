@@ -3,6 +3,7 @@
 Layered architecture for high-performance agent behavior.
 This module now supports modular SeahorseSkills for dynamic prompt assembly.
 """
+
 from __future__ import annotations
 
 import datetime
@@ -15,15 +16,20 @@ from seahorse_ai.prompts.few_shot import FEW_SHOT_TOOL_EXAMPLES
 if TYPE_CHECKING:
     from seahorse_ai.skills.base import SeahorseSkill
 
-def build_system_prompt(skills: list[SeahorseSkill] | None = None, tone: str = "PROFESSIONAL") -> str:
+
+def build_system_prompt(
+    skills: list[SeahorseSkill] | None = None, tone: str = "PROFESSIONAL", intent: str = "GENERAL"
+) -> str:
     """Build a complete system prompt by composing layers and active skills.
 
     Args:
         skills: Optional list of SeahorseSkill objects assigned to the agent.
         tone: The tone of the conversation (PROFESSIONAL or CASUAL).
+        intent: The detected intent (GENERAL, PUBLIC_REALTIME, PRIVATE_MEMORY, DATABASE).
 
     Returns:
         A formatted system prompt string.
+
     """
     today = datetime.date.today().strftime("%A, %B %d, %Y")
     db_type = os.getenv("SEAHORSE_DB_TYPE", "sqlite")
@@ -32,24 +38,32 @@ def build_system_prompt(skills: list[SeahorseSkill] | None = None, tone: str = "
     base_persona = _CASUAL_PERSONA if tone == "CASUAL" else _CORE_PERSONA
     prompt = base_persona.format(today=today, db_type=db_type)
 
-    # 2. Dynamic Skill Guidelines
+    # 2. Dynamic Skill Guidelines (Modular Filtering)
+    # If intent is GENERAL or GREET, we skip most heavy tool rules to save tokens
+    if intent in ("GENERAL", "GREET") and tone != "CASUAL":
+        prompt += (
+            "\n## Guidelines\n- You are currently in Chat Mode. Answer naturally and concisely."
+        )
+        return prompt
+
     if skills:
         prompt += "\n## Guidelines for Your Skills\n"
         for skill in skills:
+            # Future: add skill.is_relevant(intent)
             prompt += skill.get_prompt_snippet() + "\n"
     else:
-        # Fallback to legacy tool rules if no skills provided (for backward compatibility)
+        # Fallback to legacy tool rules if no skills provided
         from seahorse_ai.prompts.tool_rules import TOOL_RULES
+
         prompt += "\n" + TOOL_RULES
 
     # 3. Static Layers (Confidence, Examples, Quality)
     prompt += (
-        "\n\n" + FEW_SHOT_TOOL_EXAMPLES
-        + "\n\n" + CONFIDENCE_RULES
-        + "\n\n" + SELF_CHECK_PROMPT
+        "\n\n" + FEW_SHOT_TOOL_EXAMPLES + "\n\n" + CONFIDENCE_RULES + "\n\n" + SELF_CHECK_PROMPT
     )
 
     return prompt
+
 
 # ── Core Persona (kept short — ≤30 lines) ─────────────────────────────────────
 _CORE_PERSONA = """\

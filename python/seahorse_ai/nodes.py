@@ -12,6 +12,7 @@ This module provides:
 
 Note: `time.sleep()` calls have been removed to eliminate async blocking.
 """
+
 from __future__ import annotations
 
 import json
@@ -23,6 +24,7 @@ logger = logging.getLogger(__name__)
 
 
 # ── Utility functions (production-ready) ─────────────────────────────────────
+
 
 def _serialize_messages(messages: list[Message]) -> list[dict]:
     """Convert Message objects to plain dicts for JSON serialization."""
@@ -51,9 +53,8 @@ def _prune_messages(messages: list[Message], max_chars: int = 20_000) -> list[Me
 
     first_msg = other_msgs[0]
     kept_other: list[Message] = []
-    current_chars = (
-        sum(len(str(m.content or "")) for m in system_msgs)
-        + len(str(first_msg.content or ""))
+    current_chars = sum(len(str(m.content or "")) for m in system_msgs) + len(
+        str(first_msg.content or "")
     )
 
     for msg in reversed(other_msgs[1:]):
@@ -71,6 +72,7 @@ def _prune_messages(messages: list[Message], max_chars: int = 20_000) -> list[Me
 # These functions simulate LLM behavior synchronously for graph structure testing.
 # Do NOT use in production — use seahorse_ai.planner.ReActPlanner instead.
 
+
 def reason_node(state_json: str) -> str:
     """[STUB] Reason node for Rust graph bridge testing.
 
@@ -87,11 +89,15 @@ def reason_node(state_json: str) -> str:
         messages.append(Message(role="assistant", content="How can I help you?"))
         state["next_step"] = "end"
     elif messages[-1].role == "user" and "tool" in (messages[-1].content or "").lower():
-        messages.append(Message(
-            role="assistant",
-            content="",
-            tool_calls=[{"id": "call_123", "function": {"name": "dummy_tool", "arguments": "{}"}}],
-        ))
+        messages.append(
+            Message(
+                role="assistant",
+                content="",
+                tool_calls=[
+                    {"id": "call_123", "function": {"name": "dummy_tool", "arguments": "{}"}}
+                ],
+            )
+        )
         state["next_step"] = "action"
     elif messages[-1].role == "tool":
         messages.append(Message(role="assistant", content="The tool succeeded."))

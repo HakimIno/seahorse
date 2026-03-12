@@ -17,6 +17,8 @@ impl AgentMemory {
             .and_then(|s| s.to_str())
             .unwrap_or("seahorse_memory");
 
+        std::fs::create_dir_all(parent)?;
+
         // 1. Save HNSW graph
         self.index
             .file_dump(parent, basename)
@@ -26,6 +28,12 @@ impl AgentMemory {
         let meta_path = parent.join(format!("{}.metadata.json", basename));
         let meta_file = std::fs::File::create(meta_path)?;
         serde_json::to_writer(meta_file, &*self.metadata)?;
+
+        // 3. Save Knowledge Graph as JSON
+        let graph_path = parent.join(format!("{}.graph.json", basename));
+        let graph_file = std::fs::File::create(graph_path)?;
+        let graph_lock = self.graph.read().map_err(|e| anyhow::anyhow!("Graph lock poisoned: {e}"))?;
+        serde_json::to_writer(graph_file, &*graph_lock)?;
 
         debug!(path, "memory and metadata saved");
         Ok(())
@@ -58,9 +66,19 @@ impl AgentMemory {
             DashMap::new()
         };
 
+        // Load Knowledge Graph
+        let graph_path = parent.join(format!("{}.graph.json", basename));
+        let graph = if graph_path.exists() {
+            let file = std::fs::File::open(graph_path)?;
+            serde_json::from_reader(file)?
+        } else {
+            crate::memory::graph::KnowledgeGraph::new()
+        };
+
         Ok(Self {
             index: Arc::new(index_static),
             metadata: Arc::new(metadata),
+            graph: Arc::new(std::sync::RwLock::new(graph)),
             dim,
         })
     }

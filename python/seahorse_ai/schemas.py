@@ -1,4 +1,5 @@
 """Pydantic v2 schemas for the Seahorse Agent framework."""
+
 from __future__ import annotations
 
 from pydantic import BaseModel, Field
@@ -16,12 +17,25 @@ class Message(BaseModel):
 
 import os
 
+
 class LLMConfig(BaseModel):
     """LLM provider configuration with tier support."""
 
-    model: str = Field(default_factory=lambda: os.environ.get("SEAHORSE_MODEL_WORKER", "openrouter/google/gemini-3-flash-preview"))
-    thinker_model: str = Field(default_factory=lambda: os.environ.get("SEAHORSE_MODEL_THINKER", "openrouter/google/gemini-3-flash-preview"))
-    fast_path_model: str = Field(default_factory=lambda: os.environ.get("SEAHORSE_FAST_PATH_MODEL", "openrouter/google/gemini-3.1-flash-lite-preview"))
+    model: str = Field(
+        default_factory=lambda: os.environ.get(
+            "SEAHORSE_MODEL_WORKER", "openrouter/google/gemini-3-flash-preview"
+        )
+    )
+    thinker_model: str = Field(
+        default_factory=lambda: os.environ.get(
+            "SEAHORSE_MODEL_THINKER", "openrouter/google/gemini-3-flash-preview"
+        )
+    )
+    fast_path_model: str = Field(
+        default_factory=lambda: os.environ.get(
+            "SEAHORSE_FAST_PATH_MODEL", "openrouter/google/gemini-3.1-flash-lite-preview"
+        )
+    )
     temperature: float = Field(default=0.7, ge=0.0, le=2.0)
     max_tokens: int = Field(default=4096, ge=1, le=128_000)
 

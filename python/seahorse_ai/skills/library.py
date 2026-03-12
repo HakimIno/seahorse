@@ -1,14 +1,15 @@
 """Library of core SeahorseSkills."""
+
 from __future__ import annotations
 
 from seahorse_ai.skills.base import SeahorseSkill, registry
-from seahorse_ai.tools.web_search import web_search
 from seahorse_ai.tools.browser import browser_scan
 from seahorse_ai.tools.db import database_query, database_schema
-from seahorse_ai.tools.python_interpreter import python_interpreter
-from seahorse_ai.tools.memory import memory_search
-from seahorse_ai.tools.viz import create_custom_chart
 from seahorse_ai.tools.forecaster import forecast_sales
+from seahorse_ai.tools.memory import memory_search
+from seahorse_ai.tools.python_interpreter import python_interpreter
+from seahorse_ai.tools.viz import create_custom_chart
+from seahorse_ai.tools.web_search import web_search
 
 # 1. Web Research Skill
 web_research_skill = SeahorseSkill(
@@ -17,9 +18,9 @@ web_research_skill = SeahorseSkill(
     rules=[
         "For news, weather, or recent events, you MUST use `web_search` immediately.",
         "Prioritize information from search snippets. Only use `browser_scan` for deep details.",
-        "Always cite your sources (e.g., BBC News) in the final report."
+        "Always cite your sources (e.g., BBC News) in the final report.",
     ],
-    tools=[web_search, browser_scan]
+    tools=[web_search, browser_scan],
 )
 
 # 2. Database Access Skill
@@ -29,9 +30,9 @@ database_skill = SeahorseSkill(
     rules=[
         "You MUST call `database_schema` before any query to verify table names.",
         "Never guess table names. Use the schema results to build accurate SQL.",
-        "Always ensure data integrity and accuracy in your queries."
+        "Always ensure data integrity and accuracy in your queries.",
     ],
-    tools=[database_query, database_schema]
+    tools=[database_query, database_schema],
 )
 
 # 3. Data Analysis Skill
@@ -40,9 +41,9 @@ analysis_skill = SeahorseSkill(
     description="Basic code execution and memory retrieval.",
     rules=[
         "Use the `python_interpreter` for basic math or data processing.",
-        "ALWAYS check memory via `memory_search` if the user refers to past discussions."
+        "ALWAYS check memory via `memory_search` if the user refers to past discussions.",
     ],
-    tools=[python_interpreter, memory_search]
+    tools=[python_interpreter, memory_search],
 )
 
 # 4. ADVANCED Data Analysis Skill (NEW)
@@ -54,9 +55,9 @@ advanced_analysis_skill = SeahorseSkill(
         "Use `forecast_sales` when the user asks about future trends or predictions.",
         "Always perform Exploratory Data Analysis (EDA) before finalizing conclusions.",
         "Use a professional, data-driven tone. Explain the statistical significance if possible.",
-        "Ensure charts use a modern color palette (Slate/Indigo) to look premium."
+        "Ensure charts use a modern color palette (Slate/Indigo) to look premium.",
     ],
-    tools=[python_interpreter, create_custom_chart, forecast_sales]
+    tools=[python_interpreter, create_custom_chart, forecast_sales],
 )
 
 # Registration

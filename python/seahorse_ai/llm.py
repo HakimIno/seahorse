@@ -5,6 +5,7 @@ Phase 3 improvements:
 - stream() has exponential backoff retry on transient LLM errors
 - All imports at top-level (no inline imports)
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -44,6 +45,7 @@ class LLMClient:
     ) -> AsyncIterator[str]:
         """Stream tokens as they are generated, with exponential backoff on errors."""
         from seahorse_ai.planner.circuit_breaker import is_system_healthy
+
         if not await is_system_healthy():
             logger.critical("LLM call blocked by Global Circuit Breaker — System is in Safe Mode")
             raise RuntimeError(
@@ -81,7 +83,9 @@ class LLMClient:
                     total_backoff = backoff * (0.5 + jitter)
                     logger.warning(
                         "LLM stream transient error: %s. Retrying in %.1fs… (%d left)",
-                        exc, total_backoff, retries - attempt,
+                        exc,
+                        total_backoff,
+                        retries - attempt,
                     )
                     await asyncio.sleep(total_backoff)
                     backoff *= 2
@@ -105,9 +109,12 @@ class LLMClient:
     ) -> dict:
         """Perform internal completion with exponential backoff retries on transient errors."""
         from seahorse_ai.planner.circuit_breaker import is_system_healthy
+
         if not await is_system_healthy():
             logger.critical("LLM call blocked by Global Circuit Breaker — System is in Safe Mode")
-            raise RuntimeError("System is temporarily in Safe Mode due to multiple LLM failures. Please try again in 1 minute.")
+            raise RuntimeError(
+                "System is temporarily in Safe Mode due to multiple LLM failures. Please try again in 1 minute."
+            )
 
         if tier in ("thinker", "strategist"):
             model = self._config.thinker_model
@@ -137,7 +144,9 @@ class LLMClient:
                 total_backoff = backoff * (0.5 + jitter)
                 logger.warning(
                     "LLM transient error: %s. Retrying in %.1fs… (%d left)",
-                    exc, total_backoff, retries,
+                    exc,
+                    total_backoff,
+                    retries,
                 )
                 await asyncio.sleep(total_backoff)
                 return await self._complete_with_retry(
@@ -148,3 +157,24 @@ class LLMClient:
         except Exception as exc:
             logger.error("LLM non-retryable error: %s", exc)
             raise
+
+
+def get_llm(tier: str = "worker") -> LLMClient:
+    """Helper to get a default LLM client for this tier.
+
+    Reads from environment variables:
+    - SEAHORSE_WORKER_MODEL
+    - SEAHORSE_THINKER_MODEL
+    """
+    import os
+
+    from seahorse_ai.schemas import LLMConfig
+
+    # Use environment variables if available, otherwise defaults
+    model = os.environ.get("SEAHORSE_WORKER_MODEL", "openrouter/z-ai/glm-5")
+    if tier == "thinker":
+        model = os.environ.get(
+            "SEAHORSE_THINKER_MODEL", "openrouter/google/gemini-2.0-flash-lite-preview-02-05"
+        )
+
+    return LLMClient(config=LLMConfig(model=model))

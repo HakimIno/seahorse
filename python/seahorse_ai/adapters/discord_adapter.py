@@ -9,6 +9,7 @@ Usage:
     export DISCORD_BOT_TOKEN=your_token
     uv run python -m seahorse_ai.adapters.discord_adapter
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -30,7 +31,7 @@ from seahorse_ai.schemas import AgentRequest, Message
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-    handlers=[logging.StreamHandler(sys.stdout)]
+    handlers=[logging.StreamHandler(sys.stdout)],
 )
 logger = logging.getLogger(__name__)
 
@@ -38,10 +39,7 @@ _MAX_HISTORY: int = int(os.environ.get("SEAHORSE_DISCORD_HISTORY", "20"))
 
 # Pattern to detect numbered options in AI responses
 # Matches: "1. Option A" or "1) Option A"
-_CHOICE_PATTERN = re.compile(
-    r"(?:^|\n)\s*(?:\d+[.)]\s+)(.+)",
-    re.MULTILINE
-)
+_CHOICE_PATTERN = re.compile(r"(?:^|\n)\s*(?:\d+[.)]\s+)(.+)", re.MULTILINE)
 
 
 def _extract_choices(text: str) -> list[str]:
@@ -57,6 +55,7 @@ def _extract_choices(text: str) -> list[str]:
 
 
 # ── Discord UI Components ──────────────────────────────────────────────────────
+
 
 class ClarificationView(discord.ui.View):
     """A Discord View with dynamic buttons for each choice option.
@@ -84,10 +83,10 @@ class ClarificationView(discord.ui.View):
 
         # Add a button for each choice (max 5 per row)
         colors = [
-            discord.ButtonStyle.primary,   # Blue
-            discord.ButtonStyle.secondary, # Grey
-            discord.ButtonStyle.success,   # Green
-            discord.ButtonStyle.danger,    # Red
+            discord.ButtonStyle.primary,  # Blue
+            discord.ButtonStyle.secondary,  # Grey
+            discord.ButtonStyle.success,  # Green
+            discord.ButtonStyle.danger,  # Red
             discord.ButtonStyle.primary,
         ]
         for i, choice in enumerate(choices[:5]):
@@ -104,6 +103,7 @@ class ClarificationView(discord.ui.View):
 
     def _make_callback(self, choice: str):
         """Create a callback for a specific choice button."""
+
         async def callback(interaction: discord.Interaction) -> None:
             # Acknowledge the interaction immediately (must be within 3 seconds)
             # If the interaction has expired (bot reconnect / slow), handle gracefully
@@ -125,9 +125,7 @@ class ClarificationView(discord.ui.View):
                 if acknowledged:
                     await interaction.message.edit(view=self)
                 else:
-                    await self._channel.send(
-                        "⚠️ Interaction หมดอายุ แต่ยังดำเนินการต่อ..."
-                    )
+                    await self._channel.send("⚠️ Interaction หมดอายุ แต่ยังดำเนินการต่อ...")
             except Exception:
                 pass  # Best-effort button disable
 
@@ -151,7 +149,7 @@ class ClarificationView(discord.ui.View):
 
                     content = response.content
                     if len(content) > 1900:
-                        chunks = [content[i:i+1900] for i in range(0, len(content), 1900)]
+                        chunks = [content[i : i + 1900] for i in range(0, len(content), 1900)]
                         for chunk in chunks:
                             await self._channel.send(chunk)
                     else:
@@ -163,7 +161,6 @@ class ClarificationView(discord.ui.View):
 
         return callback
 
-
     async def on_timeout(self) -> None:
         """Disable buttons when the view times out."""
         for child in self.children:
@@ -174,14 +171,13 @@ class ClarificationView(discord.ui.View):
 
 # ── Discord Client ─────────────────────────────────────────────────────────────
 
+
 class SeahorseDiscordClient(discord.Client):
     def __init__(self, planner: ReActPlanner, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         self.planner = planner
         # Per-user conversation history: user_id → deque of Message
-        self._history: dict[str, deque[Message]] = defaultdict(
-            lambda: deque(maxlen=_MAX_HISTORY)
-        )
+        self._history: dict[str, deque[Message]] = defaultdict(lambda: deque(maxlen=_MAX_HISTORY))
 
     async def on_ready(self) -> None:
         logger.info("Logged in as %s (ID: %s)", self.user, self.user.id)
@@ -194,21 +190,21 @@ class SeahorseDiscordClient(discord.Client):
             severity_emoji = "🚨" if data.get("severity") == "high" else "⚠️"
             title = data.get("title", "Business Update")
             reason = data.get("reason", "No details available.")
-            
+
             message_content = (
                 f"{severity_emoji} **PROACTIVE INSIGHT: {title}**\n\n"
                 f"{reason}\n\n"
                 f"*ต้องการให้ผมเจาะลึกข้อมูลส่วนนี้ไหมครับ?*"
             )
-            
+
             # Find a channel to post to
             # Priority: SEAHORSE_ALERTS_CHANNEL_ID env var, then first guild's first text channel
             channel_id = os.environ.get("SEAHORSE_ALERTS_CHANNEL_ID")
             target_channel = None
-            
+
             if channel_id:
                 target_channel = self.get_channel(int(channel_id))
-            
+
             if not target_channel:
                 for guild in self.guilds:
                     for channel in guild.text_channels:
@@ -217,7 +213,7 @@ class SeahorseDiscordClient(discord.Client):
                             break
                     if target_channel:
                         break
-            
+
             if target_channel:
                 files = []
                 # Handle single path (legacy) or list of paths
@@ -225,7 +221,7 @@ class SeahorseDiscordClient(discord.Client):
                 legacy_path = data.get("image_path")
                 if legacy_path and legacy_path not in image_paths:
                     image_paths.append(legacy_path)
-                
+
                 for path in image_paths:
                     if path and os.path.exists(path):
                         files.append(discord.File(path))
@@ -234,14 +230,15 @@ class SeahorseDiscordClient(discord.Client):
                 logger.info("Proactive alert sent to channel: %s", target_channel.name)
             else:
                 logger.warning("Could not find a suitable channel for proactive alert.")
-                
+
         except Exception as e:
             logger.error("Failed to send proactive alert: %s", e)
 
     async def on_message(self, message: discord.Message) -> None:
         logger.debug(
             "Event: on_message triggered by %s. Content length: %d",
-            message.author, len(message.content)
+            message.author,
+            len(message.content),
         )
 
         if message.author == self.user:
@@ -265,7 +262,11 @@ class SeahorseDiscordClient(discord.Client):
 
             prompt = message.content
             if self.user and self.user.mentioned_in(message):
-                prompt = prompt.replace(f"<@{self.user.id}>", "").replace(f"<@!{self.user.id}>", "").strip()
+                prompt = (
+                    prompt.replace(f"<@{self.user.id}>", "")
+                    .replace(f"<@!{self.user.id}>", "")
+                    .strip()
+                )
 
             if not prompt:
                 return
@@ -285,9 +286,7 @@ class SeahorseDiscordClient(discord.Client):
                     response = await self.planner.run(request)
 
                     # Update history
-                    self._history[user_id].append(
-                        Message(role="user", content=prompt)
-                    )
+                    self._history[user_id].append(Message(role="user", content=prompt))
                     self._history[user_id].append(
                         Message(role="assistant", content=response.content)
                     )
@@ -317,11 +316,13 @@ class SeahorseDiscordClient(discord.Client):
                             await message.channel.send(intro, files=files if files else None)
                             await message.channel.send("เลือกตัวเลือก:", view=view)
                         else:
-                            await message.channel.send(content, view=view, files=files if files else None)
+                            await message.channel.send(
+                                content, view=view, files=files if files else None
+                            )
                     else:
                         # Regular text response
                         if len(content) > 1900:
-                            chunks = [content[i:i+1900] for i in range(0, len(content), 1900)]
+                            chunks = [content[i : i + 1900] for i in range(0, len(content), 1900)]
                             for i, chunk in enumerate(chunks):
                                 # Attach files only to the first chunk to avoid sending duplicates
                                 if i == 0 and files:
@@ -343,9 +344,15 @@ async def main() -> None:
         return
 
     router = ModelRouter(
-        worker_model=os.environ.get("SEAHORSE_MODEL_WORKER", "openrouter/google/gemini-3-flash-preview"),
-        thinker_model=os.environ.get("SEAHORSE_MODEL_THINKER", "openrouter/google/gemini-3-flash-preview"),
-        strategist_model=os.environ.get("SEAHORSE_MODEL_STRATEGIST", "openrouter/google/gemini-3-flash-preview"),
+        worker_model=os.environ.get(
+            "SEAHORSE_MODEL_WORKER", "openrouter/google/gemini-3-flash-preview"
+        ),
+        thinker_model=os.environ.get(
+            "SEAHORSE_MODEL_THINKER", "openrouter/google/gemini-3-flash-preview"
+        ),
+        strategist_model=os.environ.get(
+            "SEAHORSE_MODEL_STRATEGIST", "openrouter/google/gemini-3-flash-preview"
+        ),
     )
     planner = ReActPlanner(llm=router)
 

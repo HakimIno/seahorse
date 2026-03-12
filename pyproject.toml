@@ -68,17 +68,18 @@ select = [
     "B",    # flake8-bugbear
     "SIM",  # flake8-simplify
     "TID",  # flake8-tidy-imports
-    "ANN",  # flake8-annotations
     "ASYNC", # flake8-async
     "N",    # pep8-naming
-    "D",    # pydocstyle
 ]
 ignore = [
-    "ANN101",  # missing self annotation
-    "ANN102",  # missing cls annotation
-    "D100",    # Missing docstring in public module
-    "D104",    # Missing docstring in public package
+    "D203",    # One blank line before class
+    "D212",    # Multi-line summary first line
+    "E501",    # Line too long (we have many long prompts)
+    "ASYNC230", # Async open() - using blocking open is fine for small files here
+    "ASYNC240", # Async os.path - using blocking os.path is fine here
 ]
+# We've removed ANN and D from select for now to focus on logic errors.
+# You can add them back later as you want to document the project.
 
 [tool.ruff.lint.isort]
 known-first-party = ["seahorse_ai", "seahorse_ffi"]

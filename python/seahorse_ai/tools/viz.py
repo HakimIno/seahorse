@@ -1,17 +1,17 @@
+import contextlib
 import json
 import logging
 import os
 import re
 import uuid
-import contextlib
 
 import matplotlib
-import matplotlib.pyplot as plt
 import matplotlib.font_manager as fm
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-matplotlib.use('Agg')  # Headless backend for Discord bot
+matplotlib.use("Agg")  # Headless backend for Discord bot
 
 from seahorse_ai.tools.base import tool
 
@@ -35,7 +35,7 @@ try:
         for font_file in os.listdir(font_dir):
             if font_file.endswith(".ttf"):
                 fm.fontManager.addfont(os.path.join(font_dir, font_file))
-        
+
         if os.path.exists(thai_font_path):
             prop_reg = fm.FontProperties(fname=thai_font_path)
         if os.path.exists(thai_font_bold_path):
@@ -73,41 +73,48 @@ def create_custom_chart(
         return None
     try:
         # 1. Parse Data (Robustly extract JSON block)
-        json_match = re.search(r'(\[.*\]|\{.*\})', data_json.strip(), re.DOTALL)
+        json_match = re.search(r"(\[.*\]|\{.*\})", data_json.strip(), re.DOTALL)
         if not json_match:
-            logger.warning(
-                "viz: No valid JSON structure found in %s...",
-                data_json[:100]
-            )
+            logger.warning("viz: No valid JSON structure found in %s...", data_json[:100])
             return "Chart Generation Error: No valid data found."
-            
+
         s_data = json_match.group(1)
         data = json.loads(s_data)
         df = pd.DataFrame(data)
 
         # 2. Setup Premium Canvas
         if prop_reg:
-            plt.rcParams['font.family'] = 'sans-serif'
-            plt.rcParams['font.sans-serif'] = [
-                prop_reg.get_name(), 'DejaVu Sans', 'Arial', 'sans-serif'
+            plt.rcParams["font.family"] = "sans-serif"
+            plt.rcParams["font.sans-serif"] = [
+                prop_reg.get_name(),
+                "DejaVu Sans",
+                "Arial",
+                "sans-serif",
             ]
-            plt.rcParams['axes.unicode_minus'] = False # Fix minus sign with custom fonts
-            
+            plt.rcParams["axes.unicode_minus"] = False  # Fix minus sign with custom fonts
+
         fig, ax = plt.subplots(figsize=(12, 7))
-        fig.patch.set_facecolor('#ffffff')
-        ax.set_facecolor('#ffffff')
-        
+        fig.patch.set_facecolor("#ffffff")
+        ax.set_facecolor("#ffffff")
+
         # Minimal, elegant pastel color palette
         bar_colors = [
-            '#aec6cf', '#ffb3ba', '#b3ecc6', '#fdfd96', '#cbb3cf',
-            '#ffd1b3', '#b3e6e6', '#e6cce6', '#d9ead3'
+            "#aec6cf",
+            "#ffb3ba",
+            "#b3ecc6",
+            "#fdfd96",
+            "#cbb3cf",
+            "#ffd1b3",
+            "#b3e6e6",
+            "#e6cce6",
+            "#d9ead3",
         ]
-        
-        ax.spines['top'].set_visible(False)
-        ax.spines['right'].set_visible(False)
-        ax.spines['left'].set_color('#d1d5db')
-        ax.spines['bottom'].set_color('#d1d5db')
-        ax.grid(axis='y', linestyle='--', alpha=0.5, color='#e5e7eb', zorder=0)
+
+        ax.spines["top"].set_visible(False)
+        ax.spines["right"].set_visible(False)
+        ax.spines["left"].set_color("#d1d5db")
+        ax.spines["bottom"].set_color("#d1d5db")
+        ax.grid(axis="y", linestyle="--", alpha=0.5, color="#e5e7eb", zorder=0)
 
         # 3. Execution Environment
         sandbox_env = {
@@ -132,32 +139,35 @@ def create_custom_chart(
             code_clean = code_clean[3:]
         if code_clean.endswith("```"):
             code_clean = code_clean[:-3]
-        
+
         # ── PHASE 3: WASMTIME SANDBOX INTEGRATION ──
         # Instead of `exec()`, we pass the generated code to the isolated Rust Wasm engine.
         # This prevents the AI from executing malicious system calls.
         use_sandbox = os.environ.get("SEAHORSE_USE_WASM", "true").lower() == "true"
-        
+
         if use_sandbox:
             try:
                 import seahorse_ffi
+
                 # Initialize the sandbox with strict resource limits
                 wasm_manager = seahorse_ffi.PyWasmManager()
-                
+
                 logger.info("viz: routing plotting logic through Wasm sandbox...")
                 # Note: Currently, WasmManager expects a compiled WASM module.
                 # In a full deployment, `code_clean` would be fed into a Wasm Python Interpreter
                 # (like RustPython or Pyodide compiled to Wasm).
                 # Since we don't have a compiled Pyodide WASM payload mapped here, we simulate
                 # the gateway passage. The final architecture compile/wraps this on the fly.
-                
+
                 # We log the sandbox initialization success, then fallback to restricted exec
                 # until the full Pyodide standard library is mounted in crates/seahorse-core
                 _ = wasm_manager
                 exec(code_clean, sandbox_env)
-                
+
             except ImportError as e:
-                logger.warning("viz: seahorse_ffi not found (%s). Falling back to restricted exec.", e)
+                logger.warning(
+                    "viz: seahorse_ffi not found (%s). Falling back to restricted exec.", e
+                )
                 exec(code_clean, sandbox_env)
         else:
             # Fallback to legacy
@@ -167,16 +177,15 @@ def create_custom_chart(
         fig.tight_layout()
         filename = f"custom_chart_{uuid.uuid4().hex[:8]}.png"
         filepath = os.path.join(CHART_DIR, filename)
-        plt.savefig(filepath, dpi=200, bbox_inches='tight')
+        plt.savefig(filepath, dpi=200, bbox_inches="tight")
         plt.close(fig)
-        
+
         logger.info(f"viz: Custom chart generated at {filepath}")
         return filepath
 
     except Exception as e:
         logger.error(
-            "viz: Failed to generate custom chart. Error: %s\nCode:\n%s...",
-            e, python_code[:200]
+            "viz: Failed to generate custom chart. Error: %s\nCode:\n%s...", e, python_code[:200]
         )
         # Close the corrupt figure
         with contextlib.suppress(BaseException):
