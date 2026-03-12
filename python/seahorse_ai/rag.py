@@ -141,7 +141,8 @@ class RAGPipeline:
                 top_k *= 2
 
             if self._use_rust and self._memory is not None:
-                raw = self._memory.search(embedding.tobytes(), k=top_k)
+                import seahorse_ffi
+                raw = seahorse_ffi.search_memory(self._memory, embedding.tobytes(), top_k)
                 results = []
                 for _i, (doc_id, dist, text, meta_json) in enumerate(raw):
                     metadata = json.loads(meta_json)
@@ -249,7 +250,8 @@ class RAGPipeline:
 
             if self._use_rust and self._memory is not None:
                 # Search across all (k=1)
-                raw = self._memory.search(embedding.tobytes(), k=1)
+                import seahorse_ffi
+                raw = seahorse_ffi.search_memory(self._memory, embedding.tobytes(), 1)
                 if raw:
                     best_id, best_dist, best_text, best_metadata_json = raw[0]
             else:

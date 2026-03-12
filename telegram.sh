@@ -33,6 +33,10 @@ export OPENROUTER_API_KEY="${OPENROUTER_API_KEY:-}"
 # Database Configuration (Postgres for production-grade testing)
 export SEAHORSE_DB_TYPE="${SEAHORSE_DB_TYPE:-postgres}"
 export SEAHORSE_PG_URI="${SEAHORSE_PG_URI:-postgresql://seahorse_user:seahorse_password@localhost:5432/seahorse_enterprise}"
+export SEAHORSE_USE_WASM="true"
+
+echo "⚙️  Building Rust FFI Module (seahorse_ffi)..."
+uv run maturin develop -m crates/seahorse-ffi/Cargo.toml --quiet
 
 echo "📱 Starting Seahorse Telegram Bot..."
 uv run python -m seahorse_ai.adapters.telegram_adapter

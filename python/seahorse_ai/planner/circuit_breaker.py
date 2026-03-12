@@ -69,75 +69,26 @@ class CircuitBreaker:
 
 
 async def record_global_failure() -> None:
-    """Increment global failure counter in Postgres."""
-    import asyncpg
-
-    pg_uri = os.environ.get("SEAHORSE_PG_URI")
-    if not pg_uri:
-        return
-
+    """Increment global failure counter via FFI."""
     try:
-        conn = await asyncpg.connect(pg_uri)
-        try:
-            # Atomic increment and status update
-            await conn.execute("""
-                UPDATE seahorse_system_status 
-                SET value = jsonb_set(
-                    jsonb_set(
-                        value, '{fail_count}', 
-                        ((value->>'fail_count')::int + 1)::text::jsonb
-                    ),
-                    '{last_fail}', to_jsonb(EXTRACT(EPOCH FROM NOW()))
-                )
-                WHERE key = 'circuit_breaker';
-            """)
-        finally:
-            await conn.close()
+        import seahorse_ffi
+        seahorse_ffi.record_global_failure()
+    except ImportError:
+        logger.warning("seahorse_ffi not found. Global Circuit Breaker ignored.")
     except Exception as e:
-        logger.error("Global Circuit Breaker: Failed to record failure: %s", e)
+        logger.error("Global Circuit Breaker: Failed to record failure FFI: %s", e)
 
 
 async def is_system_healthy() -> bool:
-    """Check if the global circuit breaker has tripped."""
-    import asyncpg
-
-    pg_uri = os.environ.get("SEAHORSE_PG_URI")
-    if not pg_uri:
-        return True
-
+    """Check if the global circuit breaker has tripped via FFI."""
     try:
-        conn = await asyncpg.connect(pg_uri)
-        try:
-            row = await conn.fetchrow(
-                "SELECT value FROM seahorse_system_status WHERE key = 'circuit_breaker';"
-            )
-            if not row:
-                return True
-
-            val = row["value"]
-            if isinstance(val, str):
-                val = json.loads(val)
-
-            fail_count = val.get("fail_count", 0)
-            last_fail = val.get("last_fail")
-
-            # Trip if more than 30 failures in the last 60 seconds
-            if fail_count >= 30 and last_fail:
-                now = time.time()
-                if now - last_fail < 60:
-                    logger.critical("Global Circuit Breaker TRIPPED (fail_count=%d)", fail_count)
-                    return False
-                else:
-                    # Auto-reset if old
-                    await conn.execute(
-                        "UPDATE seahorse_system_status SET value = "
-                        '\'{"status": "CLOSED", "fail_count": 0, "last_fail": null}\' '
-                        "WHERE key = 'circuit_breaker';"
-                    )
-
-            return True
-        finally:
-            await conn.close()
+        import seahorse_ffi
+        healthy = seahorse_ffi.is_system_healthy()
+        if not healthy:
+            logger.critical("Global Circuit Breaker TRIPPED via FFI.")
+        return healthy
+    except ImportError:
+        return True
     except Exception as e:
-        logger.error("Global Circuit Breaker: Failed to check health: %s", e)
+        logger.error("Global Circuit Breaker: Failed to check health FFI: %s", e)
         return True

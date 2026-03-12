@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import inspect
 import logging
+import asyncio
 from collections.abc import Callable
 from typing import Any, TypeVar
 
@@ -95,9 +96,14 @@ class SeahorseToolRegistry:
             return f"Error: unknown tool '{name}'. Available: {list(self._tools)}"
         fn, _ = self._tools[name]
         try:
-            result = fn(**args)
-            if inspect.isawaitable(result):
-                result = await result
+            if inspect.iscoroutinefunction(fn):
+                result = await fn(**args)
+            else:
+                # Run synchronous tools (like matplotlib) in a thread pool
+                # to prevent blocking the main asyncio event loop
+                loop = asyncio.get_running_loop()
+                result = await loop.run_in_executor(None, lambda: fn(**args))
+                
             return str(result)
         except TypeError as exc:
             # TypeErrors are usually internal code bugs (like the slice error)

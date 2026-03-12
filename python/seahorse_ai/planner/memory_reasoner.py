@@ -7,7 +7,6 @@ naturally and coherently.
 
 from __future__ import annotations
 
-import asyncio
 import logging
 
 from seahorse_ai.schemas import AgentResponse, Message
@@ -32,7 +31,7 @@ User's Question: "{query}"
 
 Rules:
 1. Answer the user's question DIRECTLY and CONCISELY. Prioritize the core fact.
-2. INTERNAL FILTERING: Only use facts from "Retrieved Facts" or "Graph Relationships" that are SIGNIFICANTLY relevant to the query. Ignore noisy or unrelated facts.
+2. INTERNAL FILTERING: Only use facts that are SIGNIFICANTLY relevant to the query.
 3. If the question is simple, provide a 1-2 sentence response. 
 4. DO NOT provide business analysis or strategic insights unless specifically requested.
 5. If the information is found in Graph Relationships, present it as a clear logical connection.
@@ -56,57 +55,39 @@ class MemoryReasoner:
     ) -> AgentResponse | None:
         """Search memory AND history, then synthesize a natural response."""
         try:
-            # 1. Retrieve raw facts from vector DB (Long-term)
-            # Use the tool call for vector search
+            # 2. Vector Search (Direct Query)
+            # Remove redundant get_entities() LLM call to save 1-2 seconds.
             search_result = await self._tools.call(  # type: ignore[union-attr]
                 "memory_search",
                 {"query": query, "k": k, "agent_id": agent_id},
             )
 
-            # 2. Parallel Retrieval (Performance Optimization)
-            # Use LLM-based Entity Extraction instead of Regex for maximum accuracy
-            # and parallelize the Vector + Graph searching.
-
-            async def get_entities():
-                extract_prompt = (
-                    "Extract unique ENTITIES (Names, Companies, Products) from the query below. "
-                    "Return only a comma-separated list of entities in Thai or English. "
-                    "If none found, return 'NONE'.\n\n"
-                    f"Query: {query}"
+            # 2a. Filter by Distance (Relevance Guard)
+            # Distances > 0.5 mean the similarity is low. We filter these out.
+            relevant_facts = []
+            if isinstance(search_result, list):
+                relevant_facts = [f for f in search_result if f.get("distance", 1.0) < 0.5]
+            
+            # Short-circuit: If we have 1 very strong match (< 0.1), skip synthesis
+            if len(relevant_facts) == 1 and relevant_facts[0].get("distance", 1.0) < 0.1:
+                logger.info("memory_reasoner: high-confidence match (dist < 0.1) — short-circuiting")
+                return AgentResponse(
+                    content=relevant_facts[0]["text"],
+                    steps=1,
+                    agent_id=agent_id,
+                    elapsed_ms=0,
+                    is_direct=True,
                 )
-                res = await self._llm.complete(
-                    [Message(role="user", content=extract_prompt)], tier="worker"
-                )
-                raw = str(res.get("content", res) if isinstance(res, dict) else res).strip()
-                if "NONE" in raw.upper():
-                    return set()
-                return {e.strip() for e in raw.split(",") if len(e.strip()) > 1}
 
-            # 2a. Run Vector Search + Entity Extraction in parallel
-            vector_task = self._tools.call(
-                "memory_search", {"query": query, "k": k, "agent_id": agent_id}
-            )
-            entities_task = get_entities()
+            # 2b. Graph Search (Optional/Experimental)
+            # We only do this if specifically needed; for now, prioritize vector.
+            graph_context = "(No structural relationships requested)"
 
-            search_result, unique_entities = await asyncio.gather(vector_task, entities_task)
-
-            # 2b. Format Vector Results
+            # 2c. Format Vector Results
             vector_facts = (
-                "\n".join([f"- {f['text']}" for f in search_result])
-                if search_result
-                else "(No relevant long-term memories found)"
-            )
-
-            # 2c. Run Graph Neighbor searches in parallel for all extracted entities
-            graph_tasks = [
-                self._tools.call("graph_search_neighbors", {"entity": entity})
-                for entity in unique_entities
-            ]
-            graph_results = await asyncio.gather(*graph_tasks) if graph_tasks else []
-
-            graph_lines = [res for res in graph_results if "Graph relationships" in res]
-            graph_context = (
-                "\n".join(graph_lines) if graph_lines else "(No structural relationships found)"
+                "\n".join([f"- {f['text']}" for f in relevant_facts])
+                if relevant_facts
+                else "(No relevant memories found)"
             )
 
             # 3. Format Conversation History (Short-term)

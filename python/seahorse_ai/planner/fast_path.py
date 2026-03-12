@@ -38,7 +38,7 @@ class StructuredIntent:
 
 
 # Actions that bypass ReAct tools but still generate natural responses
-_FAST_ACTIONS = frozenset({"STORE", "QUERY", "GREET", "CHAT"})
+_FAST_ACTIONS = frozenset({"STORE", "QUERY", "GREET", "CHAT", "SEARCH_WEB"})
 
 # (Removed hardcoded _GREETINGS and _CHAT_FALLBACKS arrays)
 
@@ -213,6 +213,11 @@ class FastPathRouter:
         if si.action == "QUERY" and si.entity:
             return await self._handle_query(si.entity, agent_id, history)
 
+        if si.action == "SEARCH_WEB":
+            # Pass the entity (if any) or prompt to query handler
+            search_term = si.entity if si.entity else prompt
+            return await self._handle_web_search(search_term, prompt, history, start_t)
+
         return None
 
     async def _handle_conversational(
@@ -257,6 +262,41 @@ class FastPathRouter:
             steps=1,
             elapsed_ms=int((time.perf_counter() - start_t) * 1000),
         )
+
+    async def _handle_web_search(
+        self, search_term: str, prompt: str, history: list[Message] | None, start_t: float
+    ) -> AgentResponse | None:
+        """Fast-path for simple web searches bypassing full planner."""
+        try:
+            import time
+            from seahorse_ai.schemas import Message
+            
+            # Execute tool directly
+            raw_result = await self._tools.call("web_search", {"query": search_term})
+            
+            # Synthesize answer using fast model
+            msgs = [
+                Message(
+                    role="system", 
+                    content="You are Seahorse AI, an expert news anchor and researcher. Read the provided search results carefully. Synthesize a comprehensive, accurate, and engaging summary. Do NOT just copy the bullet points. Add context where necessary. Reply in the same language as the user."
+                )
+            ]
+            if history:
+                 msgs.extend(history[-2:]) # Context
+            msgs.append(Message(role="user", content=f"User Query: {prompt}\n\nSearch Results:\n{raw_result}"))
+            
+            res = await self._llm.complete(msgs, tier="fast")
+            content = str(res.get("content", res) if isinstance(res, dict) else res)
+            
+            return AgentResponse(
+                content=content,
+                steps=1, # Tool call counts as 1 step
+                elapsed_ms=int((time.perf_counter() - start_t) * 1000),
+            )
+            
+        except Exception as e:
+            logger.error(f"Fast web search error: {e}")
+            return None # Fallback to ReAct on failure
 
     async def _handle_store(
         self,

@@ -163,38 +163,36 @@ async def memory_store(text: str, importance: int = 3, agent_id: str | None = No
     "Returns the top-k most semantically similar stored texts. "
     "Use this before answering questions that may have been discussed before."
 )
-async def memory_search(query: str, k: int = 10, agent_id: str | None = None) -> str:
-    """Search the HNSW memory index and return up to k matching texts."""
+async def memory_search(query: str, k: int = 10, agent_id: str | None = None, min_similarity: float = 0.1) -> list[dict] | str:
+    """Search memory index. Returns dicts for planner or string for LLM."""
     k = int(k)
     pipeline = get_pipeline()
     if pipeline.size == 0:
-        return "Memory is empty. Nothing has been stored yet."
+        return "Memory is empty."
 
-    # In the future, we can use agent_id for multi-user isolation
     filter_metadata = {"agent_id": agent_id} if agent_id else None
     results = await pipeline.search(query, k=k, filter_metadata=filter_metadata)
     
     if not results:
-        return f"No relevant memories found for: {query!r}"
+        return []
 
-    # Prioritize by importance (descending) and similarity (ascending distance)
+    # 1. Filter by minimum similarity (distance = 1 - similarity)
+    # Threshold for noise reduction (default 0.1 similarity = 0.9 distance)
+    results = [r for r in results if r["distance"] < (1.0 - min_similarity)]
+
+    if not results:
+        return []
+
+    # 2. Prioritize by importance + similarity
     results.sort(
         key=lambda x: (x["metadata"].get("importance", 3), 1 - x["distance"]), 
         reverse=True
     )
 
-    lines = [f"Memory search results for: {query!r}\n"]
-    for i, res in enumerate(results, 1):
-        text = res["text"]
-        dist = res["distance"]
-        meta = res["metadata"]
-        importance = meta.get("importance", 3)
-        similarity = f"{(1 - dist) * 100:.1f}%"
-        date_str = meta.get("created_at", "unknown")[:16].replace("T", " ")
-        lines.append(f"{i}. [Imp:{importance}] [{similarity} match] (Saved: {date_str}) {text}")
-
-    logger.info("memory_search: query_len=%d k=%d results=%d", len(query), k, len(results))
-    return "\n".join(lines)
+    # 3. Decision: Return raw for planner OR string for LLM
+    # If called via ReAct loop (agent_id in context), usually wants the string.
+    # If called via MemoryReasoner (internal), usually wants the list.
+    return results
 
 
 @tool(

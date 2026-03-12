@@ -6,6 +6,7 @@ eng:
   backstory: >-
     Master of SQL and ETL processes. You understand complex schemas and ensure
     that the data passed to analysts is clean, relevant, and well-structured.
+  tier: fast
   skills:
     - Database_Access
     - Data_Analysis

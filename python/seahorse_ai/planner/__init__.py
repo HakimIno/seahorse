@@ -109,8 +109,8 @@ class ReActPlanner:
         skills: list[SeahorseSkill] | None = None,
         max_steps: int = 15,
         default_tier: str = "worker",
-        step_timeout_seconds: int = 30,
-        global_timeout_seconds: int = 120,
+        step_timeout_seconds: int = 120,
+        global_timeout_seconds: int = 600,
         identity_prompt: str | None = None,
     ) -> None:
         """Initialize the ReActPlanner with its sub-components.
@@ -140,7 +140,7 @@ class ReActPlanner:
         self._cfg = ExecutorConfig(
             max_steps=max_steps,
             step_timeout_seconds=step_timeout_seconds,
-            global_timeout_seconds=300,
+            global_timeout_seconds=global_timeout_seconds,
         )
         setup_telemetry()  # idempotent
 
@@ -313,13 +313,16 @@ class ReActPlanner:
                 content = result.content
                 is_data_intent = intent in ("DATABASE", "PRIVATE_MEMORY", "PUBLIC_REALTIME")
 
-                # OPTIMIZATION: Skip synthesis for crew sub-agents or if is_direct
+                # OPTIMIZATION: Skip synthesis if is_direct OR if current agent is already a thinker/strategist
                 skip_synthesis = getattr(result, "is_direct", False)
+                is_elite_already = current_tier in ("thinker", "strategist")
+                
                 if (
                     not result.terminated
                     and not skip_synthesis
                     and not is_crew
-                    and (current_tier == "strategist" or is_data_intent)
+                    and not is_elite_already
+                    and is_data_intent
                 ):
                     content = await self._synthesize(
                         messages,
@@ -364,13 +367,13 @@ class ReActPlanner:
                 Message(
                     role="user",
                     content=(
-                        "Summarize the context above for the user in a natural tone.\n"
+                        "Provide a natural response to the user based on the tool results above.\n"
                         "RULES:\n"
-                        "1. BE CONCISE. If the answer is already clear, do not add fluff.\n"
+                        "1. BE CONCISE. Just answer the user's latest question. DO NOT summarize past tasks you have already completed.\n"
                         "2. Avoid rigid business jargon unless specifically asked.\n"
-                        "3. If you see patterns or risks, mention them briefly.\n"
-                        "5. DISTINGUISH between 'Technical Timeouts' (system taking too long) and 'Service Failures' (DB offline). Do not hallucinate connection issues if it was just a timeout.\n"
-                        "6. REPLY in the same language the user used (Thai/English)."
+                        "3. If you see patterns or risks related to the IMMEDIATE question, mention them briefly.\n"
+                        "4. DISTINGUISH between 'Technical Timeouts' (system taking too long) and 'Service Failures' (DB offline). Do not hallucinate connection issues if it was just a timeout.\n"
+                        "5. REPLY in the same language the user used (Thai/English)."
                     ),
                 ),
             ]
@@ -454,7 +457,14 @@ class ReActPlanner:
 
 
 def _classify_tier(llm: object, prompt: str, default: str) -> str:
-    tier = getattr(llm, "classify_intent", lambda p: default)(prompt)
+    # Ensure we handle potential attribute errors or signature mismatches in mocks
+    try:
+        if hasattr(llm, "classify_intent"):
+            tier = llm.classify_intent(prompt)  # type: ignore
+        else:
+            tier = default
+    except Exception:
+        tier = default
     return "thinker" if tier == "strategist" else tier
 
 

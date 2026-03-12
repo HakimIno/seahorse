@@ -25,6 +25,10 @@ export SEAHORSE_PG_URI="postgresql://seahorse_user:seahorse_password@localhost:5
 
 # Mixture of Experts (MoE) Configuration
 # Models are loaded from .env (Gemini 2.0 + Claude 3.5)
+export SEAHORSE_USE_WASM="true"
+
+echo "⚙️  Building Rust FFI Module (seahorse_ffi)..."
+uv run maturin develop -m crates/seahorse-ffi/Cargo.toml --quiet
 
 echo "🤖 Starting Seahorse Discord Bot (Standard High-Quality Mode)..."
 uv run python -m seahorse_ai.adapters.discord_adapter

@@ -88,11 +88,14 @@ class SeahorseTeam:
                 f"Goal: {goal}\n"
                 f"Backstory: {backstory}\n"
             )
+            agent_tier = cfg.get("tier", self._default_tier if hasattr(self, "_default_tier") else "worker")
             planner = ReActPlanner(
-                llm=llm, 
-                tools=tools_registry, 
+                llm=llm,
+                tools=tools_registry,
                 skills=skills,
-                identity_prompt=agent_identity
+                identity_prompt=agent_identity,
+                step_timeout_seconds=120,
+                default_tier=agent_tier,
             )
             
             agent = CrewAgent(

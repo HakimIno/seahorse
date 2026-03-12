@@ -4,8 +4,10 @@
 #![allow(clippy::must_use_candidate)]
 
 pub mod agent;
+pub mod circuit_breaker;
 pub mod graph_runner;
 pub mod memory;
+pub mod wasm;
 
 use pyo3::prelude::*;
 
@@ -16,5 +18,8 @@ fn seahorse_ffi(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(memory::search_memory, m)?)?;
     m.add_class::<agent::PyPlannerRunner>()?;
     m.add_function(wrap_pyfunction!(agent::make_py_runner, m)?)?;
+    m.add_function(wrap_pyfunction!(circuit_breaker::record_global_failure, m)?)?;
+    m.add_function(wrap_pyfunction!(circuit_breaker::is_system_healthy, m)?)?;
+    wasm::register(m)?;
     Ok(())
 }
