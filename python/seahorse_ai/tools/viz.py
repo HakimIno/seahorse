@@ -98,21 +98,21 @@ async def render_echarts_to_png(json_conf: str) -> str | None:
 
 
 @tool(
-    "Generates a HIGHLY CUSTOMIZED, premium business chart by executing Matplotlib Python code. "
-    "You provide the custom plotting logic, which will be executed in a sandboxed environment.\n\n"
-    "Use a variety of professional color palettes (e.g., via `sns.color_palette()`). "
-    "Do not just use one fixed set of colors. Make the chart look extremely professional. "
+    "Generates a HIGH-FIDELITY, premium business chart by executing Matplotlib code. "
+    "CRITICAL: NEVER use hardcoded data or 'sample' dates (e.g., 2024). ALWAYS utilize the provided `pdf` (Polars) or `df` (Pandas) variables which contain the ACTUAL results.\n\n"
+    "TIME-SERIES RULES:\n"
+    "- If plotting a trend, you MUST handle gaps. Use `pdf = pdf.upsample(time_column, every='1d').fill_null(0)` or Pandas equivalent to ensure days with 0 activity are shown as gaps, not smoothed over.\n"
+    "- Use `prop_reg` for labels and `prop_bold` for the main title.\n\n"
     "ENVIRONMENT SETUP (Already provided, DO NOT import these):\n"
-    "- `pd`, `pl` (Polars), `np`, `plt`, `sns` are already imported.\n"
-    "- `df` (Pandas DataFrame), `pdf` (Polars DataFrame), and `data` (List of dicts) contain findings.\n"
-    "- Use `pl` (Polars) or `pd` (Pandas) for data processing as you prefer.\n"
-    "- A modern `fig, ax` (12x7, white bg, spines removed) are already created.\n"
-    "- `prop_reg` and `prop_bold` are provided for Thai/premium typography.\n"
-    "- `get_palette(name)` helper provided (names: 'modern', 'vibrant', 'corporate', 'pastel').\n\n"
-    "YOUR CODE MUST ONLY PLOT ON `ax` (e.g., `ax.plot()`, `ax.bar()`, `ax.fill_between()`).\n"
-    "DO NOT call `plt.show()` or `fig.savefig()`. The system handles rendering and saving.\n"
-    "ALWAYS set beautiful titles and labels using `prop_bold` and `prop_reg`.\n"
-    "Keep the aesthetic clean, luxurious, and easy on the eyes.\n"
+    "- `pd`, `pl` (Polars), `np`, `plt`, `sns` are pre-imported.\n"
+    "- `df` (Pandas) and `pdf` (Polars) contain the REAL data parsed from the user's request.\n"
+    "- `ax`: The active axes for plotting. DO NOT call `plt.show()`.\n"
+    "- `get_palette(name)`: Returns a hex list (names: 'modern', 'vibrant', 'corporate', 'pastel').\n\n"
+    "YOUR CODE MUST:\n"
+    "1. Sort the data by date if applicable.\n"
+    "2. Plot ONLY on `ax`.\n"
+    "3. Set professional titles and clear legends.\n\n"
+    "SECURITY: No imports, no system calls. Only plotting logic."
 )
 def create_custom_chart(
     python_code: str,

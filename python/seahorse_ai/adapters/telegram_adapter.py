@@ -12,14 +12,15 @@ Usage:
 
 from __future__ import annotations
 
-import anyio
 import json
 import logging
 import os
 import re
 import sys
+import uuid
 from collections import defaultdict, deque
 
+import anyio
 import httpx
 import msgspec
 from telegram import (
@@ -52,7 +53,12 @@ logger = logging.getLogger(__name__)
 _MAX_HISTORY: int = int(os.environ.get("SEAHORSE_TELEGRAM_HISTORY", "20"))
 
 # Pattern to detect numbered options in AI responses
+# Choice pattern
 _CHOICE_PATTERN = re.compile(r"(?:^|\n)\s*(?:\d+[.)]\s+)(.+)", re.MULTILINE)
+
+# Directory for uploaded files
+UPLOAD_DIR = "/tmp/seahorse_uploads"
+os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 
 def _extract_choices(text: str) -> list[str]:
@@ -78,6 +84,7 @@ class TelegramAdapter:
         self.router_url = router_url
         self._history: dict[int, deque[Message]] = defaultdict(lambda: deque(maxlen=_MAX_HISTORY))
         self._callback_data_map = {}
+        self._user_files: dict[int, list[str]] = defaultdict(list)
 
     async def handle_update(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Global debug handler for all updates."""
@@ -108,8 +115,8 @@ class TelegramAdapter:
         Splits long messages into chunks to avoid 'Message is too long' error.
         """
         # Split text into chunks of ~4000 characters
-        MAX_CHUNK = 4000
-        chunks = [text[i : i + MAX_CHUNK] for i in range(0, len(text), MAX_CHUNK)]
+        max_chunk = 4000
+        chunks = [text[i : i + max_chunk] for i in range(0, len(text), max_chunk)]
         
         for chunk in chunks:
             try:
@@ -134,8 +141,30 @@ class TelegramAdapter:
 
         text = msg.text or msg.caption or ""
         chat_id = update.effective_chat.id
-        chat_type = update.effective_chat.type
-        logger.info("Telegram: Update in %s (%s): %s", chat_id, chat_type, text)
+        user_id = update.effective_user.id if update.effective_user else chat_id
+        agent_id = f"telegram_{user_id}"
+
+        # Handle File Uploads
+        file_info = ""
+        if msg.document:
+            try:
+                doc = msg.document
+                file_name = doc.file_name or f"upload_{uuid.uuid4().hex[:8]}"
+                save_path = os.path.join(UPLOAD_DIR, file_name)
+                
+                # Get file from Telegram
+                tg_file = await context.bot.get_file(doc.file_id)
+                await tg_file.download_to_drive(custom_path=save_path)
+                
+                logger.info(f"Telegram: File saved to {save_path}")
+                # Store in session for persistence
+                if save_path not in self._user_files[user_id]:
+                    self._user_files[user_id].append(save_path)
+                
+                file_info = f"\n\n[SYSTEM: User uploaded a file to {save_path}. You can use tools to read it.]"
+            except Exception as e:
+                logger.error(f"Telegram: File download failed: {e}")
+                await update.message.reply_text(f"❌ ไม่สามารถดาวน์โหลดไฟล์ได้: {e}")
 
         if text.strip().startswith("/id"):
             await self.id_command(update, context)
@@ -146,6 +175,13 @@ class TelegramAdapter:
 
         user_id = update.effective_user.id if update.effective_user else chat_id
         agent_id = f"telegram_{user_id}"
+
+        # Inject ALL previously uploaded files in the session to prevent hallucination
+        if self._user_files.get(user_id):
+            active_files = ", ".join(self._user_files[user_id])
+            context_nudge = f"\n\n[SYSTEM: Active files in this session: {active_files}. USE THESE instead of sample data!]"
+            if not file_info: # Don't double-add if we just uploaded a new one
+                text += context_nudge
 
         await self._process_text_input(update, context, text, chat_id, user_id, agent_id)
 
@@ -265,6 +301,10 @@ class TelegramAdapter:
             self._history[user_id].append(Message(role="assistant", content=response.content))
 
             content = response.content
+            
+            # ── Hallucination Mitigation: Strip Markdown Image Links ──
+            # The AI sometimes hallucinations fake URLs like ![chart](https://placeholder...)
+            content = re.sub(r"!\[.*?\]\(.*?\)", "", content)
             
             # ── Handle Native ECharts JSON ──
             if "ECHART_JSON:" in content:

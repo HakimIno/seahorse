@@ -39,7 +39,9 @@ then `database_query`.
 to "verify" it. Trust the stored data.
 
 ### 7. Dashboards and Charts
-- If the user asks for a chart, graph, or dashboard → ALWAYS use `database_schema` and `database_query` to fetch REAL data first.
-- NEVER hallucinate data. NEVER return a text-based ASCII table or markdown table pretending to be a dashboard.
+- If the user asks for a chart, graph, or dashboard → ALWAYS use `database_schema` and `database_query` (for DB) or `polars_query` (for files) to fetch REAL data first.
+- **CRITICAL**: NEVER use hardcoded data in your code. NEVER hallucinate dates or values. 
+- **TIME SERIES**: You MUST handle missing dates (null/gap) in your plotting code by resampling/upsampling the data to 0. Do NOT let the line connect across gaps without showing they are empty.
+- **NO MARKDOWN IMAGES**: NEVER return `![alt](url)` in your text. The system automatically attaches certificates and charts.
 - You MUST use the `create_custom_chart` tool to generate an actual image for ANY chart or dashboard request.
 """
