@@ -1,13 +1,12 @@
 """Library of core SeahorseSkills."""
 
-from __future__ import annotations
-
 from seahorse_ai.skills.base import SeahorseSkill, registry
 from seahorse_ai.tools.browser import browser_scan
 from seahorse_ai.tools.db import database_query, database_schema
 from seahorse_ai.tools.forecaster import forecast_sales
 from seahorse_ai.tools.memory import memory_search
-from seahorse_ai.tools.python_interpreter import python_interpreter
+from seahorse_ai.tools.echarts_viz import native_echarts_chart
+from seahorse_ai.tools.polars_analyst import native_polars_aggregate, polars_query
 from seahorse_ai.tools.viz import create_custom_chart
 from seahorse_ai.tools.web_search import web_search
 
@@ -38,26 +37,27 @@ database_skill = SeahorseSkill(
 # 3. Data Analysis Skill
 analysis_skill = SeahorseSkill(
     name="Data_Analysis",
-    description="Basic code execution and memory retrieval.",
+    description="Core data processing and memory retrieval.",
     rules=[
-        "Use the `python_interpreter` for basic math or data processing.",
+        "Prioritize `polars_query` for data transformation; it is faster than Python lists.",
+        "Use `native_polars_aggregate` for large datasets to leverage Rust performance.",
         "ALWAYS check memory via `memory_search` if the user refers to past discussions.",
     ],
-    tools=[python_interpreter, memory_search],
+    tools=[polars_query, native_polars_aggregate, memory_search],
 )
 
 # 4. ADVANCED Data Analysis Skill (NEW)
 advanced_analysis_skill = SeahorseSkill(
     name="Advanced_Data_Analysis",
-    description="Professional data science, visualization, and forecasting.",
+    description="Professional data science, high-performance visualization, and forecasting.",
     rules=[
-        "Use `create_custom_chart` to generate premium visuals for your findings.",
+        "Use `native_echarts_chart` for premium, modern business visuals.",
+        "Falls back to `create_custom_chart` (Matplotlib) ONLY if ECharts is not possible.",
         "Use `forecast_sales` when the user asks about future trends or predictions.",
-        "Always perform Exploratory Data Analysis (EDA) before finalizing conclusions.",
-        "Use a professional, data-driven tone. Explain the statistical significance if possible.",
-        "Ensure charts use a modern color palette (Slate/Indigo) to look premium.",
+        "Always perform Exploratory Data Analysis (EDA) using Polars before finalizing.",
+        "Ensure charts use a modern color palette to look premium.",
     ],
-    tools=[python_interpreter, create_custom_chart, forecast_sales],
+    tools=[polars_query, native_echarts_chart, create_custom_chart, forecast_sales],
 )
 
 # Registration

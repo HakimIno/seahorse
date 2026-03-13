@@ -8,24 +8,22 @@ TOOL_RULES = """\
 ### 1. Memory & Internal Data
 - ANY product name with a code/letter (e.g. "Package A", "Plan B", "Service X") \
 → treat as INTERNAL → `memory_search` FIRST.
-- If `memory_search` returns a result → answer IMMEDIATELY. Do NOT also run `web_search`.
+- If `memory_search` returns a result → answer IMMEDIATELY.
 - If `memory_search` returns empty for an internal product \
-→ tell user "There is no data for [product] in the system" and ask them to provide it.
-  NEVER fall back to `web_search` for internal product names.
+→ informing the user about the absence in internal records.
+- **Quality Fallback**: If the entity *could* also exist publicly (e.g., a common service name), you may ask the user if they want you to check the web.
 - If user wants to update/change a value → `memory_search` first to find old value, \
 then `memory_store` the new one.
 
 ### 2. Real-time Public Data
 - Public market prices (gold/oil/crypto), stock tickers, news, weather, sports \
 → `web_search` IMMEDIATELY.
-- Do NOT check memory first for public commodity prices.
+- Do NOT check memory first for public commodity prices unless specifically asked about a historical discussion.
 - Do NOT use `web_search` for anything that looks like an internal product or service name.
 
 ### 3. Ambiguity Rule — ALWAYS ASK BEFORE ACTING
-- If the user's request could apply to MULTIPLE stored items (e.g. "Change the price to X" \
-without specifying which product) → ASK the user to clarify FIRST.
-- Format the clarifying question as a numbered list of options based on memory results:
-  "Which package do you mean?\n1. Package A\n2. Package B"
+- If the user's request could apply to MULTIPLE stored items → ASK the user to clarify FIRST.
+- Format the clarifying question as a numbered list of options.
 - Do NOT guess. Do NOT pick the first one. Always clarify.
 
 ### 4. Database / Corporate Data

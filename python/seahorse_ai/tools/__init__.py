@@ -11,7 +11,12 @@ make_default_registry  : returns a registry with all built-in tools registered
 from seahorse_ai.tools.auto_architect import auto_architect
 from seahorse_ai.tools.auto_seahorse import execute_auto_seahorse
 from seahorse_ai.tools.base import SeahorseToolRegistry, ToolSpec, tool
-from seahorse_ai.tools.browser import browser_scan
+from seahorse_ai.tools.browser import (
+    browser_close,
+    browser_scan,
+    browser_scrape,
+    browser_screenshot,
+)
 from seahorse_ai.tools.business_math import (
     calculate_margin,
     calculate_promo_impact,
@@ -60,6 +65,9 @@ __all__ = [
     "memory_delete",
     "memory_clear",
     "browser_scan",
+    "browser_scrape",
+    "browser_screenshot",
+    "browser_close",
     "competitor_radar",
     "war_room",
     "auto_architect",
@@ -96,6 +104,9 @@ def make_default_registry() -> SeahorseToolRegistry:
         memory_delete,
         memory_clear,
         browser_scan,
+        browser_scrape,
+        browser_screenshot,
+        browser_close,
         competitor_radar,
         war_room,
         auto_architect,

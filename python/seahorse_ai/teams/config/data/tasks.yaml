@@ -13,7 +13,7 @@ deep_analysis_task:
     Take the data provided for {objective} and perform a comprehensive analysis.
     This MUST include:
     1. A detailed trend analysis.
-    2. A forecast for the next 3 months using historical patterns.
+    2. A relevant forecast based on the data trends and historical patterns.
     3. At least 2 premium visualizations (charts) showing the most critical insights.
     
     REPLY in the user's language (Thai if requested in Thai).

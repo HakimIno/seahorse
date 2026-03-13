@@ -13,6 +13,7 @@ Usage:
 from __future__ import annotations
 
 import anyio
+import json
 import logging
 import os
 import re
@@ -257,6 +258,34 @@ class TelegramAdapter:
             self._history[user_id].append(Message(role="assistant", content=response.content))
 
             content = response.content
+            
+            # ── Handle Native ECharts JSON ──
+            if "ECHART_JSON:" in content:
+                try:
+                    # Extract path from ECHART_JSON:/path/to/file.json
+                    json_path = content.split("ECHART_JSON:")[-1].strip()
+                    if os.path.exists(json_path):
+                        with open(json_path) as f:
+                            chart_data = json.loads(f.read())
+                        
+                        chart_title = chart_data.get("title", {}).get("text", "Native Chart")
+                        # Phase 2: Convert to PNG via bridge
+                        from seahorse_ai.tools.viz import render_echarts_to_png
+                        import anyio
+                        
+                        png_path = await render_echarts_to_png(json.dumps(chart_data))
+                        if png_path:
+                            # Attach to response so the standard image-sending logic picks it up
+                            if not hasattr(response, "image_paths"):
+                                response.image_paths = []
+                            response.image_paths.append(png_path)
+                            content = f"📊 **Chart Generated**: {chart_title}"
+                        else:
+                            content = f"📊 **[PRO NATIVE CHART]**: {chart_title}\n\n"
+                            content += "*(Rendering failed, showing as fallback text)*"
+                except Exception as e:
+                    logger.error("Telegram: Failed to parse native echart json: %s", e)
+
             choices = _extract_choices(content)
 
             reply_markup = None

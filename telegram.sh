@@ -35,8 +35,16 @@ export SEAHORSE_DB_TYPE="${SEAHORSE_DB_TYPE:-postgres}"
 export SEAHORSE_PG_URI="${SEAHORSE_PG_URI:-postgresql://seahorse_user:seahorse_password@localhost:5432/seahorse_enterprise}"
 export SEAHORSE_USE_WASM="true"
 
-echo "⚙️  Building Rust FFI Module (seahorse_ffi)..."
+echo "⚙️  Building Rust Router & FFI..."
 uv run maturin develop -m crates/seahorse-ffi/Cargo.toml --quiet
+
+# Start Rust Router in the background if not already running
+if ! lsof -i:8000 > /dev/null; then
+  echo "🚀 Starting Rust Router (Background)..."
+  # Use nohup or just & to keep it alive
+  cargo run --release -p seahorse-router > /tmp/seahorse_router.log 2>&1 &
+  sleep 3 # Give it a moment to boot
+fi
 
 echo "📱 Starting Seahorse Telegram Bot..."
 uv run python -m seahorse_ai.adapters.telegram_adapter

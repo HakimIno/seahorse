@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import logging
+import os
 import time
 import traceback
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
-from typing import AsyncIterator
 
 import anyio
 import duckdb
@@ -15,10 +16,9 @@ from seahorse_ai.tools.base import tool
 logger = logging.getLogger(__name__)
 
 # ── Connection Pool ───────────────────────────────────────────────────────────
-
 _POOL_SIZE = 4          # concurrent DuckDB connections
 _QUERY_TIMEOUT = 30.0   # seconds
-_MAX_ROWS = 10_000      # hard cap — prevent agent from dumping huge tables
+_MAX_ROWS = int(os.environ.get("SEAHORSE_MAX_DB_ROWS", "50000"))
 
 
 class _DuckDBPool:
@@ -63,10 +63,8 @@ class _DuckDBPool:
 
     def close_all(self) -> None:
         for conn in self._conns:
-            try:
+            with suppress(Exception):
                 conn.close()
-            except Exception:
-                pass
 
 
 # Module-level singleton — created once on import
@@ -139,14 +137,21 @@ def _format(
 )
 async def duckdb_sql(
     sql_query: str,
-    max_rows: int = 500,
+    max_rows: int = 2000,
 ) -> str:
     """Run SQL via DuckDB with connection pooling, timeout, and Arrow zero-copy."""
     t0 = time.perf_counter()
+    # Ensure max_rows is an integer
     try:
-        df = await _execute(sql_query, max_rows=min(max_rows, _MAX_ROWS))
+        max_rows = int(max_rows)
+    except (ValueError, TypeError):
+        max_rows = 2000
+
+    try:
+        limit = min(max_rows, _MAX_ROWS)
+        df = await _execute(sql_query, max_rows=limit)
         elapsed = (time.perf_counter() - t0) * 1000
-        truncated = len(df) >= min(max_rows, _MAX_ROWS)
+        truncated = len(df) >= limit
         return _format(df, sql_query, elapsed, truncated)
 
     except TimeoutError:

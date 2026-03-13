@@ -6,6 +6,7 @@ import logging
 from typing import Literal
 
 from seahorse_ai.llm import LLMClient
+from seahorse_ai.prompts.intent import _is_greeting
 from seahorse_ai.schemas import LLMConfig, Message
 
 logger = logging.getLogger(__name__)
@@ -45,17 +46,8 @@ class ModelRouter:
         """Determines the required model tier based on prompt keywords and complexity."""
         p = prompt.lower()
 
-        # Level 0: Fast Lock (Greetings & Casual Talk)
-        # Use 'fast' tier (gemini-3.1-flash-lite) for extreme cost efficiency
-        from seahorse_ai.prompts.intent import _is_greeting
-
-        if _is_greeting(p):
-            logger.info("Fast Lock: Greeting detected. Routing to 'fast' tier.")
-            return "fast"
-
-        # Level 1: Budget Lock (Simple short queries)
-        if len(p.split()) < 5:
-            logger.info("Budget Lock: Very short query detected. Routing to 'fast' tier.")
+        if _is_greeting(p) or len(p.split()) <= 2:
+            logger.info("Short-circuit: Fast tier selected for minimal prompt.")
             return "fast"
 
         # Level 4: Strategist (Creative/Business Summary)

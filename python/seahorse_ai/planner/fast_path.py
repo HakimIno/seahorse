@@ -14,8 +14,10 @@ Complex actions (SEARCH_WEB, SQL, CHAT, CLARIFY) fall through to ReAct.
 
 from __future__ import annotations
 
+import datetime
 import json
 import logging
+import time
 from dataclasses import dataclass
 from typing import Any
 
@@ -46,22 +48,22 @@ STRUCTURED_INTENT_PROMPT = """\
 Analyze the user query and return ONLY valid JSON (no markdown, no explanation).
 
 Fields:
-- "intent": one of GENERAL, PUBLIC_REALTIME, PRIVATE_MEMORY, DATABASE
+- "intent": one of GENERAL, PUBLIC_REALTIME, PRIVATE_MEMORY, DATABASE, ANALYSIS
 - "action": one of STORE, QUERY, UPDATE, DELETE, SEARCH_WEB, SQL, GREET, CHAT, CLARIFY
 - "entity": the key data to store/search/update (string or null)
 - "needs_clarification": true if the request is ambiguous
 - "complexity": 1-5 (Integer)
-- "tone": "PROFESSIONAL" (for work, facts, data) or "CASUAL" (for jokes, greetings, small talk)
-    - 1-2: Simple facts, greetings, or basic storage.
-    - 3: Complex tool usage, analysis, or logic (Single Agent).
-    - 4-5: Multi-step objectives, deep research, or projects (Specialized Crew required).
+- "tone": "PROFESSIONAL" or "CASUAL"
+    - 1-2: Simple facts, greetings, or basic storage (Fast Path).
+    - 3-5: Requires deep analysis, SQL, or multi-step reasoning (ReAct Loop).
 
 Rules:
-- Simple greetings, names, or basic chat → {{"action":"GREET","complexity":1}}
-- "What time/day/date is it?" → {{"action":"CHAT","complexity":1}}
+- Simple greetings → {{"action":"GREET","complexity":1}}
 - "Save/Remember X" → {{"action":"STORE","complexity":2}}
-- "What is [internal fact]" (memory check) → {{"action":"QUERY","complexity":2}}
-- Database analysis or multi-agent tasks → {{"complexity":3+}}
+- "What is [internal fact]" → {{"action":"QUERY","complexity":2}}
+- ANY analysis (Polars/SQL/Charts) → {{"complexity":3+, "action":"SQL"}}
+- Long-range analysis (6+ months, 1 year, history) → {{"complexity":4+}}
+- Deep research or projects → {{"complexity":4+}}
 
 
 Conversation history (if any):
@@ -81,11 +83,15 @@ async def classify_structured_intent(
     Returns a StructuredIntent with action, entity, and clarification flag.
     Falls back to GENERAL/CHAT on any error.
     """
-    from seahorse_ai.prompts.intent import _is_greeting
+    from seahorse_ai.prompts.intent import (
+        MEMORY_KEYWORDS,
+        REALTIME_KEYWORDS,
+        _is_greeting,
+    )
 
     q_lower = query.lower().strip()
 
-    # Tier 0: Greeting fast-path (0 LLM calls for classification)
+    # Tier 0: Greeting fast-path (0 LLM calls)
     if _is_greeting(q_lower):
         return StructuredIntent(
             intent="GENERAL",
@@ -94,7 +100,24 @@ async def classify_structured_intent(
             raw_category="GENERAL",
         )
 
-    # Tier 1: Single LLM call for structured classification
+    # Tier 1: Keyword-based early routing (0 LLM calls)
+    if any(k.lower() in q_lower for k in REALTIME_KEYWORDS):
+        return StructuredIntent(
+            intent="PUBLIC_REALTIME",
+            action="SEARCH_WEB",
+            complexity=3,
+            raw_category="PUBLIC_REALTIME",
+        )
+
+    if any(k.lower() in q_lower for k in MEMORY_KEYWORDS):
+        return StructuredIntent(
+            intent="PRIVATE_MEMORY",
+            action="QUERY",
+            complexity=2,
+            raw_category="PRIVATE_MEMORY",
+        )
+
+    # Tier 2: Single LLM call for semantic/ambiguous cases
     history_summary = ""
     if history:
         recent = [m for m in history[-6:] if m.role in ("user", "assistant") and m.content]
@@ -216,6 +239,9 @@ class FastPathRouter:
             # Pass the entity (if any) or prompt to query handler
             search_term = si.entity if si.entity else prompt
             return await self._handle_web_search(search_term, prompt, history, start_t)
+
+        if si.action == "POLARS_ANALYSIS":
+            return await self._handle_polars_analysis(prompt, history, start_t)
 
         return None
 
@@ -389,6 +415,90 @@ class FastPathRouter:
             return await reasoner.reason(query=entity, agent_id=agent_id, history=history)
         except Exception as exc:
             logger.error("fast_path.query failed: %s", exc)
+            return None
+
+    async def _handle_polars_analysis(
+        self, prompt: str, history: list[Message] | None, start_t: float
+    ) -> AgentResponse | None:
+        """Directly fulfill data analysis requests via native Polars + Echarts."""
+        try:
+            from seahorse_ai.schemas import Message
+
+            today = datetime.date.today().strftime("%Y-%m-%d")
+            # Get schema context to avoid "muddling" column names
+            schema = await self._tools.call("database_schema", {})
+
+            extraction_prompt = f"""
+            System Date: {today}
+            Database Schema:
+            {schema}
+            
+            Extract logic for Polars analysis and Echarts plotting.
+            Return ONLY valid JSON.
+            
+            Extraction Logic:
+            - Generate a SQL query that retrieves the raw data needed for the analysis.
+            - Analyze: "Analyze sales over the last year" -> {{ "action": "POLARS_ANALYSIS", "entity": "sales", "timeframe": "last year" }}
+            - If a time range is requested, calculate the correct date filter based on System Date.
+            - DO NOT use small LIMIT clauses (e.g., LIMIT 10) if the user wants trend analysis or full reporting.
+            - Ensure column names match the Schema provided exactly.
+            
+            JSON Fields:
+            - "sql": SQL for database_query to get raw data
+            - "aggregate_logic": List of {{'column': str, 'func': 'sum'|'mean'|'count'}}
+            - "group_by": List of columns
+            - "sort": List of columns
+            - "chart_title": Title for the chart
+            - "chart_type": 'bar' or 'line'
+            
+            User request: {prompt}
+            """
+            res = await self._llm.complete([Message(role="user", content=extraction_prompt)], tier="fast")
+            if isinstance(res, dict):
+                data = res.get("content", res)
+                if isinstance(data, str):
+                    data = _robust_json_load(data)
+            else:
+                data = _robust_json_load(str(res))
+
+            sql = data.get("sql")
+            if not sql:
+                return None  # Fallback to ReAct if we can't build SQL
+
+            # 2. Execute database_query
+            raw_data = await self._tools.call("database_query", {"query": sql})
+            
+            # 3. Aggregation (Native Polars)
+            agg_result = await self._tools.call("native_polars_aggregate", {
+                "json_data": raw_data,
+                "group_by": data.get("group_by", []),
+                "aggregations": data.get("aggregate_logic", []),
+                "sort_by": data.get("sort", [])
+            })
+            
+            # 4. Visualization (Native Echarts)
+            viz_result = await self._tools.call("native_echarts_chart", {
+                "json_data": agg_result,
+                "chart_type": data.get("chart_type", "bar"),
+                "title": data.get("chart_title", "Analysis Result")
+            })
+
+            # 5. Final synthesis
+            msgs = [
+                Message(role="system", content="Synthesize a final report based on the analysis and chart provided."),
+                Message(role="user", content=f"Analysis: {agg_result}\nVisualization: {viz_result}")
+            ]
+            final_res = await self._llm.complete(msgs, tier="fast")
+            content = str(final_res.get("content", final_res) if isinstance(final_res, dict) else final_res)
+
+            return AgentResponse(
+                content=f"{content}\n\n{viz_result}",
+                steps=3,
+                elapsed_ms=int((time.perf_counter() - start_t) * 1000),
+            )
+
+        except Exception as e:
+            logger.error(f"Fast Polars analysis error: {e}")
             return None
 
 

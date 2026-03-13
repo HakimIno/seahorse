@@ -215,12 +215,14 @@ class SwarmOrchestrator:
 
         topic = f"agent_{agent.name.lower()}"
         receiver = self._bus.subscribe(topic)
-        logger.info("Swarm: %s listening on topic '%s'", agent.name, topic)
+        logger.info("Swarm: %s listening on topic '%s' (Async Event Loop)", agent.name, topic)
 
         async with anyio.create_task_group() as tg:
             while True:
                 try:
-                    msg = await anyio.to_thread.run_sync(receiver.recv)
+                    # NEW: Non-blocking check for messages to avoid thread bloat
+                    # try_recv returns None immediately if no message is available
+                    msg = receiver.try_recv()
 
                     if msg is not None:
                         logger.info(
@@ -233,11 +235,20 @@ class SwarmOrchestrator:
 
                         # Start reagent task in group
                         tg.start_soon(agent.planner.run, request)
+                    
+                    # High-frequency polling with yield to event loop
+                    await anyio.sleep(0.01)
 
                 except Exception as e:
-                    # Ignore common Rust bridge timeouts
-                    if "timeout" not in str(e).lower() and "panic" not in str(e).lower():
-                        logger.error("Swarm [%s] listener trapped: %s", agent.name, e)
+                    # Handle lock contention or channel errors gracefully
+                    if "Lock contention" in str(e):
+                        await anyio.sleep(0.05)
+                        continue
+                    if "Channel closed" in str(e):
+                        break
+                    
+                    logger.error("Swarm [%s] listener trapped: %s", agent.name, e)
+                    await anyio.sleep(1.0)
 
     async def run(self, prompt: str) -> str:
         """Run the swarm asynchronously using AnyIO TaskGroup."""

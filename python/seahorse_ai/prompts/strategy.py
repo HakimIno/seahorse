@@ -18,7 +18,7 @@ Output format (3-5 bullet points, no prose):
 [STRATEGY PLAN]
 - Step 1: <tool_name>(<brief reason>)
 - Step 2: <tool_name>(<brief reason>)
-- Step 3: Synthesize results into final answer (Keep it brief for [DIRECT_ANSWER]).
+- Step 3: Synthesize results into final answer.
 """
 
 STRATEGY_NUDGE = (

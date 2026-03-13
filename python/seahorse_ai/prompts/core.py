@@ -38,7 +38,15 @@ def build_system_prompt(
     base_persona = _CASUAL_PERSONA if tone == "CASUAL" else _CORE_PERSONA
     prompt = base_persona.format(today=today, db_type=db_type)
 
-    # 2. Dynamic Skill Guidelines (Modular Filtering)
+    # 2. Intent-specific expansion
+    if intent in ("DATABASE", "PRIVATE_MEMORY"):
+        prompt += (
+            "\n## Deep Analysis Mode\n"
+            "- You are in Thorough Expert mode. Prioritize depth, accuracy, and comprehensive reasoning over brevity.\n"
+            "- For data analysis or memory retrieval, provide expansive and detailed explanations."
+        )
+
+    # 3. Dynamic Skill Guidelines (Modular Filtering)
     # If intent is GENERAL or GREET, we skip most heavy tool rules to save tokens
     if intent in ("GENERAL", "GREET") and tone != "CASUAL":
         prompt += (

@@ -54,6 +54,10 @@ wasmtime    = "20"
 bytemuck    = { version = "1", features = ["derive"] }
 # AI Framework
 rig-core    = "0.6.0"
+# Data Engineering
+polars      = { version = "0.41", features = ["lazy", "sql", "json", "parquet", "dtype-datetime"] }
+# Visualization
+charming = "0.3" # Effective Echarts wrapper for Rust
 
 [workspace.lints.clippy]
 all       = "warn"

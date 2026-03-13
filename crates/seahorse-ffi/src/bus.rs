@@ -61,45 +61,53 @@ pub struct PyMessageReceiver {
 
 #[pymethods]
 impl PyMessageReceiver {
+    /// Non-blocking check for the next message. Returns message dict or None.
+    pub fn try_recv<'py>(&self, py: Python<'py>) -> PyResult<Option<Bound<'py, PyDict>>> {
+        let mut rx = self.rx.try_lock().map_err(|_| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>("Lock contention"))?;
+        
+        match rx.try_recv() {
+            Ok(msg) => {
+                let dict = PyDict::new_bound(py);
+                dict.set_item("topic", msg.topic)?;
+                dict.set_item("sender", msg.sender)?;
+                dict.set_item("content", msg.content)?;
+                Ok(Some(dict))
+            },
+            Err(tokio::sync::broadcast::error::TryRecvError::Empty) => Ok(None),
+            Err(tokio::sync::broadcast::error::TryRecvError::Lagged(_)) => Ok(None),
+            Err(tokio::sync::broadcast::error::TryRecvError::Closed) => Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>("Channel closed")),
+        }
+    }
+
     /// Blocking wait for the next message on this topic subscription.
+    /// (Optimised to yield more frequently to the Python GIL)
     pub fn recv<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyDict>> {
         let rx_mutex = self.rx.clone();
         
-        // Release GIL while waiting
-        let msg = py.allow_threads(move || {
+        py.allow_threads(move || {
             loop {
-                // We must use a short blocking wait here or `try_recv` to not lock Tokio 
                 let rt = tokio::runtime::Handle::current();
                 let result = rt.block_on(async {
                     let mut rx = rx_mutex.lock().await;
-                    // timeout after 100ms so we can check Python signals and release GIL
-                    match tokio::time::timeout(std::time::Duration::from_millis(100), rx.recv()).await {
+                    match tokio::time::timeout(std::time::Duration::from_millis(50), rx.recv()).await {
                         Ok(Ok(m)) => Some(m),
-                        Ok(Err(tokio::sync::broadcast::error::RecvError::Lagged(_))) => None,
-                        Ok(Err(tokio::sync::broadcast::error::RecvError::Closed)) => panic!("Channel closed"),
-                        Err(_) => None, // timeout
+                        _ => None,
                     }
                 });
 
                 if let Some(m) = result {
-                    return m;
+                    return Ok(m);
                 }
                 
-                // If we get here it was a timeout or lag, allow python to tick
-                std::thread::sleep(std::time::Duration::from_millis(10));
-                
-                // Explicitly check for signals (e.g., Ctrl+C)
-                if let Err(e) = Python::with_gil(|py| py.check_signals()) {
-                    // Panic here will be caught by PyO3 and turned into a Python exception
-                    panic!("Python signal received: {e:?}");
-                }
+                // Check for signals frequently
+                Python::with_gil(|py| py.check_signals())?;
             }
-        });
-
-        let dict = PyDict::new_bound(py);
-        dict.set_item("topic", msg.topic)?;
-        dict.set_item("sender", msg.sender)?;
-        dict.set_item("content", msg.content)?;
-        Ok(dict)
+        }).and_then(|msg| {
+            let dict = PyDict::new_bound(py);
+            dict.set_item("topic", msg.topic)?;
+            dict.set_item("sender", msg.sender)?;
+            dict.set_item("content", msg.content)?;
+            Ok(dict)
+        })
     }
 }

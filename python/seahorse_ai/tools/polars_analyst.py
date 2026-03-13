@@ -10,12 +10,28 @@ from seahorse_ai.tools.base import tool
 
 logger = logging.getLogger(__name__)
 
+try:
+    import seahorse_ffi
+    _NATIVE_AVAILABLE = True
+except ImportError:
+    _NATIVE_AVAILABLE = False
+
 _POLARS_SAFE_GLOBALS: dict[str, Any] = {
     "__builtins__": {},
     "pl": pl,
-    "len": len, "list": list, "dict": dict, "str": str,
-    "int": int, "float": float, "round": round, "abs": abs,
-    "min": min, "max": max, "sum": sum, "zip": zip, "enumerate": enumerate,
+    "len": len,
+    "list": list,
+    "dict": dict,
+    "str": str,
+    "int": int,
+    "float": float,
+    "round": round,
+    "abs": abs,
+    "min": min,
+    "max": max,
+    "sum": sum,
+    "zip": zip,
+    "enumerate": enumerate,
 }
 
 # ── Loaders ──────────────────────────────────────────────────────────────────
@@ -73,7 +89,7 @@ def _load_tables(source_paths: list[str]) -> dict[str, pl.LazyFrame]:
 async def polars_query(
     source_paths: list[str],
     expression: str = "",
-    max_rows: int = 50,
+    max_rows: int = 500,
 ) -> str:
     try:
         if not source_paths:
@@ -287,3 +303,26 @@ def _fmt(v: Any) -> str:
     if v is None: return "N/A"
     if isinstance(v, float): return f"{v:,.2f}"
     return str(v)
+
+
+@tool(
+    "Perform high-performance data aggregation using the NATIVE Rust Polars engine. "
+    "This is faster than the Python version for large JSON datasets. "
+    "Input: data_json (string), group_by (col name), agg_col (col name)."
+)
+async def native_polars_aggregate(
+    data_json: str,
+    group_by: str,
+    agg_col: str,
+) -> str:
+    """Execute aggregation in Rust Polars and return JSON results."""
+    if not _NATIVE_AVAILABLE:
+        return "Error: Native Polars engine (seahorse_ffi) is not available in this build."
+
+    try:
+        analyst = seahorse_ffi.PyPolarsAnalyst()
+        logger.info("native_polars: executing aggregation on %s grouped by %s", agg_col, group_by)
+        return analyst.aggregate_json(data_json, group_by, agg_col)
+    except Exception as e:
+        logger.error("native_polars: aggregation failed: %s", e)
+        return f"Error: Native aggregation failed: {e}"

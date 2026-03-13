@@ -19,6 +19,8 @@ bytemuck    = { workspace = true }
 dashmap     = { version = "6.1.0", features = ["serde"] }
 rig-core    = { workspace = true }
 reqwest     = { workspace = true }
+polars      = { workspace = true }
+charming      = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true }
