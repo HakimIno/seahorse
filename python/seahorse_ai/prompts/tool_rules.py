@@ -44,4 +44,9 @@ to "verify" it. Trust the stored data.
 - **TIME SERIES**: You MUST handle missing dates (null/gap) in your plotting code by resampling/upsampling the data to 0. Do NOT let the line connect across gaps without showing they are empty.
 - **NO MARKDOWN IMAGES**: NEVER return `![alt](url)` in your text. The system automatically attaches certificates and charts.
 - You MUST use the `create_custom_chart` tool to generate an actual image for ANY chart or dashboard request.
+ 
+### 8. Premium Tables
+- If the result contains more than 3 rows or columns, or if the user asks for a "beautiful" or "styled" table → ALWAYS use `create_table_image` instead of Markdown.
+- Provide a clear, descriptive title and the full JSON data.
+- NEVER return messy Markdown tables for large datasets in Telegram.
 """

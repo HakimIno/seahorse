@@ -45,6 +45,7 @@ from seahorse_ai.tools.polars_analyst import (
 )
 from seahorse_ai.tools.python_interpreter import python_interpreter
 from seahorse_ai.tools.strategy_engine import war_room
+from seahorse_ai.tools.table_viz import create_table_image
 from seahorse_ai.tools.viz import create_custom_chart
 from seahorse_ai.tools.web_search import web_search
 
@@ -78,6 +79,7 @@ __all__ = [
     "calculate_promo_impact",
     "calculate_margin",
     "create_custom_chart",
+    "create_table_image",
     "forecast_sales",
     "execute_auto_seahorse",
     "polars_query",
@@ -117,6 +119,7 @@ def make_default_registry() -> SeahorseToolRegistry:
         calculate_promo_impact,
         calculate_margin,
         create_custom_chart,
+        create_table_image,
         forecast_sales,
         polars_query,
         polars_profile,

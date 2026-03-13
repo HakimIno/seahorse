@@ -7,6 +7,7 @@ from seahorse_ai.tools.forecaster import forecast_sales
 from seahorse_ai.tools.memory import memory_search
 from seahorse_ai.tools.echarts_viz import native_echarts_chart
 from seahorse_ai.tools.polars_analyst import native_polars_aggregate, polars_query
+from seahorse_ai.tools.table_viz import create_table_image
 from seahorse_ai.tools.viz import create_custom_chart
 from seahorse_ai.tools.web_search import web_search
 
@@ -56,8 +57,9 @@ advanced_analysis_skill = SeahorseSkill(
         "Use `forecast_sales` when the user asks about future trends or predictions.",
         "Always perform Exploratory Data Analysis (EDA) using Polars before finalizing.",
         "Ensure charts use a modern color palette to look premium.",
+        "Use `create_table_image` to present tabular data beautifully instead of simple Markdown.",
     ],
-    tools=[polars_query, native_echarts_chart, create_custom_chart, forecast_sales],
+    tools=[polars_query, native_echarts_chart, create_custom_chart, create_table_image, forecast_sales],
 )
 
 # Registration
