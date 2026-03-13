@@ -1,6 +1,8 @@
 from .seahorse_ffi import (
     PyAgentMemory,
+    PyChartGenerator,
     PyPlannerRunner,
+    PyPolarsAnalyst,
     PyWasmManager,
     is_system_healthy,
     make_py_runner,
@@ -16,4 +18,6 @@ __all__ = [
     "record_global_failure",
     "is_system_healthy",
     "PyWasmManager",
+    "PyPolarsAnalyst",
+    "PyChartGenerator",
 ]

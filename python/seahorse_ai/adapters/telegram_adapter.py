@@ -104,15 +104,22 @@ class TelegramAdapter:
     async def _safe_send_message(
         self, context: ContextTypes.DEFAULT_TYPE, chat_id: int, text: str, **kwargs: object
     ) -> None:
-        """Send a message with Markdown, falling back to plain text if parsing fails."""
-        try:
-            return await context.bot.send_message(chat_id=chat_id, text=text, **kwargs)
-        except Exception as e:
-            logger.warning(
-                "Telegram: Markdown failed for message, falling back to plain text: %s", e
-            )
-            kwargs.pop("parse_mode", None)
-            return await context.bot.send_message(chat_id=chat_id, text=text, **kwargs)
+        """Send a message with Markdown, falling back to plain text if parsing fails.
+        Splits long messages into chunks to avoid 'Message is too long' error.
+        """
+        # Split text into chunks of ~4000 characters
+        MAX_CHUNK = 4000
+        chunks = [text[i : i + MAX_CHUNK] for i in range(0, len(text), MAX_CHUNK)]
+        
+        for chunk in chunks:
+            try:
+                await context.bot.send_message(chat_id=chat_id, text=chunk, **kwargs)
+            except Exception as e:
+                logger.warning(
+                    "Telegram: Markdown failed for message chunk, falling back to plain text: %s", e
+                )
+                kwargs.pop("parse_mode", None)
+                await context.bot.send_message(chat_id=chat_id, text=chunk, **kwargs)
 
     async def handle_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle incoming text messages."""
@@ -271,7 +278,6 @@ class TelegramAdapter:
                         chart_title = chart_data.get("title", {}).get("text", "Native Chart")
                         # Phase 2: Convert to PNG via bridge
                         from seahorse_ai.tools.viz import render_echarts_to_png
-                        import anyio
                         
                         png_path = await render_echarts_to_png(json.dumps(chart_data))
                         if png_path:

@@ -2,15 +2,17 @@ import contextlib
 import json
 import logging
 import os
+import random
 import re
 import uuid
-
-import numpy as np
 
 import matplotlib
 import matplotlib.font_manager as fm
 import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
+import polars as pl
+import seaborn as sns
 
 matplotlib.use("Agg")  # Headless backend for Discord bot
 
@@ -98,20 +100,18 @@ async def render_echarts_to_png(json_conf: str) -> str | None:
 @tool(
     "Generates a HIGHLY CUSTOMIZED, premium business chart by executing Matplotlib Python code. "
     "You provide the custom plotting logic, which will be executed in a sandboxed environment.\n\n"
+    "Use a variety of professional color palettes (e.g., via `sns.color_palette()`). "
+    "Do not just use one fixed set of colors. Make the chart look extremely professional. "
     "ENVIRONMENT SETUP (Already provided, DO NOT import these):\n"
-    "- `pd`, `np`, `plt` are already imported.\n"
-    "- `df` (Pandas DataFrame) and `data` (List of dicts) contain the findings.\n"
-    "- Use `df` for vector operations, or `data` for list comprehensions.\n"
+    "- `pd`, `pl` (Polars), `np`, `plt`, `sns` are already imported.\n"
+    "- `df` (Pandas DataFrame), `pdf` (Polars DataFrame), and `data` (List of dicts) contain findings.\n"
+    "- Use `pl` (Polars) or `pd` (Pandas) for data processing as you prefer.\n"
     "- A modern `fig, ax` (12x7, white bg, spines removed) are already created.\n"
     "- `prop_reg` and `prop_bold` are provided for Thai/premium typography.\n"
-    "- A professional, corporate color list `bar_colors` (slate, navy, muted blue) is provided.\n\n"
+    "- `get_palette(name)` helper provided (names: 'modern', 'vibrant', 'corporate', 'pastel').\n\n"
     "YOUR CODE MUST ONLY PLOT ON `ax` (e.g., `ax.plot()`, `ax.bar()`, `ax.fill_between()`).\n"
     "DO NOT call `plt.show()` or `fig.savefig()`. The system handles rendering and saving.\n"
     "ALWAYS set beautiful titles and labels using `prop_bold` and `prop_reg`.\n"
-    "Make the chart look extremely professional, using alpha for layers.\n"
-    "Use a minimal, elegant, pastel color palette "
-    "(e.g., soft pinks, blues, greens, yellows). "
-    "Avoid harsh, dark, or generic bright colors.\n"
     "Keep the aesthetic clean, luxurious, and easy on the eyes.\n"
 )
 def create_custom_chart(
@@ -132,6 +132,7 @@ def create_custom_chart(
         s_data = json_match.group(1)
         data = json.loads(s_data)
         df = pd.DataFrame(data)
+        pdf = pl.DataFrame(data)
 
         # 2. Setup Premium Canvas
         if prop_reg:
@@ -148,18 +149,19 @@ def create_custom_chart(
         fig.patch.set_facecolor("#ffffff")
         ax.set_facecolor("#ffffff")
 
-        # Minimal, elegant pastel color palette
-        bar_colors = [
-            "#aec6cf",
-            "#ffb3ba",
-            "#b3ecc6",
-            "#fdfd96",
-            "#cbb3cf",
-            "#ffd1b3",
-            "#b3e6e6",
-            "#e6cce6",
-            "#d9ead3",
-        ]
+        # Dynamic color palettes
+        palettes = {
+            "modern": ["#2563eb", "#7c3aed", "#db2777", "#ea580c", "#16a34a"],
+            "vibrant": sns.color_palette("husl", 8).as_hex(),
+            "corporate": ["#0f172a", "#334155", "#475569", "#64748b", "#94a3b8"],
+            "pastel": ["#aec6cf", "#ffb3ba", "#b3ecc6", "#fdfd96", "#cbb3cf"],
+        }
+
+        def get_palette(name="modern"):
+            return palettes.get(name, palettes["modern"])
+
+        # Default fallback color array for legacy or simple charts
+        bar_colors = get_palette(random.choice(list(palettes.keys())))
 
         ax.spines["top"].set_visible(False)
         ax.spines["right"].set_visible(False)
@@ -239,15 +241,20 @@ def create_custom_chart(
         hardened_env = {
             "__builtins__": safe_builtins,
             "pd": pd,
+            "pl": pl,
             "np": np,
             "plt": plt,
+            "sns": sns,
             "df": df,
+            "pdf": pdf,
             "data": data,
             "fig": fig,
             "ax": ax,
             "prop_reg": prop_reg,
             "prop_bold": prop_bold,
             "bar_colors": bar_colors,
+            "get_palette": get_palette,
+            "random": random,
         }
         
         exec(code_clean, hardened_env)

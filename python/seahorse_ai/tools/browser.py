@@ -50,18 +50,34 @@ class _BrowserPool:
 
     async def _ensure_started(self) -> Browser:
         async with self._lock:
-            if self._browser is None or not self._browser.is_connected():
-                logger.info("Starting Chromium browser...")
+            # Check if browser is still valid and connected
+            if (
+                self._browser is None 
+                or not self._browser.is_connected()
+                or self._playwright is None
+            ):
+                if self._browser:
+                    try:
+                        await self._browser.close()
+                    except Exception:
+                        pass
+                if self._playwright:
+                    try:
+                        await self._playwright.stop()
+                    except Exception:
+                        pass
+                
+                logger.info("Starting Chromium browser singleton...")
                 self._playwright = await async_playwright().start()
                 self._browser = await self._playwright.chromium.launch(
                     headless=True,
                     args=[
                         "--no-sandbox",
                         "--disable-setuid-sandbox",
-                        "--disable-dev-shm-usage",   # ป้องกัน crash ใน Docker
+                        "--disable-dev-shm-usage",
                         "--disable-gpu",
-                        "--no-zygote",               # ลด memory ใน container
-                        "--single-process",          # สำหรับ low-memory server
+                        "--no-zygote",
+                        "--single-process",
                     ],
                 )
             return self._browser
@@ -199,6 +215,9 @@ async def browser_screenshot(
         return f"Screenshot error: {e}"
 
 
+@tool(
+    "Backward compatibility alias for browser_scrape. Use browser_scrape instead."
+)
 async def browser_scan(url: str) -> str:
     """Backward compatibility alias for browser_scrape."""
     return await browser_scrape(url)

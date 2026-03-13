@@ -62,7 +62,7 @@ Rules:
 - "Save/Remember X" → {{"action":"STORE","complexity":2}}
 - "What is [internal fact]" → {{"action":"QUERY","complexity":2}}
 - ANY analysis (Polars/SQL/Charts) → {{"complexity":3+, "action":"SQL"}}
-- Long-range analysis (6+ months, 1 year, history) → {{"complexity":4+}}
+- Simple chart request (e.g., "สร้างกราฟยอดขาย") → {{"complexity":3, "action":"SQL"}}
 - Deep research or projects → {{"complexity":4+}}
 
 
@@ -101,7 +101,13 @@ async def classify_structured_intent(
         )
 
     # Tier 1: Keyword-based early routing (0 LLM calls)
-    if any(k.lower() in q_lower for k in REALTIME_KEYWORDS):
+    ANALYSIS_KEYWORDS = (
+        "กราฟ", "chart", "plot", "polars", "วิเคราะห์", "สรุป", "table", "ตาราง", 
+        "เปรียบเทียบ", "สถิติ", "เฉลี่ย", "เปอร์เซ็นต์", "%", "compare", "statistics"
+    )
+    is_analysis = any(k.lower() in q_lower for k in ANALYSIS_KEYWORDS)
+
+    if any(k.lower() in q_lower for k in REALTIME_KEYWORDS) and not is_analysis:
         return StructuredIntent(
             intent="PUBLIC_REALTIME",
             action="SEARCH_WEB",
@@ -109,7 +115,7 @@ async def classify_structured_intent(
             raw_category="PUBLIC_REALTIME",
         )
 
-    if any(k.lower() in q_lower for k in MEMORY_KEYWORDS):
+    if any(k.lower() in q_lower for k in MEMORY_KEYWORDS) and not is_analysis:
         return StructuredIntent(
             intent="PRIVATE_MEMORY",
             action="QUERY",
