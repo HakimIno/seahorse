@@ -4,6 +4,7 @@ members = [
     "crates/seahorse-core",
     "crates/seahorse-router",
     "crates/seahorse-ffi",
+    "seahorse-desktop/src-tauri",
 ]
 
 [workspace.package]
