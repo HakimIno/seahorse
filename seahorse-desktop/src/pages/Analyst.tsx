@@ -1,78 +1,62 @@
-import { useState, useRef, useEffect } from "react";
+import { useState } from "react";
 import { Icon } from '@iconify/react';
+import { useChat } from '../hooks/useChat';
+import MessageList from '../components/MessageList';
 import '../styles/Analyst.css';
 
-interface Message {
-    id: string;
-    role: "user" | "ai";
-    content: string;
-}
-
 export default function Analyst() {
-    const [messages, setMessages] = useState<Message[]>([
-        { id: "1", role: "ai", content: "สวัสดีครับ! ผม Seahorse AI พร้อมช่วยคุณวิเคราะห์ข้อมูลบน MacBook แล้วครับ" }
-    ]);
+    const { messages, isLoading, sendMessage, error } = useChat();
     const [input, setInput] = useState("");
-    const chatEndRef = useRef<HTMLDivElement>(null);
-
-    const scrollToBottom = () => {
-        chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
-    };
-
-    useEffect(() => {
-        scrollToBottom();
-    }, [messages]);
 
     const handleSend = () => {
-        if (!input.trim()) return;
-
-        const userMsg: Message = { id: Date.now().toString(), role: "user", content: input };
-        setMessages(prev => [...prev, userMsg]);
+        if (!input.trim() || isLoading) return;
+        sendMessage(input);
         setInput("");
-
-        setTimeout(() => {
-            const aiMsg: Message = {
-                id: (Date.now() + 1).toString(),
-                role: "ai",
-                content: `คุณถามว่า: "${userMsg.content}"\nผมกำลังวิเคราะห์ข้อมูลให้กรุณารอสักครู่...`
-            };
-            setMessages(prev => [...prev, aiMsg]);
-        }, 600);
     };
 
     return (
-        <>
+        <div className="analyst-page">
             <header className="header">
-                <div className="header-title">Analyst</div>
-                <div className="header-status">
-                    <span className="status-dot"></span>
-                    Online
+                <div className="header-left">
+                    <div className="header-title">AgentV2</div>
+                    <div className="header-status">
+                        {isLoading ? 'Processing...' : '2 subscribers'}
+                    </div>
+                </div>
+                <div className="header-actions">
+                    <Icon icon="majesticons:search-line" className="icon-btn" />
+                    <Icon icon="majesticons:more-vertical-line" className="icon-btn" />
+                    <Icon icon="majesticons:layout-line" className="icon-btn" />
                 </div>
             </header>
 
-            <div className="chat-container">
-                {messages.map((m) => (
-                    <div key={m.id} className={`message ${m.role}`}>
-                        {m.content}
-                    </div>
-                ))}
-                <div ref={chatEndRef} />
-            </div>
+            <MessageList messages={messages} />
+
+            {error && <div className="error-banner">{error}</div>}
 
             <div className="input-area">
                 <div className="input-wrapper">
+                    <Icon icon="majesticons:paperclip-line" style={{ color: '#707579', fontSize: '1.4rem' }} />
                     <input
                         className="chat-input"
-                        placeholder="Ask Seahorse anything..."
+                        placeholder="Broadcast a message..."
                         value={input}
                         onChange={(e) => setInput(e.target.value)}
                         onKeyDown={(e) => e.key === 'Enter' && handleSend()}
+                        disabled={isLoading}
                     />
-                    <button className="send-btn" onClick={handleSend}>
-                        <Icon icon="majesticons:send-line" />
-                    </button>
+                    <div className="input-actions" style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
+                        <Icon icon="majesticons:emoji-line" style={{ color: '#707579', fontSize: '1.4rem' }} />
+                        <button
+                            className={`send-btn ${isLoading ? 'disabled' : ''}`}
+                            onClick={handleSend}
+                            disabled={isLoading}
+                        >
+                            <Icon icon={isLoading ? "majesticons:loading-line" : "majesticons:send-line"} className={isLoading ? "spin" : ""} />
+                        </button>
+                    </div>
                 </div>
             </div>
-        </>
+        </div>
     );
 }
