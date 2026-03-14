@@ -19,9 +19,8 @@
 .message-agent-name {
   font-size: 0.85rem;
   font-weight: 600;
-  color: #34a853; /* Telegram agent colors vary, using a nice green */
+  color: #fff; /* Telegram agent colors vary, using a nice green */
   margin-bottom: 2px;
-  margin-left: 12px;
 }
 
 .message-bubble {

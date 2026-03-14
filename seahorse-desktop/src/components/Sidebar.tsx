@@ -1,4 +1,7 @@
+import { useState } from 'react';
 import { Icon } from '@iconify/react';
+import { NavLink } from 'react-router-dom';
+import { useTheme } from '../hooks/useTheme';
 import '../styles/Sidebar.css';
 
 interface ChatItem {
@@ -45,10 +48,56 @@ const mockChats: ChatItem[] = [
 ];
 
 export default function Sidebar() {
+    const [isMenuOpen, setIsMenuOpen] = useState(false);
+    const { theme, toggleTheme } = useTheme();
+
     return (
         <aside className="sidebar">
+            {/* Drawer Overlay */}
+            {isMenuOpen && <div className="drawer-overlay" onClick={() => setIsMenuOpen(false)}></div>}
+
+            {/* Side Drawer */}
+            <div className={`side-drawer ${isMenuOpen ? 'open' : ''}`}>
+                <div className="drawer-header">
+                    <div className="drawer-user-info">
+                        <div className="drawer-avatar"></div>
+                        <div className="drawer-user-details">
+                            <div className="drawer-user-name">Weerachit</div>
+                            <div className="drawer-user-phone">+66 XX XXX XXXX</div>
+                        </div>
+                    </div>
+                    <button className="drawer-theme-toggle" onClick={(e) => toggleTheme(e)}>
+                        <Icon icon={theme === 'dark' ? "majesticons:sun-line" : "majesticons:moon-line"} />
+                    </button>
+                </div>
+
+                <nav className="drawer-nav">
+                    <NavLink to="/profile" className="drawer-item" onClick={() => setIsMenuOpen(false)}>
+                        <Icon icon="majesticons:user-line" />
+                        <span>My Profile</span>
+                    </NavLink>
+                    <NavLink to="/reports" className="drawer-item" onClick={() => setIsMenuOpen(false)}>
+                        <Icon icon="majesticons:analytics-line" />
+                        <span>Reports</span>
+                    </NavLink>
+                    <NavLink to="/memory" className="drawer-item" onClick={() => setIsMenuOpen(false)}>
+                        <Icon icon="majesticons:brain-line" />
+                        <span>Memory</span>
+                    </NavLink>
+                    <NavLink to="/settings" className="drawer-item" onClick={() => setIsMenuOpen(false)}>
+                        <Icon icon="majesticons:settings-cog-line" />
+                        <span>Settings</span>
+                    </NavLink>
+                    <div className="drawer-divider"></div>
+                    <div className="drawer-item">
+                        <Icon icon="majesticons:logout-line" />
+                        <span>Logout</span>
+                    </div>
+                </nav>
+            </div>
+
             <div className="sidebar-header">
-                <button className="menu-btn">
+                <button className="menu-btn" onClick={() => setIsMenuOpen(true)}>
                     <Icon icon="majesticons:menu-line" />
                 </button>
                 <div className="search-wrapper">
