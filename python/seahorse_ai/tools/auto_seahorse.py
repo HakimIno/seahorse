@@ -44,14 +44,24 @@ async def execute_auto_seahorse(
 
     if not team_name or team_name == "GENERAL":
         logger.info("Auto-Seahorse: Identifying team for objective: %s", objective)
-        teams_list = ", ".join(registry.list_teams())
+        # Get team info for better classification
+        team_info = []
+        for t_name in registry.list_teams():
+            t_obj = registry.get(t_name)
+            doc = t_obj.__class__.__doc__ or "Specialized team"
+            # Extract first line of docstring
+            desc = doc.strip().split("\n")[0]
+            team_info.append(f"- {t_name}: {desc}")
+            
+        team_info_str = "\n        ".join(team_info)
+        
         team_prompt = f"""
         Identify the best specialized team for this objective: "{objective}"
         
-        Available Teams:
-        {teams_list}
+        Available Teams and Their Purpose:
+        {team_info_str}
         
-        Return ONLY the team name (e.g., DATA, HR, or RESEARCH).
+        Return ONLY the team name (e.g., DATA, HR, FOOTBALL, or RESEARCH).
         """
         team_response = await llm.complete(
             [Message(role="user", content=team_prompt)], tier="worker"

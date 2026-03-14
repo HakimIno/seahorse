@@ -11,6 +11,7 @@ pub mod graph_runner;
 pub mod memory;
 pub mod viz;
 pub mod wasm;
+pub mod networking;
 
 use pyo3::prelude::*;
 
@@ -27,6 +28,7 @@ fn seahorse_ffi(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<bus::PyMessageReceiver>()?;
     m.add_class::<analysis::PyPolarsAnalyst>()?;
     m.add_class::<viz::PyChartGenerator>()?;
+    m.add_function(wrap_pyfunction!(networking::fetch_football_data, m)?)?;
     wasm::register(m)?;
     Ok(())
 }

@@ -21,6 +21,7 @@ rig-core    = { workspace = true }
 reqwest     = { workspace = true }
 polars      = { workspace = true }
 charming      = { workspace = true }
+governor      = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true }

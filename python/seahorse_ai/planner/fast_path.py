@@ -14,9 +14,11 @@ Complex actions (SEARCH_WEB, SQL, CHAT, CLARIFY) fall through to ReAct.
 
 from __future__ import annotations
 
+import asyncio
 import datetime
 import json
 import logging
+import re
 import time
 from dataclasses import dataclass
 from typing import Any
@@ -25,13 +27,16 @@ from seahorse_ai.schemas import AgentResponse, Message
 
 logger = logging.getLogger(__name__)
 
+# Standardize conversation context window
+_HISTORY_WINDOW = 4
+
 
 @dataclass
 class StructuredIntent:
     """Result of structured intent classification."""
 
-    intent: str = "GENERAL"  # GENERAL|PUBLIC_REALTIME|PRIVATE_MEMORY|DATABASE
-    action: str = "CHAT"  # STORE|QUERY|UPDATE|DELETE|SEARCH_WEB|SQL|GREET|CHAT|CLARIFY
+    intent: str = "GENERAL"  # GENERAL|PUBLIC_REALTIME|PRIVATE_MEMORY|DATABASE|FOOTBALL
+    action: str = "CHAT"  # STORE|QUERY|UPDATE|DELETE|SEARCH_WEB|SQL|GREET|CHAT|CLARIFY|FOOTBALL_INTEL
     entity: str | None = None  # The key data to store/search
     needs_clarification: bool = False  # True if ambiguous
     complexity: int = 3  # 1-5 (1: Easy/Greetings, 5: Multi-agent project)
@@ -40,7 +45,7 @@ class StructuredIntent:
 
 
 # Actions that bypass ReAct tools but still generate natural responses
-_FAST_ACTIONS = frozenset({"STORE", "QUERY", "GREET", "CHAT", "SEARCH_WEB"})
+_FAST_ACTIONS = frozenset({"STORE", "QUERY", "GREET", "CHAT", "SEARCH_WEB", "FOOTBALL_INTEL", "POLARS_ANALYSIS"})
 
 # (Removed hardcoded _GREETINGS and _CHAT_FALLBACKS arrays)
 
@@ -48,8 +53,8 @@ STRUCTURED_INTENT_PROMPT = """\
 Analyze the user query and return ONLY valid JSON (no markdown, no explanation).
 
 Fields:
-- "intent": one of GENERAL, PUBLIC_REALTIME, PRIVATE_MEMORY, DATABASE, ANALYSIS
-- "action": one of STORE, QUERY, UPDATE, DELETE, SEARCH_WEB, SQL, GREET, CHAT, CLARIFY
+- "intent": one of GENERAL, PUBLIC_REALTIME, PRIVATE_MEMORY, DATABASE, ANALYSIS, FOOTBALL
+- "action": one of STORE, QUERY, UPDATE, DELETE, SEARCH_WEB, SQL, GREET, CHAT, CLARIFY, FOOTBALL_INTEL
 - "entity": the key data to store/search/update (string or null)
 - "needs_clarification": true if the request is ambiguous
 - "complexity": 1-5 (Integer)
@@ -64,6 +69,7 @@ Rules:
 - ANY analysis (Polars/SQL/Charts) → {{"complexity":3+, "action":"SQL"}}
 - Simple chart request (e.g., "สร้างกราฟยอดขาย") → {{"complexity":3, "action":"SQL"}}
 - Deep research or projects → {{"complexity":4+}}
+- Football/Spec betting (e.g., "ราคาบอล", "Value", "xG") → {{"intent":"FOOTBALL", "action":"FOOTBALL_INTEL", "complexity":2}}
 
 
 Conversation history (if any):
@@ -101,11 +107,24 @@ async def classify_structured_intent(
         )
 
     # Tier 1: Keyword-based early routing (0 LLM calls)
-    ANALYSIS_KEYWORDS = (
+    analysis_keywords = (
         "กราฟ", "chart", "plot", "polars", "วิเคราะห์", "สรุป", "table", "ตาราง", 
         "เปรียบเทียบ", "สถิติ", "เฉลี่ย", "เปอร์เซ็นต์", "%", "compare", "statistics"
     )
-    is_analysis = any(k.lower() in q_lower for k in ANALYSIS_KEYWORDS)
+    football_keywords = (
+        "ราคาบอล", "บอลวันนี้", "วิเคราะห์บอล", "ทีเด็ด", "football odds", "soccer odds",
+        "คะแนน xg", "ตัวเจ็บ", "ไลน์อัพ", "lineup", "value", "ความได้เปรียบ"
+    )
+    is_analysis = any(k.lower() in q_lower for k in analysis_keywords)
+    is_football = any(k.lower() in q_lower for k in football_keywords)
+
+    if is_football and not is_analysis:
+        return StructuredIntent(
+            intent="FOOTBALL",
+            action="FOOTBALL_INTEL",
+            complexity=2,
+            raw_category="FOOTBALL",
+        )
 
     if any(k.lower() in q_lower for k in REALTIME_KEYWORDS) and not is_analysis:
         return StructuredIntent(
@@ -142,10 +161,14 @@ async def classify_structured_intent(
         logger.info("structured_intent raw result: %r", result)
 
         # Handle both dict and string results
+        data = result
         if isinstance(result, dict):
-            data = result.get("content", result)
-            if isinstance(data, str):
-                data = _robust_json_load(data)
+            # If Content is already a dict, don't parse it as string
+            data_content = result.get("content")
+            if isinstance(data_content, str):
+                data = _robust_json_load(data_content)
+            elif isinstance(data_content, dict):
+                data = data_content
         else:
             data = _robust_json_load(str(result))
 
@@ -223,8 +246,6 @@ class FastPathRouter:
         if si.action not in _FAST_ACTIONS:
             return None  # Complex → ReAct loop
 
-        import time
-
         start_t = time.perf_counter()
 
         if si.action == "GREET":
@@ -249,17 +270,15 @@ class FastPathRouter:
         if si.action == "POLARS_ANALYSIS":
             return await self._handle_polars_analysis(prompt, history, start_t)
 
+        if si.action == "FOOTBALL_INTEL":
+            return await self._handle_football_intel(prompt, history, start_t)
+
         return None
 
     async def _handle_conversational(
         self, prompt: str, history: list[Message] | None, start_t: float, tone: str = "PROFESSIONAL"
     ) -> AgentResponse:
         """Process greetings and simple chat queries fully via the fast model."""
-        import datetime
-        import time
-
-        from seahorse_ai.schemas import Message
-
         today = datetime.date.today().strftime("%A, %B %d, %Y")
 
         # Select persona based on tone
@@ -281,8 +300,8 @@ class FastPathRouter:
         msgs = [Message(role="system", content=system_msg)]
         if history:
             # OPTIMIZATION: Truncate history for greetings.
-            # Usually only need last 2 turns to maintain flow without token waste.
-            msgs.extend(history[-2:])
+            # Usually only need last turns to maintain flow without token waste.
+            msgs.extend(history[-_HISTORY_WINDOW:])
         msgs.append(Message(role="user", content=prompt))
 
         try:
@@ -304,14 +323,8 @@ class FastPathRouter:
     ) -> AgentResponse | None:
         """Fast-path for simple web searches bypassing full planner."""
         try:
-            import time
-
-            from seahorse_ai.schemas import Message
-
             # Execute tool directly
             raw_result = await self._tools.call("web_search", {"query": search_term})
-
-            import datetime
 
             today = datetime.date.today().strftime("%A, %B %d, %Y")
 
@@ -328,7 +341,7 @@ class FastPathRouter:
                 )
             ]
             if history:
-                msgs.extend(history[-2:])  # Context
+                msgs.extend(history[-_HISTORY_WINDOW:])  # Context
             msgs.append(
                 Message(
                     role="user", content=f"User Query: {prompt}\n\nSearch Results:\n{raw_result}"
@@ -394,7 +407,12 @@ class FastPathRouter:
             )
         except Exception as exc:
             logger.error("fast_path.store failed: %s", exc)
-            return None  # type: ignore[return-value]
+            return AgentResponse(
+                content="ขออภัย ไม่สามารถบันทึกข้อมูลได้ในขณะนี้ครับ ❌",
+                steps=0,
+                agent_id=agent_id,
+                elapsed_ms=0,
+            )
 
     async def _extract_facts(self, text: str) -> list[object]:
         """Extract MemoryFacts via LLM extractor, falling back to regex."""
@@ -414,6 +432,8 @@ class FastPathRouter:
         self, entity: str, agent_id: str, history: list[Message] | None = None
     ) -> AgentResponse | None:
         """Search memory and synthesize an answer (Phase 4)."""
+        if history:
+            history = history[-_HISTORY_WINDOW:]
         try:
             from seahorse_ai.planner.memory_reasoner import MemoryReasoner
 
@@ -491,9 +511,11 @@ class FastPathRouter:
 
             # 5. Final synthesis
             msgs = [
-                Message(role="system", content="Synthesize a final report based on the analysis and chart provided."),
-                Message(role="user", content=f"Analysis: {agg_result}\nVisualization: {viz_result}")
+                Message(role="system", content="Synthesize a final report based on the analysis and chart provided.")
             ]
+            if history:
+                msgs.extend(history[-_HISTORY_WINDOW:])
+            msgs.append(Message(role="user", content=f"Analysis: {agg_result}\nVisualization: {viz_result}"))
             final_res = await self._llm.complete(msgs, tier="fast")
             content = str(final_res.get("content", final_res) if isinstance(final_res, dict) else final_res)
 
@@ -507,10 +529,200 @@ class FastPathRouter:
             logger.error(f"Fast Polars analysis error: {e}")
             return None
 
+    async def _handle_football_intel(
+        self, prompt: str, history: list[Message] | None, start_t: float
+    ) -> AgentResponse | None:
+        """Directly fulfill football intelligence requests via optimized tool calls."""
+        try:
+            today = datetime.date.today().strftime("%Y-%m-%d")
+
+            extraction_prompt = f"""
+            System Date: {today}
+            Extract football match details for API search.
+            Return ONLY valid JSON.
+            
+            IMPORTANT: For "teamname", use the simplest possible common name (e.g., 'Arsenal').
+            If the user asks for "today", "now", or general "Value" without a team, set "teamname" to "ALL".
+            
+            Context Extraction:
+            - If one or more leagues or countries are mentioned (e.g. "Premier League", "La Liga", "England"), extract them into a list.
+            
+            JSON Fields:
+            - "teamname": Team name or "ALL"
+            - "leagues": List of league names (e.g., ['Premier League', 'La Liga']) or null
+            - "countries": List of country names or null
+            - "date": YYYY-MM-DD
+            - "request_type": 'odds' | 'intel' | 'h2h' | 'value'
+            - "is_ranking": boolean (true if user wants a comparison, top matches, highest-to-lowest, or list)
+
+            User request: {prompt}
+            """
+            res = await self._llm.complete([Message(role="user", content=extraction_prompt)], tier="fast")
+            data = _robust_json_load(str(res.get("content", res) if isinstance(res, dict) else res))
+
+            team = data.get("teamname")
+            leagues_req = data.get("leagues") or ([data.get("leaguename")] if data.get("leaguename") else [])
+            countries_req = data.get("countries") or ([data.get("country")] if data.get("country") else [])
+            date = data.get("date", today)
+            req_type = data.get("request_type", "value")
+            is_ranking = data.get("is_ranking", False)
+
+            if not team:
+                return None  # Fallback to ReAct
+
+            # 1. Search for fixture
+            # If leagues_req is provided, we use the first one for the tool call as a hint,
+            # but we will manually filter the results by ALL requested leagues below.
+            hint_league = leagues_req[0] if leagues_req else None
+            fixtures_json = await self._tools.call("searchfixture", {
+                "teamname": team, 
+                "date": date,
+                "leaguename": hint_league
+            })
+            
+            if not (isinstance(fixtures_json, str) and (fixtures_json.startswith("[") or fixtures_json.startswith("{"))):
+                 return AgentResponse(content=fixtures_json, steps=1, elapsed_ms=int((time.perf_counter() - start_t) * 1000))
+
+            fixtures = json.loads(fixtures_json)
+
+            if not fixtures:
+                msg = f"ไม่พบข้อมูลการแข่งขันของ {team}"
+                if leagues_req:
+                    msg += f" ใน {', '.join(leagues_req)}"
+                msg += f" ในวันที่ {date} ครับ"
+                return AgentResponse(content=msg, steps=1, elapsed_ms=int((time.perf_counter() - start_t) * 1000))
+
+            # --- Target Selection ---
+            # Stricter Filter: Exclude youth/reserve unless explicitly in the request
+            youth_terms = ("U18", "U21", "U23", "Reserve", "Women", "Youth")
+            is_youth_req = any(ut.lower() in (lreq.lower() for lreq in leagues_req) for ut in youth_terms)
+            
+            # Split leagues_req if LLM returned them as a single string
+            if leagues_req and len(leagues_req) == 1 and "," in leagues_req[0]:
+                leagues_req = [lreq.strip() for lreq in leagues_req[0].split(",")]
+            
+            filtered_fixtures = []
+            for f in fixtures:
+                l_name = f.get("league", "").lower()
+                
+                # If user specified leagues, ONLY include those leagues
+                if leagues_req and not any(lname.lower() in l_name for lname in leagues_req):
+                    continue
+                
+                # If it's a youth/reserve league but user didn't ask for it, skip
+                if not is_youth_req and any(ut.lower() in l_name for ut in youth_terms):
+                    continue
+                filtered_fixtures.append(f)
+
+            if not filtered_fixtures:
+                 # Fallback to original list if filter was too aggressive
+                 filtered_fixtures = fixtures
+
+            # Ranking/Selection
+            major_leagues = ("Premier League", "La Liga", "Serie A", "Bundesliga", "Ligue 1", "UEFA Champions League", "Thai League 1")
+            
+            def score_match(f):
+                score = 0
+                l_name = f.get("league", "").lower()
+                c_name = f.get("country", "").lower()
+                
+                # Priority 1: Exact League Match
+                if leagues_req and any(lname.lower() == l_name for lname in leagues_req):
+                    score += 100
+                elif leagues_req and any(lname.lower() in l_name for lname in leagues_req):
+                    score += 50
+                
+                # Priority 2: Country Match
+                if countries_req and any(cname.lower() in c_name for cname in countries_req):
+                    score += 40
+                
+                # Priority 3: Major Leagues
+                if any(ml.lower() in l_name for ml in major_leagues):
+                    score += 30
+                
+                return score
+
+            filtered_fixtures.sort(key=score_match, reverse=True)
+            
+            # Select targets: 1 if specific, up to 5 if ranking
+            target_limit = 5 if is_ranking else 1
+            targets = filtered_fixtures[:target_limit]
+
+            # ranking detection for Odds API
+            from seahorse_ai.tools.football_stats import getsportkey
+            
+            # Guard getsportkey to prevent crash if targets is empty
+            league_for_odds = ""
+            if leagues_req:
+                league_for_odds = leagues_req[0]
+            elif targets:
+                league_for_odds = targets[0].get("league", "")
+                
+            sport_key = getsportkey(league_for_odds) if league_for_odds else None
+
+            # 2. Parallel Deep Analysis
+            async def analyze_target(target):
+                fid = target["fixture_id"]
+                tasks = []
+                if req_type in ("intel", "value"):
+                    tasks.append(self._tools.call("getmatchintel", {"fixtureid": fid}))
+                if req_type in ("odds", "value"):
+                    tasks.append(self._tools.call("fetchliveodds", {"fixtureid": fid}))
+                
+                results = await asyncio.gather(*tasks)
+                
+                header = f"### {target['match']} ({target.get('league')} - {target.get('country')})\n"
+                body = ""
+                for r in results:
+                    body += f"[DATA]: {r}\n"
+                return header + body
+
+            # Fetch individual match data and league-wide comparison in parallel
+            analysis_tasks = [analyze_target(t) for t in targets]
+            if sport_key and is_ranking:
+                analysis_tasks.append(self._tools.call("comparemarketodds", {"sportkey": sport_key}))
+            
+            all_results = await asyncio.gather(*analysis_tasks)
+            
+            # Separate market comparison from match reports
+            match_reports = all_results[:len(targets)]
+            market_comparison = all_results[len(targets)] if len(all_results) > len(targets) else "No multi-bookmaker data available."
+
+            # Synthesis
+            synthesis_prompt = f"""
+            Analyze the following football data and provide a DEEP, QUANTITATIVE, and PROFESSIONAL report in the user's language.
+            Today is: {today}
+            
+            You analyzed {len(targets)} match(es).
+            Target Data:
+            {chr(10).join(match_reports)}
+            
+            Market Comparison (Multi-Bookmaker):
+            {market_comparison}
+            
+            Context: The user asked "{prompt}".
+            
+            CRITICAL RULES FOR ANALYSIS:
+            1. SHOW THE NUMBERS: Include Win Probabilities (%), xG values, and Market Odds. Mention if a specific bookmaker (from Market Comparison) offers significantly better odds.
+            2. CALCULATE THE EDGE: Compare Model Probability vs Market Odds. Explicitly state "Edge: +12.5%".
+            3. REASONING: Provide a "Data Reason" (1-2 sentences) linking stats to the pick.
+            4. FORMATTING: Bold headers, Thai if query was Thai. Rank by highest Edge/Value.
+            """
+            final_res = await self._llm.complete([Message(role="user", content=synthesis_prompt)], tier="fast")
+            content = str(final_res.get("content", final_res) if isinstance(final_res, dict) else final_res)
+
+            return AgentResponse(
+                content=content,
+                steps=len(targets) * 2 + 1,
+                elapsed_ms=int((time.perf_counter() - start_t) * 1000),
+            )
+
+        except Exception as e:
+            logger.error(f"Fast football intel error: {e}")
+            return None
+
 
 # ── Helper functions ───────────────────────────────────────────────────────────
-
-import re  # noqa: E402
 
 _SPLIT_DELIMITERS = re.compile(r"[,،;]\s*|\sและ\s|\sand\s", re.IGNORECASE)
 
@@ -540,4 +752,7 @@ def _robust_json_load(text: str) -> dict[str, Any]:
             return json.loads(text[start : end + 1])
         except json.JSONDecodeError:
             pass
+    return {}
+
+
     return {}

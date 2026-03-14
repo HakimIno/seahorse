@@ -20,6 +20,7 @@ pub mod scheduler;
 pub mod viz;
 pub mod wasm;
 pub mod worker;
+pub mod networking;
 
 pub use agent::RigAgent;
 pub use analysis::PolarsAnalyst;

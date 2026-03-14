@@ -85,6 +85,13 @@ class TelegramAdapter:
         self._history: dict[int, deque[Message]] = defaultdict(lambda: deque(maxlen=_MAX_HISTORY))
         self._callback_data_map = {}
         self._user_files: dict[int, list[str]] = defaultdict(list)
+        
+        # Configuration for specialized bots
+        self.welcome_message = os.environ.get(
+            "SEAHORSE_TELEGRAM_WELCOME", 
+            "สวัสดีครับ! ผม Seahorse AI พร้อมช่วยคุณวิเคราะห์ข้อมูลธุรกิจแล้วครับ"
+        )
+        self.system_nudge = os.environ.get("SEAHORSE_TELEGRAM_NUDGE", "")
 
     async def handle_update(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Global debug handler for all updates."""
@@ -92,7 +99,7 @@ class TelegramAdapter:
 
     async def start_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle /start command."""
-        await update.message.reply_text("สวัสดีครับ! ผม Seahorse AI พร้อมช่วยคุณวิเคราะห์ข้อมูลธุรกิจแล้วครับ")
+        await update.message.reply_text(self.welcome_message)
 
     async def id_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Reply with the current Chat ID."""
@@ -205,8 +212,13 @@ class TelegramAdapter:
                 else:
                     cleaned_history.append(msg)
 
+            # Inject system nudge if configured
+            final_prompt = text
+            if self.system_nudge:
+                final_prompt = f"{self.system_nudge}\n\nUser Question: {text}"
+
             request = AgentRequest(
-                prompt=text,
+                prompt=final_prompt,
                 agent_id=agent_id,
                 history=cleaned_history,
             )
@@ -234,7 +246,7 @@ class TelegramAdapter:
                         resp = await client.post(
                             f"{self.router_url}/v1/agent/run",
                             json={
-                                "prompt": text,
+                                "prompt": final_prompt,
                                 "agent_id": agent_id,
                                 "history": [msgspec.to_builtins(m) for m in fast_path_history],
                             },

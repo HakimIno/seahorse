@@ -47,6 +47,18 @@ from seahorse_ai.tools.python_interpreter import python_interpreter
 from seahorse_ai.tools.strategy_engine import war_room
 from seahorse_ai.tools.table_viz import create_table_image
 from seahorse_ai.tools.viz import create_custom_chart
+from seahorse_ai.tools.football_stats import (
+    calculatebetvalue,
+    comparemarketodds,
+    fetchlivematch,
+    fetchliveodds,
+    geth2hresults,
+    getmatchintel,
+    getupcomingfixtures,
+    kellycriterion,
+    predictmatchoutcome,
+    searchfixture,
+)
 from seahorse_ai.tools.web_search import web_search
 
 __all__ = [
@@ -88,6 +100,16 @@ __all__ = [
     "convert_to_parquet",
     "duckdb_sql",
     "sql_to_polars",
+    "geth2hresults",
+    "getmatchintel",
+    "getupcomingfixtures",
+    "predictmatchoutcome",
+    "calculatebetvalue",
+    "comparemarketodds",
+    "kellycriterion",
+    "fetchlivematch",
+    "fetchliveodds",
+    "searchfixture",
 ]
 
 
@@ -127,6 +149,16 @@ def make_default_registry() -> SeahorseToolRegistry:
         convert_to_parquet,
         duckdb_sql,
         sql_to_polars,
+        geth2hresults,
+        getmatchintel,
+        getupcomingfixtures,
+        predictmatchoutcome,
+        calculatebetvalue,
+        comparemarketodds,
+        kellycriterion,
+        fetchlivematch,
+        fetchliveodds,
+        searchfixture,
     ):
         registry.register(fn)
     return registry

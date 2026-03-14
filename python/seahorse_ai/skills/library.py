@@ -3,9 +3,18 @@
 from seahorse_ai.skills.base import SeahorseSkill, registry
 from seahorse_ai.tools.browser import browser_scan
 from seahorse_ai.tools.db import database_query, database_schema
+from seahorse_ai.tools.echarts_viz import native_echarts_chart
+from seahorse_ai.tools.football_stats import (
+    calculatebetvalue,
+    fetchlivematch,
+    fetchliveodds,
+    geth2hresults,
+    getmatchintel,
+    kellycriterion,
+    predictmatchoutcome,
+)
 from seahorse_ai.tools.forecaster import forecast_sales
 from seahorse_ai.tools.memory import memory_search
-from seahorse_ai.tools.echarts_viz import native_echarts_chart
 from seahorse_ai.tools.polars_analyst import native_polars_aggregate, polars_query
 from seahorse_ai.tools.table_viz import create_table_image
 from seahorse_ai.tools.viz import create_custom_chart
@@ -62,8 +71,32 @@ advanced_analysis_skill = SeahorseSkill(
     tools=[polars_query, native_echarts_chart, create_custom_chart, create_table_image, forecast_sales],
 )
 
+# 5. Football Scout Skill (NEW)
+football_scout_skill = SeahorseSkill(
+    name="Football_Scout",
+    description="Deep analysis and prediction of football matches using statistics and real-time intel.",
+    rules=[
+        "Use `fetchlivematch` and `fetchliveodds` for real-time data instead of web search if possible.",
+        "Use `geth2hresults` to understand historical trends between teams.",
+        "Always call `getmatchintel` to check for injuries or tactical changes before predicting.",
+        "Use `calculatebetvalue` and `kellycriterion` for bankroll management and finding an edge.",
+        "When explaining predictions, cite specific factors like xG and injury reports.",
+    ],
+    tools=[
+        geth2hresults, 
+        getmatchintel, 
+        predictmatchoutcome, 
+        fetchlivematch, 
+        fetchliveodds, 
+        calculatebetvalue, 
+        kellycriterion,
+        web_search
+    ],
+)
+
 # Registration
 registry.register(web_research_skill)
 registry.register(database_skill)
 registry.register(analysis_skill)
 registry.register(advanced_analysis_skill)
+registry.register(football_scout_skill)

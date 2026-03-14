@@ -77,7 +77,7 @@ class _BrowserPool:
                         "--disable-dev-shm-usage",
                         "--disable-gpu",
                         "--no-zygote",
-                        "--single-process",
+                        # --single-process removed for stability
                     ],
                 )
             return self._browser
@@ -86,28 +86,38 @@ class _BrowserPool:
     async def page(self) -> AsyncIterator[Page]:
         """Acquire isolated context + page, release เมื่อ done."""
         async with self._sem:
-            browser = await self._ensure_started()
-            context = await browser.new_context(
-                viewport=_VIEWPORT,
-                user_agent=(
-                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                    "AppleWebKit/537.36 (KHTML, like Gecko) "
-                    "Chrome/120.0.0.0 Safari/537.36"
-                ),
-                java_script_enabled=True,
-                bypass_csp=True,
-                ignore_https_errors=True,
-            )
-            # Block unnecessary resources — เร็วขึ้น ~40%
-            await context.route(
-                "**/*",
-                lambda route: route.abort()
-                if route.request.resource_type in {"image", "font", "media", "stylesheet"}
-                else route.continue_(),
-            )
-            page = await context.new_page()
-            page.set_default_timeout(_PAGE_TIMEOUT)
-            page.set_default_navigation_timeout(_NAV_TIMEOUT)
+            for attempt in range(2): # Simple retry for flaky sessions
+                try:
+                    browser = await self._ensure_started()
+                    context = await browser.new_context(
+                        viewport=_VIEWPORT,
+                        user_agent=(
+                            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                            "AppleWebKit/537.36 (KHTML, like Gecko) "
+                            "Chrome/120.0.0.0 Safari/537.36"
+                        ),
+                        java_script_enabled=True,
+                        bypass_csp=True,
+                        ignore_https_errors=True,
+                    )
+                    # Block unnecessary resources — เร็วขึ้น ~40%
+                    await context.route(
+                        "**/*",
+                        lambda route: route.abort()
+                        if route.request.resource_type in {"image", "font", "media", "stylesheet"}
+                        else route.continue_(),
+                    )
+                    page = await context.new_page()
+                    page.set_default_timeout(_PAGE_TIMEOUT)
+                    page.set_default_navigation_timeout(_NAV_TIMEOUT)
+                    break 
+                except Exception as e:
+                    if attempt == 1: raise e
+                    logger.warning(f"Browser attempt {attempt} failed, retrying: {e}")
+                    # Force a restart on next attempt
+                    self._browser = None 
+                    await asyncio.sleep(1)
+
             try:
                 yield page
             finally:

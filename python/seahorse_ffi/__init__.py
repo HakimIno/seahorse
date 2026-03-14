@@ -4,6 +4,7 @@ from .seahorse_ffi import (
     PyPlannerRunner,
     PyPolarsAnalyst,
     PyWasmManager,
+    fetch_football_data,
     is_system_healthy,
     make_py_runner,
     record_global_failure,
@@ -20,4 +21,5 @@ __all__ = [
     "PyWasmManager",
     "PyPolarsAnalyst",
     "PyChartGenerator",
+    "fetch_football_data",
 ]

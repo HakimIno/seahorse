@@ -22,6 +22,9 @@ pub enum CoreError {
 
     #[error("graph execution error: {0}")]
     Graph(String),
+
+    #[error("internal error: {0}")]
+    Internal(String),
 }
 
 pub type CoreResult<T> = Result<T, CoreError>;
