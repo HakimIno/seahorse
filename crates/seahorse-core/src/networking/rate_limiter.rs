@@ -1,9 +1,8 @@
 use std::num::NonZeroU32;
-use std::sync::Arc;
-use governor::{Quota, RateLimiter, state::DirectStateStore};
+use governor::{Quota, RateLimiter};
 use reqwest::Client;
 use serde_json::Value;
-use tracing::{debug, info};
+use tracing::debug;
 use crate::error::CoreResult;
 
 /// Rate-limited HTTP client for external sports APIs.
@@ -14,14 +13,16 @@ pub struct NetworkClient {
 
 impl NetworkClient {
     /// Create a new client with a specific rate limit (requests per minute).
-    pub fn new(requests_per_minute: u32) -> Self {
-        let quota = Quota::per_minute(NonZeroU32::new(requests_per_minute).unwrap());
+    pub fn new(requests_per_minute: u32) -> CoreResult<Self> {
+        let rpm = NonZeroU32::new(requests_per_minute)
+            .ok_or_else(|| crate::error::CoreError::Config("requests_per_minute must be > 0".into()))?;
+        let quota = Quota::per_minute(rpm);
         let limiter = RateLimiter::direct(quota);
         
-        Self {
+        Ok(Self {
             client: Client::new(),
             limiter,
-        }
+        })
     }
 
     /// Fetch data from a URL with rate limiting and optional Headers (like API Keys).
@@ -47,4 +48,4 @@ use once_cell::sync::Lazy;
 
 /// Global instance of the rate-limited client for API-Football.
 /// Default to 10 per minute as a safe starting point.
-pub static FOOTBALL_CLIENT: Lazy<NetworkClient> = Lazy::new(|| NetworkClient::new(10));
+pub static FOOTBALL_CLIENT: Lazy<NetworkClient> = Lazy::new(|| NetworkClient::new(10).expect("hardcoded rpm is safe"));

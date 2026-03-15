@@ -11,6 +11,12 @@ pub enum CoreError {
     #[error("config error: {0}")]
     Config(String),
 
+    #[error("python error: {0}")]
+    Python(String),
+
+    #[error("wasm error: {0}")]
+    Wasm(String),
+
     #[error("channel closed")]
     ChannelClosed,
 

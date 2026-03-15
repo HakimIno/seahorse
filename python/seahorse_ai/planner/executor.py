@@ -17,6 +17,7 @@ from __future__ import annotations
 import json
 import logging
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
@@ -66,7 +67,7 @@ class ReActExecutor:
         tools: object,
         circuit_breaker: object,
         config: ExecutorConfig | None = None,
-        step_callback: callable | None = None,
+        step_callback: Callable[..., Any] | None = None,
     ) -> None:
         self._llm = llm
         self._tools = tools

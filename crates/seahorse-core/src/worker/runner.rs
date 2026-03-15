@@ -1,9 +1,11 @@
+use async_trait::async_trait;
 use tokio::sync::mpsc;
 use crate::error::CoreResult;
 
 /// Abstraction over the Python AI layer.
 /// Implemented by `seahorse-ffi::agent::PyPlannerRunner`.
 /// Kept as a trait so unit tests can inject a mock.
+#[async_trait]
 pub trait PythonRunner: Send + Sync + 'static {
     /// Run a single agent turn.
     ///
@@ -13,7 +15,7 @@ pub trait PythonRunner: Send + Sync + 'static {
     ///
     /// # Returns
     /// The final complete response string.
-    fn run(
+    async fn run(
         &self,
         task_id: &str,
         agent_id: &str,

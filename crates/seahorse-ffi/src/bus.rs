@@ -21,7 +21,7 @@ impl PyMessageBus {
     }
 
     /// Publish a message to a topic. Non-blocking.
-    pub fn publish(&self, _py: Python<'_>, topic: String, sender: String, content: String) -> PyResult<usize> {
+    pub fn publish(&self, py: Python<'_>, topic: String, sender: String, content: String) -> PyResult<usize> {
         let bus = self.inner.clone();
         let message = SwarmMessage {
             topic,
@@ -29,19 +29,23 @@ impl PyMessageBus {
             content,
         };
         
-        let rt = tokio::runtime::Handle::current();
-        let size = rt.block_on(async {
-            bus.publish(message).await.unwrap_or(0)
+        let size = py.allow_threads(|| {
+            let rt = tokio::runtime::Handle::current();
+            rt.block_on(async {
+                bus.publish(message).await.unwrap_or(0)
+            })
         });
         Ok(size)
     }
 
     /// Get a subscriber for a topic. Returns a PyMessageReceiver.
-    pub fn subscribe(&self, _py: Python<'_>, topic: String) -> PyResult<PyMessageReceiver> {
+    pub fn subscribe(&self, py: Python<'_>, topic: String) -> PyResult<PyMessageReceiver> {
         let bus = self.inner.clone();
-        let rt = tokio::runtime::Handle::current();
-        let rx = rt.block_on(async {
-            bus.subscribe(&topic).await
+        let rx = py.allow_threads(|| {
+            let rt = tokio::runtime::Handle::current();
+            rt.block_on(async {
+                bus.subscribe(&topic).await
+            })
         });
         
         Ok(PyMessageReceiver {

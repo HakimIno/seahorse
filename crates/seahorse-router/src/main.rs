@@ -43,16 +43,16 @@ async fn main() -> anyhow::Result<()> {
 
     info!(addr = %addr, "seahorse-router listening");
 
-    tokio::spawn(async {
-        if tokio::signal::ctrl_c().await.is_ok() {
-            info!("Ctrl-C received! Forcefully shutting down...");
-            telemetry::shutdown_telemetry();
-            std::process::exit(0);
-        }
-    });
+    axum::serve(listener, router)
+        .with_graceful_shutdown(async {
+            tokio::signal::ctrl_c()
+                .await
+                .expect("failed to install CTRL+C handler");
+            info!("Shutting down gracefully...");
+        })
+        .await?;
 
-    axum::serve(listener, router).await?;
-
+    info!("Server stopped, flushing telemetry...");
     telemetry::shutdown_telemetry();
     Ok(())
 }

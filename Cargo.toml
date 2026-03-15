@@ -61,6 +61,7 @@ polars      = { version = "0.41", features = ["lazy", "sql", "json", "parquet", 
 charming = "0.3" # Effective Echarts wrapper for Rust
 # Rate Limiting
 governor = "0.6"
+async-trait = "0.1"
 
 [workspace.lints.clippy]
 all       = "warn"

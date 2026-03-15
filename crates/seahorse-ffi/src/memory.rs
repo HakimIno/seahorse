@@ -46,10 +46,16 @@ impl PyAgentMemory {
         embedding: &[u8],
         text: String,
         metadata_json: String,
-    ) {
-        let emb: &[f32] = bytemuck::cast_slice(embedding);
+    ) -> PyResult<()> {
+        let emb: &[f32] = bytemuck::try_cast_slice(embedding).map_err(|e| {
+            PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
+                "embedding alignment error: {e}"
+            ))
+        })?;
         // Release GIL during HNSW insert
-        py.allow_threads(|| self.inner.insert(doc_id, emb, text, metadata_json));
+        py.allow_threads(|| self.inner.insert(doc_id, emb, text, metadata_json))
+            .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!("{e}")))?;
+        Ok(())
     }
 
     /// Search and return (doc_id, distance, text, metadata_json).
@@ -60,9 +66,15 @@ impl PyAgentMemory {
         query: &[u8],
         k: usize,
         ef: usize,
-    ) -> Vec<(usize, f32, String, String)> {
-        let q: &[f32] = bytemuck::cast_slice(query);
-        py.allow_threads(|| self.inner.search(q, k, ef))
+    ) -> PyResult<Vec<(usize, f32, String, String)>> {
+        let q: &[f32] = bytemuck::try_cast_slice(query).map_err(|e| {
+            PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
+                "query alignment error: {e}"
+            ))
+        })?;
+        let results = py.allow_threads(|| self.inner.search(q, k, ef))
+            .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!("{e}")))?;
+        Ok(results)
     }
 
     /// Remove a document (Soft Delete).
@@ -146,7 +158,12 @@ pub fn search_memory(
     k: usize,
     ef: usize,
 ) -> PyResult<Vec<(usize, f32, String, String)>> {
-    let q: &[f32] = bytemuck::cast_slice(query_bytes);
-    let results = py.allow_threads(|| memory.inner.search(q, k, ef));
+    let q: &[f32] = bytemuck::try_cast_slice(query_bytes).map_err(|e| {
+        PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
+            "query alignment error: {e}"
+        ))
+    })?;
+    let results = py.allow_threads(|| memory.inner.search(q, k, ef))
+        .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!("{e}")))?;
     Ok(results)
 }

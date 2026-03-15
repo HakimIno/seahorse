@@ -11,7 +11,9 @@ use tracing::{debug, instrument};
 /// Wraps a Rust-native HNSW index for agent memory.
 /// Zero GC pauses, sub-5ms search at 100k documents.
 pub struct AgentMemory {
-    pub(crate) index: Arc<Hnsw<'static, f32, DistCosine>>,
+    pub(crate) index: Arc<std::sync::RwLock<Hnsw<'static, f32, DistCosine>>>,
+    // SAFETY: keep the loader alive so the index's borrows remain valid
+    pub(crate) _loader: Option<hnsw_rs::hnswio::HnswIo>,
     // Concurrent map for doc_id -> (text, json_metadata)
     pub(crate) metadata: Arc<DashMap<usize, (String, String)>>,
     // Concurrent Directed Knowledge Graph
@@ -19,9 +21,7 @@ pub struct AgentMemory {
     pub(crate) dim: usize,
 }
 
-// SAFETY: Hnsw and DashMap are internally synchronized.
-unsafe impl Send for AgentMemory {}
-unsafe impl Sync for AgentMemory {}
+// AgentMemory is now safely Send + Sync.
 
 impl AgentMemory {
     /// Create a new HNSW index.
@@ -34,7 +34,8 @@ impl AgentMemory {
     pub fn new(dim: usize, max_elements: usize, m: usize, ef_construction: usize) -> Self {
         let index = Hnsw::new(m, max_elements, 16, ef_construction, DistCosine);
         Self {
-            index: Arc::new(index),
+            index: Arc::new(std::sync::RwLock::new(index)),
+            _loader: None,
             metadata: Arc::new(DashMap::new()),
             graph: Arc::new(std::sync::RwLock::new(graph::KnowledgeGraph::new())),
             dim,
@@ -42,38 +43,45 @@ impl AgentMemory {
     }
 
     /// Insert an embedding with associated text and metadata.
-    ///
-    /// # Panics (debug only)
-    /// Panics if `embedding.len() != self.dim`.
     #[instrument(skip(self, embedding, text, meta), fields(id))]
-    pub fn insert(&self, id: usize, embedding: &[f32], text: String, meta: String) {
-        debug_assert_eq!(
-            embedding.len(),
-            self.dim,
-            "embedding dim mismatch: expected {}, got {}",
-            self.dim,
-            embedding.len()
-        );
-        self.index.insert((&embedding.to_vec(), id));
+    pub fn insert(&self, id: usize, embedding: &[f32], text: String, meta: String) -> crate::error::CoreResult<()> {
+        if embedding.len() != self.dim {
+            return Err(crate::error::CoreError::Memory(format!(
+                "embedding dim mismatch: expected {}, got {}",
+                self.dim,
+                embedding.len()
+            )));
+        }
+        let index = self.index.write().expect("HNSW lock poisoned");
+        // NOTE: .to_vec() is an allocation hot spot, but required by hnsw_rs::Hnsw::insert API
+        index.insert((&embedding.to_vec(), id));
         self.metadata.insert(id, (text, meta));
         debug!(id, dim = self.dim, "memory insert including metadata");
+        Ok(())
     }
 
     /// Search for the `k` nearest neighbours.
     ///
     /// Returns `(doc_id, distance, text, metadata)` tuples.
     #[instrument(skip(self, query), fields(k, ef))]
-    pub fn search(&self, query: &[f32], k: usize, ef: usize) -> Vec<(usize, f32, String, String)> {
-        debug_assert_eq!(query.len(), self.dim);
-        let results = self.index.search(query, k, ef);
-        results
+    pub fn search(&self, query: &[f32], k: usize, ef: usize) -> crate::error::CoreResult<Vec<(usize, f32, String, String)>> {
+        if query.len() != self.dim {
+            return Err(crate::error::CoreError::Memory(format!(
+                "query dim mismatch: expected {}, got {}",
+                self.dim,
+                query.len()
+            )));
+        }
+        let index = self.index.read().expect("HNSW lock poisoned");
+        let results = index.search(query, k, ef);
+        Ok(results
             .into_iter()
             .filter_map(|n| {
                 self.metadata.get(&n.d_id).map(|entry| {
                     (n.d_id, n.distance, entry.0.clone(), entry.1.clone())
                 })
             })
-            .collect()
+            .collect())
     }
 
     /// Remove a document from the metadata map (Soft Delete).

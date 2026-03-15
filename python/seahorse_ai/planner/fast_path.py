@@ -41,7 +41,7 @@ class StructuredIntent:
     needs_clarification: bool = False  # True if ambiguous
     complexity: int = 3  # 1-5 (1: Easy/Greetings, 5: Multi-agent project)
     tone: str = "PROFESSIONAL"  # PROFESSIONAL | CASUAL
-    raw_category: str = ""  # Legacy category for compatibility
+    raw_category: str = ""  # Legacy field for telemetry backward compatibility
 
 
 # Actions that bypass ReAct tools but still generate natural responses

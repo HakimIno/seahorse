@@ -36,7 +36,7 @@ impl PolarsAnalyst {
         let cursor = std::io::Cursor::new(json_data.as_bytes());
         let df = JsonReader::new(cursor)
             .finish()
-            .map_err(|e| CoreError::Config(format!("Failed to parse JSON into DataFrame: {e}")))?;
+            .map_err(|e| CoreError::Internal(format!("Failed to parse JSON into DataFrame: {e}")))?;
 
         // 2. Perform aggregation
         let mut result = df
@@ -50,7 +50,7 @@ impl PolarsAnalyst {
                     .with_multithreaded(true),
             )
             .collect()
-            .map_err(|e| CoreError::Config(format!("Aggregation failed: {e}")))?;
+            .map_err(|e| CoreError::Internal(format!("Aggregation failed: {e}")))?;
 
         info!(rows = result.height(), "Aggregation completed successfully");
 
@@ -58,7 +58,7 @@ impl PolarsAnalyst {
         let mut buf = Vec::new();
         JsonWriter::new(&mut buf)
             .finish(&mut result)
-            .map_err(|e| CoreError::Config(format!("Failed to serialise result to JSON: {e}")))?;
+            .map_err(|e| CoreError::Internal(format!("Failed to serialise result to JSON: {e}")))?;
 
         Ok(String::from_utf8_lossy(&buf).to_string())
     }

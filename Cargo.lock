@@ -5539,6 +5539,7 @@ name = "seahorse-core"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-trait",
  "bytemuck",
  "bytes",
  "charming",
@@ -5574,6 +5575,7 @@ name = "seahorse-ffi"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-trait",
  "bytemuck",
  "once_cell",
  "pyo3",

@@ -1,6 +1,7 @@
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::Instant;
+use tokio::sync::Mutex;
 use tracing::{error, warn};
 
 use crate::worker::runner::PythonRunner;
@@ -34,7 +35,7 @@ impl HeartbeatSupervisor {
                 // 2. Identify stale tasks
                 let now = Instant::now();
                 let stale: Vec<String> = {
-                    let guard = active_tasks.lock().unwrap();
+                    let guard = active_tasks.lock().await;
                     guard
                         .iter()
                         .filter(|(_, &start)| now.duration_since(start).as_secs() > 300)
@@ -49,11 +50,11 @@ impl HeartbeatSupervisor {
         });
     }
 
-    pub(crate) fn track(&self, id: String) {
-        self.active_tasks.lock().unwrap().insert(id, Instant::now());
+    pub(crate) async fn track(&self, id: String) {
+        self.active_tasks.lock().await.insert(id, Instant::now());
     }
 
-    pub(crate) fn untrack(&self, id: &str) {
-        self.active_tasks.lock().unwrap().remove(id);
+    pub(crate) async fn untrack(&self, id: &str) {
+        self.active_tasks.lock().await.remove(id);
     }
 }

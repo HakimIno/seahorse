@@ -14,6 +14,7 @@ use axum::{
     Extension, Router,
 };
 use tower_http::trace::TraceLayer;
+use tower_http::cors::{CorsLayer, Any};
 
 use seahorse_core::SeahorseCore;
 
@@ -35,6 +36,7 @@ pub fn build_router(core: Arc<SeahorseCore>) -> Router {
         .merge(v1)
         .layer(Extension(core))
         .layer(TraceLayer::new_for_http())
+        .layer(CorsLayer::new().allow_origin(Any).allow_methods(Any).allow_headers(Any))
 }
 
 /// Tower middleware function that validates JWT on every request.

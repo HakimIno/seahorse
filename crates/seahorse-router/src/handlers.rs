@@ -57,15 +57,27 @@ pub async fn run_agent(
         }));
     }
 
-    let (task_id, _rx) = core
+    let (task_id, mut rx) = core
         .scheduler
         .submit(req.agent_id, req.prompt, req.history)
         .await?;
 
+    let mut response_content = String::new();
+    while let Some(token) = rx.recv().await {
+        if token.starts_with("[ERROR]") {
+            return Err(AppError::Internal(token));
+        }
+        if !token.starts_with("[DONE]") {
+            // In synchronous mode, the worker loop sends the full response as the last token.
+            // We overwrite response_content with each non-metadata token to ensure we get the final one.
+            response_content = token;
+        }
+    }
+
     Ok(Json(RunResponse {
         task_id,
-        status: "queued",
-        content: None,
+        status: "completed",
+        content: Some(response_content),
     }))
 }
 
@@ -116,9 +128,16 @@ pub async fn memory_search(
 
     let results = core
         .memory
-        .search(&req.embedding, req.k.unwrap_or(5), req.ef.unwrap_or(100));
+        .search(&req.embedding, req.k.unwrap_or(5), req.ef.unwrap_or(100))?;
 
-    Ok(Json(MemorySearchResponse { results }))
+    let hits = results.into_iter().map(|(id, dist, txt, meta)| MemoryHit {
+        doc_id: id,
+        distance: dist,
+        text: txt,
+        metadata: meta,
+    }).collect();
+
+    Ok(Json(MemorySearchResponse { results: hits }))
 }
 
 #[derive(Debug, Deserialize)]
@@ -129,6 +148,14 @@ pub struct MemorySearchRequest {
 }
 
 #[derive(Debug, Serialize)]
+pub struct MemoryHit {
+    pub doc_id: usize,
+    pub distance: f32,
+    pub text: String,
+    pub metadata: String,
+}
+
+#[derive(Debug, Serialize)]
 pub struct MemorySearchResponse {
-    pub results: Vec<(usize, f32, String, String)>,
+    pub results: Vec<MemoryHit>,
 }

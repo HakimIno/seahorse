@@ -12,14 +12,10 @@ pub fn fetch_football_data(py: Python<'_>, url: String, api_key: String) -> PyRe
         ("x-apisports-key".to_string(), api_key),
     ];
     
-    // We run the async fetch in a blocking manner using a local runtime handle.
+    // We run the async fetch in a blocking manner using the current runtime handle.
     // This is safe because Seahorse tools are executed in worker threads on the Python side.
     let result: Result<serde_json::Value, String> = py.allow_threads(|| {
-        let rt = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .map_err(|e| format!("Failed to create runtime: {e}"))?;
-            
+        let rt = tokio::runtime::Handle::current();
         rt.block_on(async {
             FOOTBALL_CLIENT.fetch_json(&url, headers).await
         })
