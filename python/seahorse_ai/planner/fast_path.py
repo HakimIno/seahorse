@@ -555,6 +555,10 @@ class FastPathRouter:
             - "request_type": 'odds' | 'intel' | 'h2h' | 'value'
             - "is_ranking": boolean (true if user wants a comparison, top matches, highest-to-lowest, or list)
 
+            STRICT RULES:
+            - If the user mentions "Serie A", "Serie B", or "Premier League", check if they also mentioned a country (Italy, Brazil, England). If not, default to the most famous one but keep "countries" as null or ALL unless sure.
+            - ALWAYS try to extract a list of "countries" if mentioned.
+
             User request: {prompt}
             """
             res = await self._llm.complete([Message(role="user", content=extraction_prompt)], tier="fast")
@@ -586,10 +590,19 @@ class FastPathRouter:
             fixtures = json.loads(fixtures_json)
 
             if not fixtures:
+                # If no matches found, check if the league name is valid first
+                league_check = await self._tools.call("searchleague", {"name": hint_league or team})
+                if "No leagues found" in league_check:
+                    return AgentResponse(
+                        content=f"ไม่พบข้อมูลลีกหรือทีมที่ชื่อ '{hint_league or team}' ครับ รบกวนตรวจสอบชื่ออีกครั้ง",
+                        steps=1,
+                        elapsed_ms=int((time.perf_counter() - start_t) * 1000)
+                    )
+                
                 msg = f"ไม่พบข้อมูลการแข่งขันของ {team}"
                 if leagues_req:
                     msg += f" ใน {', '.join(leagues_req)}"
-                msg += f" ในวันที่ {date} ครับ"
+                msg += f" ในวันที่ {date} ครับ (แต่อาจจะมีในวันอื่น)"
                 return AgentResponse(content=msg, steps=1, elapsed_ms=int((time.perf_counter() - start_t) * 1000))
 
             # --- Target Selection ---
@@ -704,9 +717,27 @@ class FastPathRouter:
             
             CRITICAL RULES FOR ANALYSIS:
             1. SHOW THE NUMBERS: Include Win Probabilities (%), xG values, and Market Odds. Mention if a specific bookmaker (from Market Comparison) offers significantly better odds.
-            2. CALCULATE THE EDGE: Compare Model Probability vs Market Odds. Explicitly state "Edge: +12.5%".
-            3. REASONING: Provide a "Data Reason" (1-2 sentences) linking stats to the pick.
-            4. FORMATTING: Bold headers, Thai if query was Thai. Rank by highest Edge/Value.
+            2. CALCULATE THE EDGE: Use the formula: Edge = (Model Prob * Market Odds) - 1.
+            3. STRICT MARKET & LEAGUE ALIGNMENT: 
+               - If comparing against 'Win' odds (1), use ONLY 'Home Win' probability.
+               - DO NOT combine probabilities (e.g., Win + Draw) unless comparing against a 'Double Chance' (1X/X2) market price.
+               - VERIFY LEAGUE/COUNTRY: Check the [DATA] field for each match. If a match is in "Serie A - Brazil", DO NOT label it as "Serie A - Italy". Group by [Country - League] clearly.
+            4. ANTI-HALLUCINATION RULE:
+               - If [DATA] contains "(DATA UNAVAILABLE)" or "No intelligence found", DO NOT report any Win/Draw/Away percentages. 
+               - DO NOT MAKE UP numbers. Just state that modern analytics for this specific match are currently unavailable.
+            5. KELLY CRITERION: 
+               - If an Edge (+EV) is detected, you MUST calculate the Kelly Criterion (Fractional 0.5) to suggest a stake.
+               - FORMULA: f* = ( (Decimal Odds - 1) * Prob - (1 - Prob) ) / (Decimal Odds - 1)
+               - Show the result as: "Kelly Suggestion: X.XX% of Bankroll".
+               - Assume a Total Bankroll of 10,000 units unless the user mentions otherwise, and provide the concrete stake (e.g., "Recommend 250 units").
+            6. CONFIDENCE & UNCERTAINTY: 
+               - Must state the "Sample Size" (H2H Matches) used for analysis.
+               - Provide a qualitative Confidence Level (Low/Medium/High) based on:
+                   - Data availability (is it UNAVAILABLE?)
+                   - Sample Size (Low if < 3 matches)
+                   - Conflict between Model % and Advice/H2H.
+            7. REASONING: Provide a "Data Reason" (1-2 sentences) linking stats to the pick.
+            8. FORMATTING: Bold headers, Thai if query was Thai. Rank by highest Edge/Value.
             """
             final_res = await self._llm.complete([Message(role="user", content=synthesis_prompt)], tier="fast")
             content = str(final_res.get("content", final_res) if isinstance(final_res, dict) else final_res)

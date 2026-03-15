@@ -2,6 +2,15 @@ use pyo3::prelude::*;
 use pyo3::types::PyDict;
 use seahorse_core::bus::{MessageBus, SwarmMessage};
 use std::sync::Arc;
+use once_cell::sync::Lazy;
+use tokio::runtime::Runtime;
+
+static BUS_RUNTIME: Lazy<Runtime> = Lazy::new(|| {
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .expect("Failed to create Seahorse Bus runtime")
+});
 
 /// Python accessible wrapper for the Swarm MessageBus
 #[pyclass]
@@ -30,10 +39,15 @@ impl PyMessageBus {
         };
         
         let size = py.allow_threads(|| {
-            let rt = tokio::runtime::Handle::current();
-            rt.block_on(async {
-                bus.publish(message).await.unwrap_or(0)
-            })
+            if let Ok(handle) = tokio::runtime::Handle::try_current() {
+                handle.block_on(async {
+                    bus.publish(message).await.unwrap_or(0)
+                })
+            } else {
+                BUS_RUNTIME.block_on(async {
+                    bus.publish(message).await.unwrap_or(0)
+                })
+            }
         });
         Ok(size)
     }
@@ -42,10 +56,15 @@ impl PyMessageBus {
     pub fn subscribe(&self, py: Python<'_>, topic: String) -> PyResult<PyMessageReceiver> {
         let bus = self.inner.clone();
         let rx = py.allow_threads(|| {
-            let rt = tokio::runtime::Handle::current();
-            rt.block_on(async {
-                bus.subscribe(&topic).await
-            })
+            if let Ok(handle) = tokio::runtime::Handle::try_current() {
+                handle.block_on(async {
+                    bus.subscribe(&topic).await
+                })
+            } else {
+                BUS_RUNTIME.block_on(async {
+                    bus.subscribe(&topic).await
+                })
+            }
         });
         
         Ok(PyMessageReceiver {
@@ -90,14 +109,23 @@ impl PyMessageReceiver {
         
         py.allow_threads(move || {
             loop {
-                let rt = tokio::runtime::Handle::current();
-                let result = rt.block_on(async {
-                    let mut rx = rx_mutex.lock().await;
-                    match tokio::time::timeout(std::time::Duration::from_millis(50), rx.recv()).await {
-                        Ok(Ok(m)) => Some(m),
-                        _ => None,
-                    }
-                });
+                let result = if let Ok(handle) = tokio::runtime::Handle::try_current() {
+                    handle.block_on(async {
+                        let mut rx = rx_mutex.lock().await;
+                        match tokio::time::timeout(std::time::Duration::from_millis(50), rx.recv()).await {
+                            Ok(Ok(m)) => Some(m),
+                            _ => None,
+                        }
+                    })
+                } else {
+                    BUS_RUNTIME.block_on(async {
+                        let mut rx = rx_mutex.lock().await;
+                        match tokio::time::timeout(std::time::Duration::from_millis(50), rx.recv()).await {
+                            Ok(Ok(m)) => Some(m),
+                            _ => None,
+                        }
+                    })
+                };
 
                 if let Some(m) = result {
                     return Ok(m);

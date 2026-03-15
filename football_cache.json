@@ -1,0 +1,185 @@
+{
+  "teams": {},
+  "fixtures": {
+    "search_ALL_Thai League 1_2026-03-15": [
+      {
+        "fixture_id": 1491269,
+        "match": "Bangkok United vs Port FC",
+        "status": "Not Started",
+        "league": "Thai League 1",
+        "country": "Thailand"
+      },
+      {
+        "fixture_id": 1491270,
+        "match": "Kanchanaburi vs Sukhothai FC",
+        "status": "Not Started",
+        "league": "Thai League 1",
+        "country": "Thailand"
+      },
+      {
+        "fixture_id": 1491271,
+        "match": "Ratchaburi vs Ayutthaya FC",
+        "status": "Not Started",
+        "league": "Thai League 1",
+        "country": "Thailand"
+      }
+    ],
+    "search_ALL_Serie A_2026-03-15": [
+      {
+        "fixture_id": 1457039,
+        "match": "Gavilanes FC Matamoros vs Deportivo Zap",
+        "status": "Match Finished",
+        "league": "Liga Premier Serie A",
+        "country": "Mexico"
+      },
+      {
+        "fixture_id": 1457186,
+        "match": "Jaguares de Chiapas vs Tapachula",
+        "status": "Match Finished",
+        "league": "Liga Premier Serie A",
+        "country": "Mexico"
+      },
+      {
+        "fixture_id": 1457040,
+        "match": "Lobos ULMX vs Cordob\u00e9s",
+        "status": "Match Finished",
+        "league": "Liga Premier Serie A",
+        "country": "Mexico"
+      },
+      {
+        "fixture_id": 1378153,
+        "match": "Hellas Verona vs Genoa",
+        "status": "Not Started",
+        "league": "Serie A",
+        "country": "Italy"
+      },
+      {
+        "fixture_id": 1479742,
+        "match": "Como W vs Ternana W",
+        "status": "Not Started",
+        "league": "Serie A Women",
+        "country": "Italy"
+      },
+      {
+        "fixture_id": 1479743,
+        "match": "Juventus W vs AC Milan W",
+        "status": "Not Started",
+        "league": "Serie A Women",
+        "country": "Italy"
+      },
+      {
+        "fixture_id": 1378149,
+        "match": "Pisa vs Cagliari",
+        "status": "Not Started",
+        "league": "Serie A",
+        "country": "Italy"
+      },
+      {
+        "fixture_id": 1378150,
+        "match": "Sassuolo vs Bologna",
+        "status": "Not Started",
+        "league": "Serie A",
+        "country": "Italy"
+      },
+      {
+        "fixture_id": 1378144,
+        "match": "Como vs AS Roma",
+        "status": "Not Started",
+        "league": "Serie A",
+        "country": "Italy"
+      },
+      {
+        "fixture_id": 1479741,
+        "match": "Roma W vs Fiorentina W",
+        "status": "Not Started",
+        "league": "Serie A Women",
+        "country": "Italy"
+      },
+      {
+        "fixture_id": 1457187,
+        "match": "Monta\u00f1eses vs Racing de Veracruz",
+        "status": "Not Started",
+        "league": "Liga Premier Serie A",
+        "country": "Mexico"
+      },
+      {
+        "fixture_id": 1492165,
+        "match": "Fluminense vs Atletico Paranaense",
+        "status": "Not Started",
+        "league": "Serie A",
+        "country": "Brazil"
+      },
+      {
+        "fixture_id": 1492166,
+        "match": "Internacional vs Bahia",
+        "status": "Not Started",
+        "league": "Serie A",
+        "country": "Brazil"
+      },
+      {
+        "fixture_id": 1492168,
+        "match": "Santos vs Corinthians",
+        "status": "Not Started",
+        "league": "Serie A",
+        "country": "Brazil"
+      },
+      {
+        "fixture_id": 1378147,
+        "match": "Lazio vs AC Milan",
+        "status": "Not Started",
+        "league": "Serie A",
+        "country": "Italy"
+      },
+      {
+        "fixture_id": 1457041,
+        "match": "Real Apodaca vs Atletico Hidalgo",
+        "status": "Not Started",
+        "league": "Liga Premier Serie A",
+        "country": "Mexico"
+      },
+      {
+        "fixture_id": 1492163,
+        "match": "Coritiba vs remo",
+        "status": "Not Started",
+        "league": "Serie A",
+        "country": "Brazil"
+      },
+      {
+        "fixture_id": 1492167,
+        "match": "Palmeiras vs Mirassol",
+        "status": "Not Started",
+        "league": "Serie A",
+        "country": "Brazil"
+      },
+      {
+        "fixture_id": 1445577,
+        "match": "Acatlan vs Durango",
+        "status": "Not Started",
+        "league": "Liga Premier Serie A",
+        "country": "Mexico"
+      },
+      {
+        "fixture_id": 1445578,
+        "match": "Guerreros vs Los Cabos United",
+        "status": "Not Started",
+        "league": "Liga Premier Serie A",
+        "country": "Mexico"
+      },
+      {
+        "fixture_id": 1492161,
+        "match": "RB Bragantino vs Sao Paulo",
+        "status": "Not Started",
+        "league": "Serie A",
+        "country": "Brazil"
+      },
+      {
+        "fixture_id": 1492164,
+        "match": "Cruzeiro vs Vasco DA Gama",
+        "status": "Not Started",
+        "league": "Serie A",
+        "country": "Brazil"
+      }
+    ]
+  },
+  "leagues": {}
+}

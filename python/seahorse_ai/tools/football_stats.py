@@ -61,8 +61,17 @@ def searchfixture(teamname: str, date: str, leaguename: str | None = None) -> st
         raw_json = fetch_football_data(url, api_key)
         data = json.loads(raw_json)
         
+        # Diagnostic: check for API-Sports errors
+        errors = data.get("errors", [])
+        if errors:
+            logger.error(f"API-Football errors for date {date}: {errors}")
+            if isinstance(errors, dict) and "token" in errors:
+                return "Error: API Key invalid or expired."
+            return f"API-Sports error: {errors}"
+
         # Optimization: Filter at dictionary level before heavy Pydantic model creation
-        raw_response = data.get("response", [])
+        raw_response = data.get("response") or []
+        results_count = data.get("results", 0)
         matches = []
         
         # Check if this is a general search for all matches
@@ -70,7 +79,7 @@ def searchfixture(teamname: str, date: str, leaguename: str | None = None) -> st
         search_term = teamname.lower().strip() if not is_all else ""
         target_league = leaguename.lower().strip() if leaguename else None
         
-        logger.info(f"Filtering {len(raw_response)} matches for '{teamname}' (League: {leaguename}) on {date}")
+        logger.info(f"Filtering {len(raw_response)} matches from {results_count} total for '{teamname}' (League: {leaguename}) on {date}")
 
         for res in raw_response:
             home_data = res.get("teams", {}).get("home", {})
@@ -115,6 +124,49 @@ def searchfixture(teamname: str, date: str, leaguename: str | None = None) -> st
     except Exception as e:
         logger.error(f"Error searching fixture: {e}")
         return f"Error searching fixture: {e}"
+
+
+@tool("Search for a league ID by name or country.")
+def searchleague(name: str, country: str | None = None) -> str:
+    """
+    Find a league_id by name (e.g., 'Thai League 1').
+    
+    Args:
+        name: Name of the league to search for.
+        country: Optional country name.
+    """
+    api_key = os.environ.get("FOOTBALL_API_KEY")
+    if not api_key:
+        return "Error: FOOTBALL_API_KEY not found."
+
+    url = f"https://v3.football.api-sports.io/leagues?search={name}"
+    try:
+        raw_json = fetch_football_data(url, api_key)
+        data = json.loads(raw_json)
+        
+        response = data.get("response", [])
+        leagues = []
+        for item in response:
+            l_info = item.get("league", {})
+            c_info = item.get("country", {})
+            
+            # Filter by country if provided
+            if country and country.lower() not in c_info.get("name", "").lower():
+                continue
+                
+            leagues.append({
+                "league_id": l_info.get("id"),
+                "name": l_info.get("name"),
+                "country": c_info.get("name"),
+                "type": l_info.get("type")
+            })
+            
+        if not leagues:
+            return f"No leagues found matching '{name}'."
+            
+        return json.dumps(leagues, indent=2)
+    except Exception as e:
+        return f"Error searching league: {e}"
 
 
 @tool("Get upcoming fixtures for a specific league and date.")
@@ -354,12 +406,24 @@ def _condense_intel(raw_json: str) -> str:
         comp = data.get("comparison", {})
         
         # Extract win probabilities
-        resp = f"Win%: H:{pred.get('winner', {}).get('comment', 'N/A')} "
-        resp += f"(Home:{pred.get('percent', {}).get('home')} Draw:{pred.get('percent', {}).get('draw')} Away:{pred.get('percent', {}).get('away')}) "
+        home_p = pred.get('percent', {}).get('home')
+        draw_p = pred.get('percent', {}).get('draw')
+        away_p = pred.get('percent', {}).get('away')
+        
+        if not home_p or not draw_p or not away_p:
+            resp = "Win%: (DATA UNAVAILABLE) "
+        else:
+            resp = f"Win%: H:{pred.get('winner', {}).get('comment', 'N/A')} "
+            resp += f"(Home:{home_p} Draw:{draw_p} Away:{away_p}) "
+        
+        # Expert advice and Sample Size (H2H)
+        advice = pred.get("advice", "No specific advice")
+        h2h_count = len(data.get("h2h", []))
+        resp += f"Sample: {h2h_count} Recent Matches. Advice: {advice}. "
         
         # Extract comparison/intensity
-        resp += f"Attack:{comp.get('att', {}).get('home')}/{comp.get('att', {}).get('away')} "
-        resp += f"Defense:{comp.get('def', {}).get('home')}/{comp.get('def', {}).get('away')} "
+        resp += f"Attack:{comp.get('att', {}).get('home') or 'N/A'}/{comp.get('att', {}).get('away') or 'N/A'} "
+        resp += f"Defense:{comp.get('def', {}).get('home') or 'N/A'}/{comp.get('def', {}).get('away') or 'N/A'} "
         return resp
     except Exception:
         return raw_json[:500]

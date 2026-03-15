@@ -25,6 +25,19 @@ from seahorse_ai.tools.competitor_radar import competitor_radar
 from seahorse_ai.tools.db import database_query, database_schema
 from seahorse_ai.tools.duckdb_analyst import duckdb_sql, sql_to_polars
 from seahorse_ai.tools.filesystem import list_files, read_file, write_file
+from seahorse_ai.tools.football_stats import (
+    calculatebetvalue,
+    comparemarketodds,
+    fetchlivematch,
+    fetchliveodds,
+    geth2hresults,
+    getmatchintel,
+    getupcomingfixtures,
+    kellycriterion,
+    predictmatchoutcome,
+    searchfixture,
+    searchleague,
+)
 from seahorse_ai.tools.forecaster import forecast_sales
 from seahorse_ai.tools.integrations import (
     google_calendar_add_event,
@@ -47,18 +60,6 @@ from seahorse_ai.tools.python_interpreter import python_interpreter
 from seahorse_ai.tools.strategy_engine import war_room
 from seahorse_ai.tools.table_viz import create_table_image
 from seahorse_ai.tools.viz import create_custom_chart
-from seahorse_ai.tools.football_stats import (
-    calculatebetvalue,
-    comparemarketodds,
-    fetchlivematch,
-    fetchliveodds,
-    geth2hresults,
-    getmatchintel,
-    getupcomingfixtures,
-    kellycriterion,
-    predictmatchoutcome,
-    searchfixture,
-)
 from seahorse_ai.tools.web_search import web_search
 
 __all__ = [
@@ -110,6 +111,7 @@ __all__ = [
     "fetchlivematch",
     "fetchliveodds",
     "searchfixture",
+    "searchleague",
 ]
 
 
@@ -159,6 +161,7 @@ def make_default_registry() -> SeahorseToolRegistry:
         fetchlivematch,
         fetchliveodds,
         searchfixture,
+        searchleague,
     ):
         registry.register(fn)
     return registry
