@@ -13,7 +13,7 @@ import asyncio
 import logging
 import math
 import re
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from seahorse_ai.graph_db import GraphManager
@@ -42,17 +42,63 @@ class HindsightRecaller:
             self._graph_search(query, agent_id, k),
         ]
         
-        # Execute in parallel
+        # 1. Execute Search Tasks in parallel
         results_lists = await asyncio.gather(*tasks)
         
-        # Flat list for fusion
-        merged = self._rrf_fuse(results_lists, k=k)
+        # 2. Fuse results using RRF and deduplicate by ID
+        merged = self._rrf_fuse(results_lists, k=k*2) # Get more candidates for textual deduplication
         
-        # Apply Temporal Boost if needed
+        # 3. Deduplicate by Text Content (Brutal Normalization)
+        unique_results = []
+        seen_texts = set()
+        for doc in merged:
+            # Aggressive normalization: remove non-alphanumeric, lowercase, collapse spaces
+            orig_text = doc.get("text", "")
+            text_norm = re.sub(r'[^a-z0-9]', '', orig_text.lower())
+            
+            if text_norm and text_norm not in seen_texts:
+                unique_results.append(doc)
+                seen_texts.add(text_norm)
+            elif text_norm:
+                logger.debug(f"Recaller: Dropped duplicate text: {orig_text[:50]}...")
+        
+        # Trim back to k
+        merged = unique_results[:k]
+        
+        # 4. Apply Temporal Boost (Priority 2)
         if temporal_boost:
             merged = self._apply_temporal_boost(merged)
             
         return merged
+
+    async def think(self, query: str, context: list[dict[str, Any]]) -> str:
+        """Priority 3: Synthesis Layer. Uses a 'thinker' model to answer the query based on retrieved context."""
+        from seahorse_ai.llm import get_llm
+        from seahorse_ai.schemas import Message
+        
+        if not context:
+            return "No relevant memories found to answer this query."
+            
+        context_str = "\n".join([f"- {c['text']}" for c in context])
+        
+        prompt = f"""You are Seahorse Hindsight, an AI with long-term evolving memory.
+Answer the following query based ONLY on the retrieved memories provided below.
+If the memories do not contain the answer, say "I don't have enough information in my memory yet."
+
+Query: {query}
+
+Retrieved Memories:
+{context_str}
+
+Answer:"""
+        
+        try:
+            client = get_llm(tier="thinker")
+            resp = await client.complete([Message(role="user", content=prompt)], tier="thinker")
+            return str(resp.get("content", resp)).strip()
+        except Exception as e:
+            logger.error(f"Reasoning synthesis failed: {e}")
+            return "Internal error during reasoning synthesis."
 
     async def _vector_search(self, query: str, agent_id: str | None, k: int) -> list[dict[str, Any]]:
         """Standard semantic search."""
@@ -69,24 +115,22 @@ class HindsightRecaller:
             return await self.pipeline.keyword_search(query, agent_id, k)
         return []
 
-    async def _graph_search(self, query: str, agent_id: str | None, k: int) -> list[dict[str, Any]]:
+    async def _graph_search(self, query: str, agent_id: str | None, k: int, hops: int = 3) -> list[dict[str, Any]]:
         """Knowledge graph traversal to find records linked to entities in the query (multi-hop)."""
         try:
             # 1. Precise Entity Extraction using LLM
-            # (In production, use a fast/cheap model)
             entities = await self._extract_entities_from_query(query)
             if not entities:
-                # Fallback to broad word extraction if LLM fails or is empty
                 entities = [w.strip("?,.!") for w in query.split() if len(w) > 3]
             
-            logger.info("Recaller: Graph reasoning for entities: %s", entities)
+            logger.info("Recaller: Graph reasoning for entities: %s (hops=%d)", entities, hops)
             
             graph_results = []
             seen_ids = set()
             
             for entity in entities:
-                # 2. Multi-hop traversal: Find records connected within 2 hops of the query entity
-                record_ids = await self.graph.get_records_by_path(entity, hops=2)
+                # 2. Multi-hop traversal: Increase to 6 hops for deep causality
+                record_ids = await self.graph.get_records_by_path(entity, hops=6)
                 
                 for rid in record_ids:
                     if rid not in seen_ids:
@@ -221,24 +265,31 @@ Entities:"""
         
         Score_final = Score_initial * e ^ (-(lambda / importance) * delta_time)
         """
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         # lambda for decay: 0.05 gives a half-life of ~14 days for importance 1
         decay_constant = 0.05 
 
         for doc in results:
             meta = doc.get("metadata", doc) if isinstance(doc.get("metadata"), dict) else doc
             
-            # 1. Parse Timestamp
-            ts_str = meta.get("temporal", {}).get("timestamp") if isinstance(meta.get("temporal"), dict) else meta.get("timestamp")
+            # 1. Parse Timestamp (Support both flat and nested 'temporal' field)
+            ts_data = meta.get("temporal", {}) if isinstance(meta.get("temporal"), dict) else {}
+            ts_str = ts_data.get("timestamp") or meta.get("timestamp")
+            
             try:
                 if ts_str:
-                    # Handle ISO format and potential Z suffix
-                    ts = datetime.fromisoformat(str(ts_str).replace("Z", "+00:00"))
+                    # Handle various formats: ISO, Z, raw string
+                    if isinstance(ts_str, datetime):
+                        ts = ts_str
+                    else:
+                        ts = datetime.fromisoformat(str(ts_str).replace("Z", "+00:00"))
+                    
                     if ts.tzinfo is None:
-                        ts = ts.replace(tzinfo=timezone.utc)
+                        ts = ts.replace(tzinfo=UTC)
                 else:
                     ts = now
-            except (ValueError, TypeError):
+            except (ValueError, TypeError) as e:
+                logger.warning(f"Decay: Failed to parse timestamp '{ts_str}': {e}")
                 ts = now
 
             # 2. Calculate Delta Time (in days)
@@ -258,9 +309,13 @@ Entities:"""
             
             # 5. Apply to score
             doc["temporal_decay"] = decay_factor
-            # We use rrf_score as the base if available
-            base_score = doc.get("rrf_score", 0)
+            
+            # We use rrf_score as the base if available, otherwise vector_score
+            base_score = doc.get("rrf_score", doc.get("vector_score", 0.1))
             doc["fused_score"] = base_score * decay_factor
+            
+            # Update the main score field for external tools
+            doc["score"] = doc["fused_score"]
 
         # Re-sort by new fused score
         return sorted(results, key=lambda x: x.get("fused_score", 0), reverse=True)

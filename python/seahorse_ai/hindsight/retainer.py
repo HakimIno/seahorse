@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 import logging
 import random
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, UTC
 from typing import Any
 
 from seahorse_ai.llm import get_llm
@@ -67,7 +67,7 @@ class HindsightRetainer:
         raw = re.sub(r":\s*'([^']*)'([,}])", r': "\1"\2', raw)
         return raw
 
-    async def retain(self, text: str, agent_id: str | None = None) -> list[HindsightRecord]:
+    async def retain(self, text: str, agent_id: str | None = None, importance: int | None = None) -> list[HindsightRecord]:
         """Process text and store extracted records with cost optimization."""
         
         # 1. Fast Path Optimization: For very short/trivial text, avoid LLM call
@@ -76,13 +76,15 @@ class HindsightRetainer:
             record = HindsightRecord(
                 text=text.strip(),
                 category=MemoryCategory.EXPERIENCE,
+                importance=importance or 1,
                 agent_id=agent_id,
                 metadata={"extraction_mode": "fast_path"}
             )
             await self.pipeline.store(
                 record.text,
                 metadata=record.to_qdrant_payload(),
-                agent_id=agent_id
+                agent_id=agent_id,
+                importance=record.importance
             )
             return [record]
 
@@ -143,7 +145,7 @@ class HindsightRetainer:
                 record = HindsightRecord(
                     text=item["text"],
                     category=MemoryCategory(item.get("category", "EXPERIENCE")),
-                    importance=item.get("importance", 3),
+                    importance=importance or item.get("importance", 3),
                     agent_id=agent_id,
                     metadata={"extraction_mode": "deep_path"}
                 )
@@ -213,7 +215,7 @@ class HindsightRetainer:
         from qdrant_client.models import Filter, FieldCondition, Range, DatetimeRange
 
         # Importance <= 2 and older than days_old
-        cutoff = datetime.now(timezone.utc) - timedelta(days=days_old)
+        cutoff = datetime.now(UTC) - timedelta(days=days_old)
         
         prune_filter = Filter(
             must=[
