@@ -11,9 +11,11 @@ Fuses results using Reciprocal Rank Fusion (RRF).
 
 import asyncio
 import logging
+import math
+import re
+from datetime import datetime, timezone
 from typing import Any
 
-import re
 from seahorse_ai.graph_db import GraphManager
 
 logger = logging.getLogger(__name__)
@@ -215,10 +217,50 @@ Entities:"""
         return final_results
 
     def _apply_temporal_boost(self, results: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        """Boost recent results."""
-        # Simple sorting by timestamp if present in metadata
-        return sorted(
-            results, 
-            key=lambda x: str(x.get("metadata", {}).get("timestamp", "")), 
-            reverse=True
-        )
+        """Boost recent results using exponential decay.
+        
+        Score_final = Score_initial * e ^ (-(lambda / importance) * delta_time)
+        """
+        now = datetime.now(timezone.utc)
+        # lambda for decay: 0.05 gives a half-life of ~14 days for importance 1
+        decay_constant = 0.05 
+
+        for doc in results:
+            meta = doc.get("metadata", doc) if isinstance(doc.get("metadata"), dict) else doc
+            
+            # 1. Parse Timestamp
+            ts_str = meta.get("temporal", {}).get("timestamp") if isinstance(meta.get("temporal"), dict) else meta.get("timestamp")
+            try:
+                if ts_str:
+                    # Handle ISO format and potential Z suffix
+                    ts = datetime.fromisoformat(str(ts_str).replace("Z", "+00:00"))
+                    if ts.tzinfo is None:
+                        ts = ts.replace(tzinfo=timezone.utc)
+                else:
+                    ts = now
+            except (ValueError, TypeError):
+                ts = now
+
+            # 2. Calculate Delta Time (in days)
+            delta_days = max(0, (now - ts).total_seconds() / 86400.0)
+
+            # 3. Get Importance (Factor 1-5)
+            # Higher importance slows down the decay rate
+            importance = doc.get("importance") or meta.get("importance") or 3
+            try:
+                importance = max(1, min(5, int(importance)))
+            except (ValueError, TypeError):
+                importance = 3
+
+            # 4. Calculate Final Decay Multiplier
+            # Factor 5 means it stays "fresh" 5 times longer than Factor 1
+            decay_factor = math.exp(-(decay_constant / importance) * delta_days)
+            
+            # 5. Apply to score
+            doc["temporal_decay"] = decay_factor
+            # We use rrf_score as the base if available
+            base_score = doc.get("rrf_score", 0)
+            doc["fused_score"] = base_score * decay_factor
+
+        # Re-sort by new fused score
+        return sorted(results, key=lambda x: x.get("fused_score", 0), reverse=True)

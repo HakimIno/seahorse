@@ -16,6 +16,7 @@ class MemoryCategory(Enum):
     WORLD = "WORLD"
     EXPERIENCE = "EXPERIENCE"
     MENTAL_MODEL = "MENTAL_MODEL"
+    WISDOM = "WISDOM"
     
     def __str__(self):
         return self.value

@@ -369,8 +369,6 @@ class QdrantRAGPipeline:
 
     async def delete_by_id(self, point_id: Any) -> bool:
         """Delete a specific point from Qdrant by its ID."""
-        # We need to find which collection it's in, or just try the base one
-        # For a full implementation, we'd need a mapping or search across collections
         collection = self._collection_name(None)
         try:
             await self._client.delete(
@@ -380,6 +378,20 @@ class QdrantRAGPipeline:
             return True
         except Exception:
             return False
+
+    async def delete_by_filter(self, filter_obj: Filter, agent_id: str | None = None) -> int:
+        """Delete points matching a specific filter. Returns number of deleted points (if available)."""
+        collection = self._collection_name(agent_id)
+        try:
+            result = await self._client.delete(
+                collection_name=collection,
+                points_selector=FilterSelector(filter=filter_obj),
+            )
+            logger.info("qdrant.delete_by_filter: executed on collection=%s", collection)
+            return 1 # Qdrant delete returns UpdateResult, actual count not easily available in async without scroll
+        except Exception as e:
+            logger.error("qdrant.delete_by_filter failed: %s", e)
+            return 0
 
     async def size_async(self, agent_id: str | None = None) -> int:
         """Return the number of stored vectors in the agent's collection."""

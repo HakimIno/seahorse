@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import json
 import logging
+import random
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from seahorse_ai.llm import get_llm
@@ -193,6 +195,11 @@ class HindsightRetainer:
                 except Exception as ge:
                     logger.warning("Hindsight: Graph persistence failed: %s", ge)
                 
+            # 4. Maintenance: Occasional Memory Pruning (Garbage Collection)
+            # 5% chance to trigger a prune on the current agent's collection
+            if random.random() < 0.05:
+                await self.prune_memories(agent_id=agent_id)
+
             return records
 
         except Exception as e:
@@ -200,3 +207,25 @@ class HindsightRetainer:
             # Final Fallback: store raw text
             await self.pipeline.store(text, agent_id=agent_id, metadata={"error": str(e)})
             return []
+
+    async def prune_memories(self, agent_id: str | None = None, days_old: int = 30) -> int:
+        """Remove low-importance old memories from the active vector search index."""
+        from qdrant_client.models import Filter, FieldCondition, Range, DatetimeRange
+
+        # Importance <= 2 and older than days_old
+        cutoff = datetime.now(timezone.utc) - timedelta(days=days_old)
+        
+        prune_filter = Filter(
+            must=[
+                FieldCondition(key="importance", range=Range(lte=2.0)),
+                FieldCondition(key="temporal.timestamp", range=DatetimeRange(lt=cutoff))
+            ]
+        )
+        
+        try:
+            if hasattr(self.pipeline, "delete_by_filter"):
+                logger.info("Hindsight: Running memory pruning for agent=%s", agent_id)
+                return await self.pipeline.delete_by_filter(prune_filter, agent_id=agent_id)
+        except Exception as e:
+            logger.error("Hindsight: Pruning failed: %s", e)
+        return 0
