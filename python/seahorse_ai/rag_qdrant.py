@@ -30,7 +30,11 @@ from qdrant_client.models import (
     MatchValue,
     PointStruct,
     VectorParams,
+    TextIndexParams,
+    TokenizerType,
+    MatchText,
 )
+import contextlib
 
 logger = logging.getLogger(__name__)
 
@@ -146,17 +150,35 @@ class QdrantRAGPipeline:
         )
         return numeric_id
 
+    async def keyword_search(self, query: str, agent_id: str | None, k: int) -> list[dict[str, Any]]:
+        """Perform only full-text keyword search."""
+        collection = self._collection_name(agent_id)
+        from qdrant_client.models import Filter, FieldCondition, MatchText
+        
+        results = await self._client.scroll(
+            collection_name=collection,
+            scroll_filter=Filter(
+                must=[FieldCondition(key="text", match=MatchText(text=query))]
+            ),
+            limit=k,
+            with_payload=True
+        )
+        
+        points, _ = results
+        return [
+            {"id": p.id, "text": p.payload["text"], "metadata": p.payload, "distance": 0.5} 
+            for p in points
+        ]
+
     async def search(
         self,
         query: str,
         k: int = 5,
         filter_metadata: dict | None = None,
-        rerank: bool = False,  # Qdrant scores are already good — skip LLM rerank
+        rerank: bool = False,
     ) -> list[dict]:
-        """Search for the k most similar stored texts."""
+        """Search for the k most similar stored texts using Hybrid Search (Vector + Full-text)."""
         k = int(k)
-
-        # Determine collection from agent_id in filter
         agent_id = (filter_metadata or {}).get("agent_id")
         collection = self._collection_name(agent_id)
 
@@ -167,7 +189,7 @@ class QdrantRAGPipeline:
 
         embedding = await self._embed(query)
 
-        # Build Qdrant filter from metadata (excluding agent_id which is in collection)
+        # Build Qdrant filter from metadata
         qdrant_filter = None
         extra_filters = {k: v for k, v in (filter_metadata or {}).items() if k != "agent_id"}
         if extra_filters:
@@ -177,27 +199,76 @@ class QdrantRAGPipeline:
             ]
             qdrant_filter = Filter(must=conditions)
 
-        response = await self._client.query_points(
+        # 1. Vector Search
+        vector_resp = await self._client.query_points(
             collection_name=collection,
             query=embedding.tolist(),
             query_filter=qdrant_filter,
-            limit=k,
+            limit=k * 2,
             with_payload=True,
         )
 
+        # Ensure text index exists (idempotent-ish in this context)
+        with contextlib.suppress(Exception):
+            await self._client.create_payload_index(
+                collection_name=collection,
+                field_name="text",
+                field_schema=TextIndexParams(
+                    type="text",
+                    tokenizer=TokenizerType.MULTILINGUAL,
+                    lowercase=True,
+                ),
+            )
+
+        keyword_filter = Filter(
+            must=[FieldCondition(key="text", match=MatchText(text=query))]
+        )
+        if qdrant_filter:
+            keyword_filter.must.extend(qdrant_filter.must)
+
+        keyword_resp = await self._client.scroll(
+            collection_name=collection,
+            scroll_filter=keyword_filter,
+            limit=k * 2,
+            with_payload=True,
+        )
+
+        # 3. Reciprocal Rank Fusion (RRF)
+        # RRF Score = sum(1 / (rank + constant))
+        constant = 60
+        scores: dict[Any, float] = {}
+        point_map: dict[Any, Any] = {}
+
+        # Vector rankings
+        for i, hit in enumerate(vector_resp.points):
+            scores[hit.id] = scores.get(hit.id, 0.0) + 1.0 / (i + 1 + constant)
+            point_map[hit.id] = hit
+
+        # Keyword rankings
+        for i, hit in enumerate(keyword_resp[0]):
+            scores[hit.id] = scores.get(hit.id, 0.0) + 1.0 / (i + 1 + constant)
+            point_map[hit.id] = hit
+
+        # Merge and sort
+        sorted_ids = sorted(scores.keys(), key=lambda x: scores[x], reverse=True)
+        
         formatted: list[dict] = []
-        for hit in response.points:
+        for pid in sorted_ids[:k]:
+            hit = point_map[pid]
             payload = dict(hit.payload or {})
             text = payload.pop("text", "")
-            # Qdrant cosine score is in [-1, 1] where 1 = identical
-            # Convert to distance: distance = 1 - score (lower = more similar)
-            distance = 1.0 - float(hit.score)
+            # For Hindsight feel, we return semantic distance if it was a vector hit, 
+            # or a synthetic distance otherwise.
+            score = getattr(hit, 'score', 0.5)
+            distance = 1.0 - float(score) if score is not None else 0.5
+            
             formatted.append(
                 {
                     "text": text,
                     "distance": distance,
                     "metadata": payload,
                     "id": hit.id,
+                    "rrf_score": scores[pid],
                 }
             )
 
@@ -256,6 +327,20 @@ class QdrantRAGPipeline:
     def size(self) -> int:
         """Returns -1 (async call needed) — use size_async instead."""
         return -1
+
+    async def delete_by_id(self, point_id: Any) -> bool:
+        """Delete a specific point from Qdrant by its ID."""
+        # We need to find which collection it's in, or just try the base one
+        # For a full implementation, we'd need a mapping or search across collections
+        collection = self._collection_name(None)
+        try:
+            await self._client.delete(
+                collection_name=collection,
+                points_selector=[point_id],
+            )
+            return True
+        except Exception:
+            return False
 
     async def size_async(self, agent_id: str | None = None) -> int:
         """Return the number of stored vectors in the agent's collection."""

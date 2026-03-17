@@ -180,10 +180,10 @@ def get_llm(tier: str = "worker") -> LLMClient:
     from seahorse_ai.schemas import LLMConfig
 
     # Use environment variables if available, otherwise defaults
-    model = os.environ.get("SEAHORSE_WORKER_MODEL", "openrouter/z-ai/glm-5")
+    model = os.environ.get("SEAHORSE_MODEL_WORKER", "openrouter/google/gemini-2.0-flash-lite:free")
     if tier == "thinker":
         model = os.environ.get(
-            "SEAHORSE_THINKER_MODEL", "openrouter/google/gemini-3.1-flash-lite-preview"
+            "SEAHORSE_MODEL_THINKER", "openrouter/google/gemini-2.0-flash:free"
         )
 
     return LLMClient(config=LLMConfig(model=model))

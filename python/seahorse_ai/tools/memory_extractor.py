@@ -30,12 +30,17 @@ class MemoryFact:
     )  # Subject-Predicate-Object
     importance: int = 3  # 1 (low) to 5 (critical)
     language: str = "th"  # "th" or "en" — for future filtering
+    temporal: str | None = None  # ISO8601 or description
 
 
 _EXTRACT_PROMPT = """\
-You are a precise memory extraction assistant.
+You are a precise memory extraction assistant, specializing in Hindsight-style learning.
 
-Extract ALL distinct, atomic facts from the input text.
+Extract ALL distinct, atomic facts from the input text. Focus on:
+1. Temporal accuracy (when things happened).
+2. Entity relationships (who is connected to what).
+3. Canonical facts (avoid duplicates or fluff).
+
 Return ONLY a valid JSON array with NO markdown, NO explanation.
 
 Each fact object:
@@ -46,22 +51,19 @@ Each fact object:
   "knowledge_triples": [
      {{"subject": "Entity A", "predicate": "relationship", "object": "Entity B"}}
   ],
-  "importance": 1-5
+  "importance": 1-5,
+  "temporal": "ISO8601 timestamp OR relative description if mentioned"
 }}
 
 Importance guide:
 - 5: Critical (prices, deadlines, personal names)
 - 4: Important (preferences, recurring tasks)
 - 3: Useful (general info)
-- 2: Low priority (casual mentions)
-- 1: Noise
 
 Rules:
-- 1 fact = 1 independent piece of information. Never combine.
-- Keep the original language (Thai or English as written)
-- "Packet B ราคา 5,000 บาท, Packet C ราคา 7,500 บาท" → 2 separate facts
-- "นัดประชุม 31 มีนาคม" → fact_type=EVENT, knowledge_triples=[{{"subject": "ผู้ใช้", "predicate": "มีนัดหมาย", "object": "การประชุม"}}]
-- Extract relationships between entities into the knowledge_triples array. 
+- 1 fact = 1 independent piece of information.
+- Always extract "Time" if mentioned (e.g. "yesterday", "at 5pm").
+- Map relationships into triples for the Knowledge Graph.
 
 Input text: "{text}"
 """
@@ -74,10 +76,7 @@ class MemoryExtractor:
         self._llm = llm_backend
 
     async def extract(self, text: str) -> list[MemoryFact]:
-        """Extract atomic facts from text. Returns list of MemoryFact objects.
-
-        Falls back to a single MemoryFact with the original text if LLM fails.
-        """
+        """Extract atomic facts from text. Returns list of MemoryFact objects."""
         prompt = _EXTRACT_PROMPT.format(text=text)
 
         try:
@@ -90,11 +89,10 @@ class MemoryExtractor:
             raw = str(result.get("content", result) if isinstance(result, dict) else result).strip()
 
             # Strip markdown code fences
-            if raw.startswith("```"):
-                raw = raw.split("\n", 1)[1] if "\n" in raw else raw[3:]
-            if raw.endswith("```"):
-                raw = raw[:-3]
-            raw = raw.strip()
+            if "```json" in raw:
+                raw = raw.split("```json")[1].split("```")[0].strip()
+            elif "```" in raw:
+                raw = raw.split("```")[1].split("```")[0].strip()
 
             data = json.loads(raw)
             if not isinstance(data, list):
@@ -120,6 +118,7 @@ class MemoryExtractor:
                             if isinstance(t, dict) and "subject" in t and "object" in t
                         ],
                         importance=int(item.get("importance", 3)),
+                        temporal=item.get("temporal"),
                     )
                 )
 
@@ -137,4 +136,4 @@ class MemoryExtractor:
             logger.error("memory_extractor: LLM call failed: %s — using raw text", exc)
 
         # Fallback: treat entire input as single fact
-        return [MemoryFact(text=text, fact_type="FACT", importance=3)]
+        return [MemoryFact(text=text, fact_type="FACT", importance=3, temporal=None)]
