@@ -33,7 +33,12 @@ class LLMConfig(Struct, omit_defaults=True):
     )
     fast_path_model: str = field(
         default_factory=lambda: os.environ.get(
-            "SEAHORSE_FAST_PATH_MODEL", "openrouter/google/gemini-3.1-flash-lite-preview"
+            "SEAHORSE_MODEL_FAST", "openrouter/google/gemini-3.1-flash-lite-preview"
+        )
+    )
+    extract_model: str = field(
+        default_factory=lambda: os.environ.get(
+            "SEAHORSE_MODEL_EXTRACT", "openrouter/google/gemini-3.1-flash-lite-preview"
         )
     )
     temperature: float = 0.7

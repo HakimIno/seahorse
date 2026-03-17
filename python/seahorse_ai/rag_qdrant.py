@@ -60,7 +60,7 @@ class QdrantRAGPipeline:
         self._collection_base = collection
         self._embed_model = embed_model
         self._dim = dim
-        self._client = AsyncQdrantClient(url=url)
+        self._client = AsyncQdrantClient(url=url, timeout=60.0)
         self._initialized_collections: set[str] = set()
 
         logger.info(
@@ -87,29 +87,49 @@ class QdrantRAGPipeline:
             await self._client.get_collection(collection)
             self._initialized_collections.add(collection)
             return
-        except Exception:
-            pass  # Collection doesn't exist, create it
+        except Exception as e:
+            if "already exists" in str(e).lower() or "409" in str(e):
+                 self._initialized_collections.add(collection)
+                 return
+            pass  # Try creating it if get_collection failed for other reasons
 
-        await self._client.create_collection(
-            collection_name=collection,
-            vectors_config=VectorParams(
-                size=self._dim,
-                distance=Distance.COSINE,
-            ),
-        )
-        self._initialized_collections.add(collection)
-        logger.info("QdrantRAGPipeline: created collection=%s", collection)
+        try:
+            await self._client.create_collection(
+                collection_name=collection,
+                vectors_config=VectorParams(
+                    size=self._dim,
+                    distance=Distance.COSINE,
+                ),
+            )
+            self._initialized_collections.add(collection)
+            logger.info("QdrantRAGPipeline: created collection=%s", collection)
+        except Exception as e:
+            if "already exists" in str(e).lower() or "409" in str(e):
+                 self._initialized_collections.add(collection)
+                 return
+            logger.error("Failed to ensure collection %s: %s", collection, e)
+            raise
 
     async def _embed(self, text: str) -> np.ndarray:
-        """Embed text using the configured model via LiteLLM."""
-        import litellm
+        """Embed text using the configured model via LiteLLM with local caching."""
+        # 1. Check local cache first
+        if not hasattr(self, "_embed_cache"):
+            self._embed_cache: dict[str, np.ndarray] = {}
+        
+        if text in self._embed_cache:
+            return self._embed_cache[text]
 
+        import litellm
         resp = await litellm.aembedding(
             model=self._embed_model,
             input=[text],
         )
         vec = resp.data[0]["embedding"]
-        return np.array(vec, dtype=np.float32)
+        embedding = np.array(vec, dtype=np.float32)
+        
+        # 2. Save to cache
+        self._embed_cache[text] = embedding
+        return embedding
 
     # ── Public API (same as RAGPipeline) ──────────────────────────────────────
 
@@ -118,9 +138,11 @@ class QdrantRAGPipeline:
         text: str,
         doc_id: int | None = None,
         metadata: dict | None = None,
+        importance: int = 3,
+        agent_id: str | None = None,
     ) -> int:
         """Embed text and store in Qdrant. Returns a numeric doc_id."""
-        agent_id = (metadata or {}).get("agent_id")
+        agent_id = agent_id or (metadata or {}).get("agent_id")
         collection = self._collection_name(agent_id)
         await self._ensure_collection(collection)
 
@@ -130,7 +152,14 @@ class QdrantRAGPipeline:
         point_uuid = str(uuid.uuid4())
         numeric_id = abs(hash(point_uuid)) % (2**63)
 
-        payload: dict[str, Any] = {"text": text, **(metadata or {})}
+        payload: dict[str, Any] = {
+            "text": text, 
+            "id": point_uuid, # Keep the original UUID in payload for consistent retrieval
+            "importance": importance,
+            **(metadata or {})
+        }
+        if agent_id:
+            payload["agent_id"] = agent_id
 
         await self._client.upsert(
             collection_name=collection,
@@ -257,17 +286,27 @@ class QdrantRAGPipeline:
             hit = point_map[pid]
             payload = dict(hit.payload or {})
             text = payload.pop("text", "")
-            # For Hindsight feel, we return semantic distance if it was a vector hit, 
-            # or a synthetic distance otherwise.
-            score = getattr(hit, 'score', 0.5)
-            distance = 1.0 - float(score) if score is not None else 0.5
+            
+            # Use UUID from payload if available, else numeric point ID
+            record_uuid = payload.get("id")
+            effective_id = str(record_uuid) if record_uuid else str(hit.id)
+            
+            similarity = getattr(hit, 'score', 0.5)
+            try:
+                similarity = float(similarity)
+            except (TypeError, ValueError):
+                similarity = 0.5
+            
+            # Standardize: Qdrant Cosine is similarity (1.0 = match). 
+            # We return distance (0.0 = match) for Hindsight.
+            distance = max(0.0, min(1.0, 1.0 - similarity))
             
             formatted.append(
                 {
+                    "id": effective_id,
                     "text": text,
                     "distance": distance,
                     "metadata": payload,
-                    "id": hit.id,
                     "rrf_score": scores[pid],
                 }
             )
@@ -350,3 +389,13 @@ class QdrantRAGPipeline:
             return info.points_count or 0
         except Exception:
             return 0
+
+    async def clear(self, agent_id: str | None = None) -> None:
+        """Wipe the collection."""
+        collection = self._collection_name(agent_id)
+        try:
+            await self._client.delete_collection(collection)
+            self._initialized_collections.discard(collection)
+            logger.info("Qdrant: collection %s cleared", collection)
+        except Exception as e:
+            logger.warning("Qdrant: clear failed: %s", e)

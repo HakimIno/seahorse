@@ -21,6 +21,19 @@ from seahorse_ai.schemas import LLMConfig, Message
 
 logger = logging.getLogger(__name__)
 
+# Register common models to suppress LiteLLM mapping warnings and provide metadata
+litellm.register_model({
+    "openrouter/baai/bge-m3": {
+        "max_tokens": 8192,
+        "input_cost_per_token": 0.00000001,
+        "output_cost_per_token": 0.00000001,
+        "lite_llm_model_name": "baai/bge-m3",
+        "model_info": {
+            "db_model": False
+        }
+    }
+})
+
 # Transient errors that are safe to retry
 _RETRYABLE = (
     litellm.ServiceUnavailableError,
@@ -180,10 +193,14 @@ def get_llm(tier: str = "worker") -> LLMClient:
     from seahorse_ai.schemas import LLMConfig
 
     # Use environment variables if available, otherwise defaults
-    model = os.environ.get("SEAHORSE_MODEL_WORKER", "openrouter/google/gemini-2.0-flash-lite:free")
+    config = LLMConfig()
+    model = config.model
+    
     if tier == "thinker":
-        model = os.environ.get(
-            "SEAHORSE_MODEL_THINKER", "openrouter/google/gemini-2.0-flash:free"
-        )
+        model = config.thinker_model
+    elif tier == "fast":
+        model = config.fast_path_model
+    elif tier == "extract":
+        model = config.extract_model
 
     return LLMClient(config=LLMConfig(model=model))

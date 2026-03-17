@@ -12,6 +12,7 @@ from typing import Any
 
 from seahorse_ai.llm import get_llm
 from seahorse_ai.schemas import Message
+from seahorse_ai.graph_db import GraphManager
 from .models import HindsightRecord, MemoryCategory, Entity, Relation, TemporalContext
 
 logger = logging.getLogger(__name__)
@@ -51,12 +52,24 @@ class HindsightRetainer:
         """Initialize with a storage pipeline."""
         self.pipeline = pipeline
         self.llm = get_llm("worker")
+        self.graph = GraphManager()
+
+    def _repair_json(self, raw: str) -> str:
+        """Attempt to fix common LLM JSON errors like single quotes."""
+        # Replace single quotes with double quotes (rough heuristic)
+        # This is dangerous for text containing apostrophes, so we only do it if normal parse fails
+        import re
+        # Fix single quotes around keys
+        raw = re.sub(r"([{,])\s*'([^']+)':", r'\1"\2":', raw)
+        # Fix single quotes around values
+        raw = re.sub(r":\s*'([^']*)'([,}])", r': "\1"\2', raw)
+        return raw
 
     async def retain(self, text: str, agent_id: str | None = None) -> list[HindsightRecord]:
         """Process text and store extracted records with cost optimization."""
         
-        # 1. Fast Path Optimization: For short/trivial text, avoid LLM call
-        if len(text.strip()) < 40:
+        # 1. Fast Path Optimization: For very short/trivial text, avoid LLM call
+        if len(text.strip()) < 25:
             logger.info("Hindsight: Fast Path Retain (text too short for deep extraction)")
             record = HindsightRecord(
                 text=text.strip(),
@@ -71,7 +84,7 @@ class HindsightRetainer:
             )
             return [record]
 
-        # 2. Deep Path: XML-Based Extraction
+        # 2. Deep Path: Extraction
         prompt = _RETAIN_PROMPT.format(text=text)
         
         try:
@@ -79,22 +92,52 @@ class HindsightRetainer:
             result = await self.llm.complete([Message(role="user", content=prompt)], tier="worker")
             raw = str(result.get("content", result) if isinstance(result, dict) else result).strip()
             
+            logger.debug("Hindsight: Raw LLM Output: %s", raw)
+            
             # Fail-Safe Parsing: Extract JSON block
+            json_str = raw
             if "```json" in raw:
-                raw = raw.split("```json")[1].split("```")[0].strip()
+                json_str = raw.split("```json")[1].split("```")[0].strip()
             elif "```" in raw:
-                raw = raw.split("```")[1].split("```")[0].strip()
-            elif "[" in raw and "]" in raw:
-                # Fallback: find first [ and last ]
-                start = raw.find("[")
-                end = raw.rfind("]") + 1
-                raw = raw[start:end]
-                
-            data = json.loads(raw)
+                json_str = raw.split("```")[1].split("```")[0].strip()
+            
+            # Find the first [ or {
+            start_list = json_str.find("[")
+            start_dict = json_str.find("{")
+            
+            if start_list != -1 and (start_dict == -1 or start_list < start_dict):
+                # It's a list
+                end = json_str.rfind("]") + 1
+                json_str = json_str[start_list:end]
+            elif start_dict != -1:
+                # It's a single dict (wrap it in a list later)
+                end = json_str.rfind("}") + 1
+                json_str = json_str[start_dict:end]
+
+            try:
+                data = json.loads(json_str)
+            except json.JSONDecodeError:
+                # Try one repair attempt
+                logger.warning("Hindsight: Initial JSON parse failed, attempting repair...")
+                json_str = self._repair_json(json_str)
+                data = json.loads(json_str)
+
+            # Normalize to list
+            if isinstance(data, dict):
+                # Some models wrap the list in a key like "records" or "facts"
+                for key in ["records", "facts", "data", "hindsight"]:
+                    if key in data and isinstance(data[key], list):
+                        data = data[key]
+                        break
+                if isinstance(data, dict):
+                    data = [data] # Single record case
+
             records: list[HindsightRecord] = []
             
             for item in data:
-                # Struct validation via msgspec in models
+                if not isinstance(item, dict) or "text" not in item:
+                    continue
+                    
                 record = HindsightRecord(
                     text=item["text"],
                     category=MemoryCategory(item.get("category", "EXPERIENCE")),
@@ -105,20 +148,22 @@ class HindsightRetainer:
                 
                 # Hydrate entities
                 for e in item.get("entities", []):
-                    record.entities.append(Entity(name=e["name"], type=e.get("type", "GENERIC")))
+                    if isinstance(e, dict) and "name" in e:
+                        record.entities.append(Entity(name=e["name"], type=e.get("type", "GENERIC")))
                 
                 # Hydrate relations
                 for r in item.get("relations", []):
-                    record.relations.append(Relation(subject=r["subject"], predicate=r["predicate"], object=r["object"]))
+                    if isinstance(r, dict) and "subject" in r and "object" in r:
+                        record.relations.append(Relation(subject=r["subject"], predicate=r.get("predicate", "related_to"), object=r["object"]))
                 
                 # Hydrate temporal
                 t_hint = item.get("temporal", {})
-                record.temporal.relative_description = t_hint.get("relative_description")
+                if isinstance(t_hint, dict):
+                    record.temporal.relative_description = t_hint.get("relative_description")
                 
                 records.append(record)
                 
                 # 3. Persistence with Semantic Deduplication
-                # Check if a very similar fact already exists to avoid redundancy
                 existing = await self.pipeline.search(
                     record.text,
                     k=1,
@@ -129,12 +174,24 @@ class HindsightRetainer:
                     logger.info("Hindsight: Skipping redundant record (dist=%.4f)", existing[0]["distance"])
                     continue
 
+                # 3a. Vector Store
                 await self.pipeline.store(
                     record.text,
                     metadata=record.to_qdrant_payload(),
                     agent_id=agent_id,
                     importance=record.importance
                 )
+
+                # 3b. Graph Store (Neo4j)
+                try:
+                    for entity in record.entities:
+                        await self.graph.upsert_entity(entity.name, entity.type)
+                        await self.graph.link_record_to_entity(record.id, entity.name)
+                    
+                    for rel in record.relations:
+                        await self.graph.add_relationship(rel.subject, rel.object, rel.predicate)
+                except Exception as ge:
+                    logger.warning("Hindsight: Graph persistence failed: %s", ge)
                 
             return records
 
