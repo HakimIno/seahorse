@@ -137,11 +137,22 @@ class GraphManager:
         Returns list of dicts with 'id' and 'distance'.
         """
         query = (
-            f"MATCH p=(e {{name: $name}})-[*1..{hops}]-(neighbor:Entity)<-[:MENTIONS]-(r:HindsightRecord) "
+            f"MATCH p=(e {{name: $name}})-[*1..{hops}]-(neighbor:Entity) <-[:MENTIONS]-(r:HindsightRecord) "
             "RETURN DISTINCT r.id as id, length(p) as distance"
         )
         async with self.driver.session() as session:
             result = await session.run(query, name=entity_name)
+            return [record.data() async for record in result]
+
+    async def get_all_relationships(self) -> list[dict]:
+        """Export all entities and their relationships for visualization."""
+        query = (
+            "MATCH (s:Entity)-[r]->(o:Entity) "
+            "RETURN s.name as source, labels(s)[0] as source_type, "
+            "type(r) as relationship, o.name as target, labels(o)[0] as target_type"
+        )
+        async with self.driver.session() as session:
+            result = await session.run(query)
             return [record.data() async for record in result]
 
     async def clear(self) -> None:
