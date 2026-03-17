@@ -6,6 +6,7 @@ and persisting them to multi-modal storage.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import random
@@ -15,7 +16,7 @@ from typing import Any
 from seahorse_ai.llm import get_llm
 from seahorse_ai.schemas import Message
 from seahorse_ai.graph_db import GraphManager
-from .models import HindsightRecord, MemoryCategory, Entity, Relation, TemporalContext
+from .models import HindsightRecord, MemoryCategory, Entity, Relation
 
 logger = logging.getLogger(__name__)
 
@@ -50,11 +51,12 @@ You are a Hindsight Memory Extractor. Extract structured facts from the <input_t
 """
 
 class HindsightRetainer:
-    def __init__(self, pipeline: Any) -> None:
-        """Initialize with a storage pipeline."""
+    def __init__(self, pipeline: Any, concurrency: int = 5) -> None:
+        """Initialize with a storage pipeline and concurrency control."""
         self.pipeline = pipeline
         self.llm = get_llm("worker")
         self.graph = GraphManager()
+        self.semaphore = asyncio.Semaphore(concurrency)
 
     def _repair_json(self, raw: str) -> str:
         """Attempt to fix common LLM JSON errors like single quotes."""
@@ -68,7 +70,21 @@ class HindsightRetainer:
         return raw
 
     async def retain(self, text: str, agent_id: str | None = None, importance: int | None = None) -> list[HindsightRecord]:
-        """Process text and store extracted records with cost optimization."""
+        """Process text and store extracted records with cost and concurrency optimization."""
+        async with self.semaphore:
+            return await self._retain_internal(text, agent_id, importance)
+
+    async def retain_batch(self, texts: list[str], agent_id: str | None = None, importance: int | None = None) -> list[HindsightRecord]:
+        """Process multiple texts in parallel using the internal semaphore."""
+        logger.info("Hindsight: Processing batch of %d records...", len(texts))
+        tasks = [self.retain(text, agent_id, importance) for text in texts]
+        results = await asyncio.gather(*tasks)
+        # Flatten results
+        all_records = [rec for sublist in results for rec in sublist]
+        return all_records
+
+    async def _retain_internal(self, text: str, agent_id: str | None = None, importance: int | None = None) -> list[HindsightRecord]:
+        """The core retention logic, now called via retain() with semaphore control."""
         
         # 1. Fast Path Optimization: For very short/trivial text, avoid LLM call
         if len(text.strip()) < 25:
@@ -152,13 +168,18 @@ class HindsightRetainer:
                 
                 # Hydrate entities
                 for e in item.get("entities", []):
-                    if isinstance(e, dict) and "name" in e:
+                    if isinstance(e, dict) and e.get("name") and str(e["name"]).lower() != "null":
                         record.entities.append(Entity(name=e["name"], type=e.get("type", "GENERIC")))
                 
                 # Hydrate relations
                 for r in item.get("relations", []):
-                    if isinstance(r, dict) and "subject" in r and "object" in r:
-                        record.relations.append(Relation(subject=r["subject"], predicate=r.get("predicate", "related_to"), object=r["object"]))
+                    if isinstance(r, dict) and r.get("subject") and r.get("object") and \
+                       str(r["subject"]).lower() != "null" and str(r["object"]).lower() != "null":
+                            record.relations.append(Relation(
+                                subject=r["subject"], 
+                                predicate=r.get("predicate", "related_to"), 
+                                object=r["object"]
+                            ))
                 
                 # Hydrate temporal
                 t_hint = item.get("temporal", {})

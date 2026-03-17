@@ -3,9 +3,22 @@
 from __future__ import annotations
 
 import os
+from enum import Enum
 from typing import Any
 
 from msgspec import Struct, field
+
+
+class AgentRole(Enum):
+    """Roles for different agents in the swarm."""
+    COMMANDER = "commander"
+    SCOUT = "scout"
+    WORKER = "worker"
+    ARCHITECT = "architect"
+    RESEARCHER = "researcher"
+
+    def __str__(self) -> str:
+        return self.value
 
 
 class Message(Struct, omit_defaults=True):

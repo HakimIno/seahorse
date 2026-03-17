@@ -9,6 +9,8 @@ from .seahorse_ffi import (
     make_py_runner,
     record_global_failure,
     search_memory,
+    normalize_text,
+    deduplicate_by_text,
 )
 
 __all__ = [
@@ -22,4 +24,6 @@ __all__ = [
     "PyPolarsAnalyst",
     "PyChartGenerator",
     "fetch_football_data",
+    "normalize_text",
+    "deduplicate_by_text",
 ]

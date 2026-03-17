@@ -12,11 +12,12 @@ Fuses results using Reciprocal Rank Fusion (RRF).
 import asyncio
 import logging
 import math
-import re
 from datetime import UTC, datetime
 from typing import Any
 
 from seahorse_ai.graph_db import GraphManager
+from seahorse_ai.schemas import AgentRole
+from seahorse_ai.hindsight.reranker import HindsightReranker
 
 logger = logging.getLogger(__name__)
 
@@ -25,11 +26,14 @@ class HindsightRecaller:
         """Initialize with a storage pipeline."""
         self.pipeline = pipeline
         self.graph = GraphManager()
+        self.reranker = HindsightReranker()
 
     async def recall(
         self, 
         query: str, 
         agent_id: str | None = None, 
+        agent_role: AgentRole = AgentRole.WORKER,
+        current_task: str = "",
         k: int = 10,
         temporal_boost: bool = True
     ) -> list[dict[str, Any]]:
@@ -48,27 +52,23 @@ class HindsightRecaller:
         # 2. Fuse results using RRF and deduplicate by ID
         merged = self._rrf_fuse(results_lists, k=k*2) # Get more candidates for textual deduplication
         
-        # 3. Deduplicate by Text Content (Brutal Normalization)
-        unique_results = []
-        seen_texts = set()
-        for doc in merged:
-            # Aggressive normalization: remove non-alphanumeric, lowercase, collapse spaces
-            orig_text = doc.get("text", "")
-            text_norm = re.sub(r'[^a-z0-9]', '', orig_text.lower())
-            
-            if text_norm and text_norm not in seen_texts:
-                unique_results.append(doc)
-                seen_texts.add(text_norm)
-            elif text_norm:
-                logger.debug(f"Recaller: Dropped duplicate text: {orig_text[:50]}...")
+        # 3. Deduplicate by Text Content (Rust-Accelerated)
+        import seahorse_ffi
+        merged = seahorse_ffi.deduplicate_by_text(merged)
         
-        # Trim back to k
-        merged = unique_results[:k]
-        
-        # 4. Apply Temporal Boost (Priority 2)
+        # 4. Apply Temporal Boost (Initial boost for reranker context)
         if temporal_boost:
             merged = self._apply_temporal_boost(merged)
             
+        # 5. Contextual & Utility Reranking
+        merged = await self.reranker.rerank(
+            query=query,
+            documents=merged,
+            agent_role=agent_role,
+            current_task=current_task,
+            top_n=k
+        )
+        
         return merged
 
     async def think(self, query: str, context: list[dict[str, Any]]) -> str:
@@ -79,11 +79,27 @@ class HindsightRecaller:
         if not context:
             return "No relevant memories found to answer this query."
             
-        context_str = "\n".join([f"- {c['text']}" for c in context])
+        context_items = []
+        for i, doc in enumerate(context):
+            dist = doc.get("distance", 0)
+            if dist == 0:
+                reliability = "[Direct Fact]"
+            elif dist <= 2:
+                reliability = f"[Inferred - {dist} hops]"
+            else:
+                reliability = f"[UNCERTAIN - {dist} hops distance]"
+            
+            context_items.append(f"Memory {i+1} {reliability}:\n{doc.get('text', '')}")
+            
+        context_str = "\n\n".join(context_items)
         
         prompt = f"""You are Seahorse Hindsight, an AI with long-term evolving memory.
 Answer the following query based ONLY on the retrieved memories provided below.
-If the memories do not contain the answer, say "I don't have enough information in my memory yet."
+
+CRITICAL RULES:
+1. If memories are marked [UNCERTAIN] or have many hops, express DOUBT (e.g. "I suspect...", "It's possible but unverified...").
+2. Only state things as absolute facts if they are [Direct Fact].
+3. If the memories do not contain the answer, say "I don't have enough information in my memory yet."
 
 Query: {query}
 
@@ -115,10 +131,9 @@ Answer:"""
             return await self.pipeline.keyword_search(query, agent_id, k)
         return []
 
-    async def _graph_search(self, query: str, agent_id: str | None, k: int, hops: int = 3) -> list[dict[str, Any]]:
+    async def _graph_search(self, query: str, agent_id: str | None, k: int, hops: int = 6) -> list[dict[str, Any]]:
         """Knowledge graph traversal to find records linked to entities in the query (multi-hop)."""
         try:
-            # 1. Precise Entity Extraction using LLM
             entities = await self._extract_entities_from_query(query)
             if not entities:
                 entities = [w.strip("?,.!") for w in query.split() if len(w) > 3]
@@ -129,12 +144,18 @@ Answer:"""
             seen_ids = set()
             
             for entity in entities:
-                # 2. Multi-hop traversal: Increase to 6 hops for deep causality
-                record_ids = await self.graph.get_records_by_path(entity, hops=6)
+                # Returns list of dicts with 'id' and 'distance'
+                path_hits = await self.graph.get_records_by_path(entity, hops=hops)
                 
-                for rid in record_ids:
+                for hit in path_hits:
+                    rid = hit["id"]
                     if rid not in seen_ids:
-                        graph_results.append({"id": rid, "graph_hit": True})
+                        # Apply score decay in the fusion layer or here
+                        graph_results.append({
+                            "id": rid, 
+                            "graph_hit": True, 
+                            "distance": hit["distance"]
+                        })
                         seen_ids.add(rid)
                         
             return graph_results
@@ -231,16 +252,29 @@ Entities:"""
                 if doc.get("graph_hit"):
                     doc_map[doc_id]["graph_hit"] = True
                 
-                # 4. Extract/Update Vector/Cosine Score
+                # 4. Extract/Update Vector/Cosine/Hop Score
                 target = doc_map[doc_id]
-                # Try to get similarity from various possible fields
                 val = doc.get("vector_score") or doc.get("score") or doc.get("distance")
+                
+                # Context Decay Logic
+                dist = doc.get("distance")
+                decay = 1.0
+                if dist is not None:
+                    try:
+                        dist = int(dist)
+                        decay = 0.8 ** dist 
+                        target["distance"] = dist
+                    except (ValueError, TypeError):
+                        pass
+
                 if val is not None:
                     try:
                         val = float(val)
                         # If it looks like a distance (small value for match), convert to similarity
-                        # In Qdrant, similarity is usually 0.5-1.0, distance is 0.0-0.5
                         similarity = 1.0 - val if ("distance" in doc or val < 0.45) else val
+                        
+                        # Apply Decay to final vector/graph score
+                        similarity *= decay
                         
                         # Only update if we don't have a score or this one is better
                         if target.get("vector_score") is None or similarity > target["vector_score"]:

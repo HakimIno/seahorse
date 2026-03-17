@@ -4,12 +4,11 @@ Provides a singleton driver for interacting with Neo4j to store and
 retrieve Entities and Relationships for the Hindsight memory system.
 """
 
-from __future__ import annotations
-
-import os
 import logging
+import os
 from typing import Optional
-from neo4j import AsyncGraphDatabase, AsyncDriver
+
+from neo4j import AsyncDriver, AsyncGraphDatabase
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +46,10 @@ class GraphManager:
 
     async def upsert_entity(self, name: str, entity_type: str = "Entity", properties: dict | None = None) -> None:
         """Create or update an Entity node."""
+        if not name or str(name).lower() == "null" or str(name).strip() == "":
+            logger.warning(f"GraphManager: Skipping upsert_entity with invalid name: {name}")
+            return
+            
         properties = properties or {}
         query = (
             f"MERGE (e:{entity_type} {{name: $name}}) "
@@ -66,6 +69,14 @@ class GraphManager:
         properties: dict | None = None
     ) -> None:
         """Create a relationship between two entities."""
+        if not subj_name or not obj_name:
+            logger.warning(f"GraphManager: Skipping add_relationship with invalid names: subj={subj_name}, obj={obj_name}")
+            return
+            
+        if str(subj_name).lower() == "null" or str(obj_name).lower() == "null":
+            logger.warning(f"GraphManager: Skipping add_relationship with 'null' name: subj={subj_name}, obj={obj_name}")
+            return
+
         properties = properties or {}
         # Dynamic relationship types in Cypher require a bit of care with f-strings or APOC
         # For simplicity, we use a generic RELATIONSHIP type with a 'type' property if needed,
@@ -89,6 +100,10 @@ class GraphManager:
 
     async def link_record_to_entity(self, record_id: str, entity_name: str, entity_type: str = "Entity") -> None:
         """Link a HindsightRecord (represented by its ID) to an Entity it mentions."""
+        if not entity_name or str(entity_name).lower() == "null":
+            logger.warning(f"GraphManager: Skipping link_record_to_entity with invalid entity_name: {entity_name}")
+            return
+            
         query = (
             "MERGE (r:HindsightRecord {id: $record_id}) "
             f"MERGE (e:{entity_type} {{name: $entity_name}}) "
@@ -98,10 +113,10 @@ class GraphManager:
             await session.run(query, record_id=record_id, entity_name=entity_name)
 
     async def get_connected_entities(self, entity_name: str, hops: int = 1) -> list[dict]:
-        """Find entities connected to a starting node."""
+        """Find entities connected to a starting node, including distance."""
         query = (
-            f"MATCH (e {{name: $name}})-[r*1..{hops}]-(neighbor) "
-            "RETURN neighbor.name as name, labels(neighbor)[0] as type, properties(neighbor) as props"
+            f"MATCH p=(e {{name: $name}})-[r*1..{hops}]-(neighbor) "
+            "RETURN neighbor.name as name, labels(neighbor)[0] as type, properties(neighbor) as props, length(p) as distance"
         )
         async with self.driver.session() as session:
             result = await session.run(query, name=entity_name)
@@ -117,17 +132,17 @@ class GraphManager:
             result = await session.run(query, name=entity_name)
             return [record["id"] async for record in result]
 
-    async def get_records_by_path(self, entity_name: str, hops: int = 2) -> list[str]:
+    async def get_records_by_path(self, entity_name: str, hops: int = 2) -> list[dict]:
         """Find Record IDs connected through a chain of entities (multi-hop).
-        Example: (Entity A)-[]-(Entity B)-[:MENTIONS]-(Record)
+        Returns list of dicts with 'id' and 'distance'.
         """
         query = (
-            f"MATCH (e {{name: $name}})-[*1..{hops}]-(neighbor:Entity)<-[:MENTIONS]-(r:HindsightRecord) "
-            "RETURN DISTINCT r.id as id"
+            f"MATCH p=(e {{name: $name}})-[*1..{hops}]-(neighbor:Entity)<-[:MENTIONS]-(r:HindsightRecord) "
+            "RETURN DISTINCT r.id as id, length(p) as distance"
         )
         async with self.driver.session() as session:
             result = await session.run(query, name=entity_name)
-            return [record["id"] async for record in result]
+            return [record.data() async for record in result]
 
     async def clear(self) -> None:
         """Wipe the entire database (DANGER: use only for testing)."""

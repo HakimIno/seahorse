@@ -12,6 +12,7 @@ pub mod memory;
 pub mod viz;
 pub mod wasm;
 pub mod networking;
+pub mod optimizer;
 
 use pyo3::prelude::*;
 
@@ -29,6 +30,8 @@ fn seahorse_ffi(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<analysis::PyPolarsAnalyst>()?;
     m.add_class::<viz::PyChartGenerator>()?;
     m.add_function(wrap_pyfunction!(networking::fetch_football_data, m)?)?;
+    m.add_function(wrap_pyfunction!(optimizer::normalize_text, m)?)?;
+    m.add_function(wrap_pyfunction!(optimizer::deduplicate_by_text, m)?)?;
     wasm::register(m)?;
     Ok(())
 }
