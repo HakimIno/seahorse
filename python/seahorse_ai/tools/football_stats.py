@@ -14,179 +14,166 @@ from seahorse_ffi import fetch_football_data
 
 logger = logging.getLogger(__name__)
 
-# Mapping from API-Football League names/IDs to The Odds API sport_keys
-LEAGUE_TO_SPORT_KEY = {
-    "Premier League": "soccer_epl",
-    "La Liga": "soccer_spain_la_liga",
-    "Serie A": "soccer_italy_serie_a",
-    "Bundesliga": "soccer_germany_bundesliga",
-    "Ligue 1": "soccer_france_ligue_1",
-    "UEFA Champions League": "soccer_uefa_champions_league",
-    "UEFA Europa League": "soccer_uefa_europa_league",
-    "Major League Soccer": "soccer_usa_mls",
-    "Eredivisie": "soccer_netherlands_eredivisie",
-    "Primeira Liga": "soccer_portugal_primeira_liga",
+# Mapping from common names to Football-Data.org Competition Codes
+COMPETITION_CODES = {
+    "Premier League": "PL",
+    "Championship": "ELC",
+    "La Liga": "PD",
+    "Serie A": "SA",
+    "Bundesliga": "BL1",
+    "Ligue 1": "FL1",
+    "Eredivisie": "DED",
+    "Primeira Liga": "PPL",
+    "UEFA Champions League": "CL",
+    "European Championship": "EC",
+    "World Cup": "WC",
 }
+
+def getcompcode(leaguename: str) -> str | None:
+    """Helper to map league name to Football-Data.org competition code."""
+    for name, code in COMPETITION_CODES.items():
+        if name.lower() in leaguename.lower() or leaguename.lower() in name.lower():
+            return code
+    return None
 
 def getsportkey(leaguename: str) -> str | None:
     """Helper to map league name to The Odds API sport key."""
-    for name, key in LEAGUE_TO_SPORT_KEY.items():
-        if name.lower() in leaguename.lower() or leaguename.lower() in name.lower():
-            return key
-    return None
+    # Mapping for The Odds API (EPL, La Liga, etc.)
+    ODDS_MAPPING = {
+        "PL": "soccer_epl",
+        "ELC": "soccer_efl_champ",
+        "PD": "soccer_spain_la_liga",
+        "SA": "soccer_italy_serie_a",
+        "BL1": "soccer_germany_bundesliga",
+        "FL1": "soccer_france_ligue_one",
+        "DED": "soccer_netherlands_eredivisie",
+        "PPL": "soccer_portugal_primeira_liga",
+        "CL": "soccer_uefa_champs_league",
+    }
+    code = getcompcode(leaguename)
+    return ODDS_MAPPING.get(code) if code else None
+
+@tool("Calculate average goals (xG proxy) for a team from recent matches.")
+def getteamxg(teamid: int) -> str:
+    """
+    Fetch last 10 finished matches for a team and return average goals scored.
+    """
+    api_key = os.environ.get("FOOTBALL_API_KEY")
+    if not api_key:
+        return "Error: FOOTBALL_API_KEY not found."
+
+    url = f"https://api.football-data.org/v4/teams/{teamid}/matches?status=FINISHED&limit=10"
+    try:
+        raw_json = fetch_fd_data(url, api_key)
+        data = json.loads(raw_json)
+        matches = data.get("matches", [])
+        if not matches:
+            return "0.0"
+        
+        total_goals = 0
+        count = 0
+        for m in matches:
+            count += 1
+            score = m.get("score", {}).get("fullTime", {})
+            if m.get("homeTeam", {}).get("id") == teamid:
+                total_goals += score.get("home", 0)
+            else:
+                total_goals += score.get("away", 0)
+        
+        avg = total_goals / count if count > 0 else 0.0
+        return str(round(avg, 2))
+    except Exception as e:
+        return f"Error calculating xG: {e}"
+
+def fetch_fd_data(url: str, api_key: str) -> str:
+    """Helper to fetch data from Football-Data.org with correct headers."""
+    import requests
+    headers = {"X-Auth-Token": api_key}
+    try:
+        response = requests.get(url, headers=headers)
+        response.raise_for_status()
+        return response.text
+    except Exception as e:
+        # Avoid error level logging for 400 (Bad Request) as it's common during Migration/Fixture resolution
+        if hasattr(e, 'response') and e.response.status_code == 400:
+            logger.warning(f"Football-Data.org (400): {url}")
+        else:
+            logger.error(f"Football-Data.org error ({url}): {e}")
+        return f"Error: {e}"
 
 
 @tool("Search for a fixture ID by team name, league name, and date.")
 def searchfixture(teamname: str, date: str, leaguename: str | None = None) -> str:
     """
-    Search for a fixture_id using team name and date (YYYY-MM-DD).
-    
-    Args:
-        teamname: Representative team name (e.g., 'Arsenal').
-        date: The date of the match in YYYY-MM-DD format.
-        leaguename: Optional league name to filter by (e.g., 'Premier League').
+    Search for a fixture using Football-Data.org.
     """
-    # For now we'll focus on caching the fixtures found for a specific date
-    cache_key = f"search_{teamname}_{leaguename}_{date}"
-    cached = get_fixture_info(cache_key)
-    if cached:
-        return json.dumps(cached, indent=2)
-
     api_key = os.environ.get("FOOTBALL_API_KEY")
     if not api_key:
         return "Error: FOOTBALL_API_KEY not found."
 
-    url = f"https://v3.football.api-sports.io/fixtures?date={date}"
+    code = getcompcode(leaguename) if leaguename else None
+    url = f"https://api.football-data.org/v4/matches?dateFrom={date}&dateTo={date}"
+    if code:
+        url = f"https://api.football-data.org/v4/competitions/{code}/matches?dateFrom={date}&dateTo={date}"
+
     try:
-        raw_json = fetch_football_data(url, api_key)
+        raw_json = fetch_fd_data(url, api_key)
         data = json.loads(raw_json)
+        matches_raw = data.get("matches", [])
         
-        # Diagnostic: check for API-Sports errors
-        errors = data.get("errors", [])
-        if errors:
-            logger.error(f"API-Football errors for date {date}: {errors}")
-            if isinstance(errors, dict) and "token" in errors:
-                return "Error: API Key invalid or expired."
-            return f"API-Sports error: {errors}"
-
-        # Optimization: Filter at dictionary level before heavy Pydantic model creation
-        raw_response = data.get("response") or []
-        results_count = data.get("results", 0)
         matches = []
+        search_term = teamname.lower().strip()
+        is_all = search_term == "all"
+
+        for m in matches_raw:
+            home = m.get("homeTeam", {}).get("name", "").lower()
+            away = m.get("awayTeam", {}).get("name", "").lower()
+            
+            if is_all or search_term in home or search_term in away:
+                matches.append({
+                    "fixture_id": m.get("id"),
+                    "home_team_id": m.get("homeTeam", {}).get("id"),
+                    "away_team_id": m.get("awayTeam", {}).get("id"),
+                    "match": f"{m.get('homeTeam', {}).get('name')} vs {m.get('awayTeam', {}).get('name')}",
+                    "status": m.get("status"),
+                    "league": m.get("competition", {}).get("name"),
+                    "country": m.get("area", {}).get("name")
+                })
         
-        # Check if this is a general search for all matches
-        is_all = teamname.upper() == "ALL"
-        search_term = teamname.lower().strip() if not is_all else ""
-        target_league = leaguename.lower().strip() if leaguename else None
-        
-        logger.info(f"Filtering {len(raw_response)} matches from {results_count} total for '{teamname}' (League: {leaguename}) on {date}")
-
-        for res in raw_response:
-            home_data = res.get("teams", {}).get("home", {})
-            away_data = res.get("teams", {}).get("away", {})
-            home_name = home_data.get("name", "").lower()
-            away_name = away_data.get("name", "").lower()
-            
-            curr_league = res.get("league", {}).get("name", "").lower()
-
-            # Match logic: either it's an "ALL" search, or the team name matches
-            match_found = is_all
-            if not is_all and search_term and (
-                (home_name and (search_term in home_name or home_name in search_term)) or
-                (away_name and (search_term in away_name or away_name in search_term))
-            ):
-                match_found = True
-            
-            # League Filter (if provided)
-            if match_found and target_league and target_league not in curr_league and curr_league not in target_league:
-                match_found = False
-
-            if match_found:
-                try:
-                    # Full validation only for matches
-                    fixture_data = FullMatchData(**res)
-                    matches.append({
-                        "fixture_id": fixture_data.fixture.id,
-                        "match": f"{fixture_data.teams['home'].name} vs {fixture_data.teams['away'].name}",
-                        "status": fixture_data.fixture.status.long,
-                        "league": fixture_data.league.name,
-                        "country": fixture_data.league.country
-                    })
-                except Exception as ve:
-                    logger.warning(f"Validation error for fixture {res.get('fixture', {}).get('id')}: {ve}")
-    
-        logger.info(f"Found {len(matches)} matches for '{teamname}'")
-        if not matches:
-            return f"ไม่พบข้อมูลการแข่งขันของ {teamname} {(f'ใน {leaguename}') if leaguename else ''} ในวันที่ {date} ครับ"
-            
-        set_fixture_info(cache_key, matches)
         return json.dumps(matches, indent=2)
     except Exception as e:
-        logger.error(f"Error searching fixture: {e}")
         return f"Error searching fixture: {e}"
 
 
-@tool("Search for a league ID by name or country.")
+@tool("Search for a league ID (Competition Code) by name.")
 def searchleague(name: str, country: str | None = None) -> str:
     """
-    Find a league_id by name (e.g., 'Thai League 1').
-    
-    Args:
-        name: Name of the league to search for.
-        country: Optional country name.
+    Find a competition code (e.g., 'PL').
     """
-    api_key = os.environ.get("FOOTBALL_API_KEY")
-    if not api_key:
-        return "Error: FOOTBALL_API_KEY not found."
-
-    url = f"https://v3.football.api-sports.io/leagues?search={name}"
-    try:
-        raw_json = fetch_football_data(url, api_key)
-        data = json.loads(raw_json)
-        
-        response = data.get("response", [])
-        leagues = []
-        for item in response:
-            l_info = item.get("league", {})
-            c_info = item.get("country", {})
-            
-            # Filter by country if provided
-            if country and country.lower() not in c_info.get("name", "").lower():
-                continue
-                
-            leagues.append({
-                "league_id": l_info.get("id"),
-                "name": l_info.get("name"),
-                "country": c_info.get("name"),
-                "type": l_info.get("type")
-            })
-            
-        if not leagues:
-            return f"No leagues found matching '{name}'."
-            
-        return json.dumps(leagues, indent=2)
-    except Exception as e:
-        return f"Error searching league: {e}"
+    code = getcompcode(name)
+    if code:
+        return json.dumps([{"league_id": code, "name": name}], indent=2)
+    return f"No competition code found for '{name}'."
 
 
 @tool("Get upcoming fixtures for a specific league and date.")
-def getupcomingfixtures(leagueid: int, date: str) -> str:
+def getupcomingfixtures(leagueid: str | int, date: str) -> str:
     """
-    Fetch all fixtures for a league on a specific date.
-    
-    Args:
-        leagueid: API-Football league ID (e.g., 39 for EPL).
-        date: Date in YYYY-MM-DD format.
+    Fetch all fixtures for a league on a specific date using Football-Data.org.
     """
     api_key = os.environ.get("FOOTBALL_API_KEY")
     if not api_key:
         return "Error: FOOTBALL_API_KEY not found."
 
-    url = f"https://v3.football.api-sports.io/fixtures?league={leagueid}&date={date}&season=2025"
+    # leagueid might be a code (PL) or numeric ID
+    comp_code = leagueid if isinstance(leagueid, str) and not leagueid.isdigit() else leagueid
+    
+    url = f"https://api.football-data.org/v4/competitions/{comp_code}/matches?dateFrom={date}&dateTo={date}"
     try:
-        raw_json = fetch_football_data(url, api_key)
-        # We just return the raw JSON for the scanner to process
-        return raw_json
+        raw_json = fetch_fd_data(url, api_key)
+        # Wrap in a structure similar to what the bot expects
+        data = json.loads(raw_json)
+        return json.dumps({"response": data.get("matches", [])})
     except Exception as e:
         return f"Error fetching league fixtures: {e}"
 
@@ -226,37 +213,23 @@ def geth2hresults(teamid1: int, teamid2: int) -> str:
 @tool("Predict the outcome of a football match using a Poisson distribution based on xG scores.")
 def predictmatchoutcome(hometeam: str, awayteam: str, homeavgxg: float, awayavgxg: float) -> str:
     """
-    Perform a simple Poisson-based prediction for a match outcome.
+    Perform a Poisson-based prediction including most-likely score and O/U 2.5.
     """
-    import math
+    from seahorse_ai.analysis.football_eval import compute_poisson_prediction
 
-    def poisson(k, lamb):
-        return (math.pow(lamb, k) * math.exp(-lamb)) / math.factorial(k)
-
-    # Simplified prediction logic
-    home_win_prob = 0.0
-    away_win_prob = 0.0
-    draw_prob = 0.0
-
-    max_goals = 6
-    for h in range(max_goals):
-        for a in range(max_goals):
-            prob = poisson(h, homeavgxg) * poisson(a, awayavgxg)
-            if h > a:
-                home_win_prob += prob
-            elif a > h:
-                away_win_prob += prob
-            else:
-                draw_prob += prob
+    poisson = compute_poisson_prediction(homeavgxg, awayavgxg)
 
     prediction = {
         "match": f"{hometeam} vs {awayteam}",
         "probabilities": {
-            "Home Win": f"{home_win_prob:.2%}",
-            "Draw": f"{draw_prob:.2%}",
-            "Away Win": f"{away_win_prob:.2%}"
+            "Home Win": f"{poisson['poisson_h']:.2%}",
+            "Draw": f"{poisson['poisson_d']:.2%}",
+            "Away Win": f"{poisson['poisson_a']:.2%}",
         },
-        "most_likely_score": "2-1" if homeavgxg > awayavgxg else "1-2"
+        "most_likely_score": poisson["most_likely_score"],
+        "most_likely_score_prob": f"{poisson['most_likely_score_prob']:.2%}",
+        "over_2.5": f"{poisson['poisson_over25']:.2%}",
+        "under_2.5": f"{poisson['poisson_under25']:.2%}",
     }
     return json.dumps(prediction, indent=2)
 
@@ -304,26 +277,9 @@ def kellycriterion(modelprobability: float, marketodds: float, bankroll: float, 
 @tool("Retrieve real-time lineups, injuries, and predictions for a match.")
 def getmatchintel(fixtureid: int) -> str:
     """
-    Fetch real match intelligence including predictions and lineups.
+    [DEPRECATED] Historical intelligence. Use Poisson model instead.
     """
-    api_key = os.environ.get("FOOTBALL_API_KEY")
-    if not api_key:
-        return "Error: FOOTBALL_API_KEY not found."
-
-    url = f"https://v3.football.api-sports.io/predictions?fixture={fixtureid}"
-    try:
-        raw_json = fetch_football_data(url, api_key)
-        data = json.loads(raw_json)
-        response = APIFootballResponse(**data)
-        
-        if not response.response:
-            return "No intelligence found for this match."
-            
-        prediction = PredictionData(**response.response[0])
-        # Default to condensed output to save tokens/context
-        return _condense_intel(prediction.model_dump_json())
-    except Exception as e:
-        return f"Error fetching match intel: {e}"
+    return "Intelligence data is now computed internally via Poisson model."
 
 
 @tool("Compare market odds across multiple bookmakers using The Odds API.")
@@ -338,114 +294,109 @@ def comparemarketodds(sportkey: str, regions: str = "uk,eu,us") -> str:
     url = f"https://api.the-odds-api.com/v4/sports/{sportkey}/odds/?apiKey={odds_key}&regions={regions}&markets=h2h"
     
     try:
-        raw_json = fetch_football_data(url, "") # API key is in URL
-        return _condense_multi_odds(raw_json)
+        # Use fetch_fd_data or similar instead of fetch_football_data to avoid headers confusion
+        import requests
+        response = requests.get(url)
+        response.raise_for_status()
+        return _condense_multi_odds(response.text)
     except Exception as e:
         return f"Error comparing market odds: {e}"
 
-@tool("Fetch real-time match data from API-Football using the high-performance Rust fetcher.")
+@tool("Fetch real-time match data from Football-Data.org.")
 def fetchlivematch(fixtureid: int) -> str:
     """
-    Fetch live match details including goals, teams, and status.
+    Fetch match details including goals, teams, and status using Football-Data.org.
     """
     api_key = os.environ.get("FOOTBALL_API_KEY")
     if not api_key:
-        return "Error: FOOTBALL_API_KEY not found in environment."
+        return "Error: FOOTBALL_API_KEY not found."
 
-    url = f"https://v3.football.api-sports.io/fixtures?id={fixtureid}"
-    
+    url = f"https://api.football-data.org/v4/matches/{fixtureid}"
     try:
-        # 1. Fetch via Rust (Rate-Limited)
-        raw_json = fetch_football_data(url, api_key)
-        data = json.loads(raw_json)
-        
-        # 2. Validate via Pydantic
-        response = APIFootballResponse(**data)
-        if not response.response:
-            return "No data found for this fixture."
-            
-        match = FullMatchData(**response.response[0])
-        
-        return match.model_dump_json(indent=2)
+        raw_json = fetch_fd_data(url, api_key)
+        return raw_json
     except Exception as e:
         return f"Error fetching live match: {e}"
 
 @tool("Fetch real-time odds for a specific match.")
 def fetchliveodds(fixtureid: int) -> str:
     """
-    Fetch market odds for a match.
+    Fetch market odds for a match. (Note: Football-Data.org free tier has limited odds).
     """
-    api_key = os.environ.get("FOOTBALL_API_KEY")
-    if not api_key:
-        return "Error: FOOTBALL_API_KEY not found in environment."
-
-    url = f"https://v3.football.api-sports.io/odds?fixture={fixtureid}"
-    
-    try:
-        raw_json = fetch_football_data(url, api_key)
-        data = json.loads(raw_json)
-        
-        response = APIFootballResponse(**data)
-        if not response.response:
-            return "No odds found for this fixture."
-            
-        odds = OddsResponse(**response.response[0])
-        
-        return _condense_odds(odds.model_dump_json())
-    except Exception as e:
-        return f"Error fetching live odds: {e}"
+    # For now, we return a message or try to fetch match details which might have odds
+    return "Market odds should be fetched via comparemarketodds for maximum coverage."
 
 
 # --- Condensation Helpers ---
 
 def _condense_intel(raw_json: str) -> str:
-    """Extract only win %, xG, and key stats to save tokens."""
+    """Extract win %, xG proxy, and key stats into a condensed JSON string."""
     try:
         data = json.loads(raw_json)
-        pred = data.get("predictions", {})
-        comp = data.get("comparison", {})
-        
-        # Extract win probabilities
-        home_p = pred.get('percent', {}).get('home')
-        draw_p = pred.get('percent', {}).get('draw')
-        away_p = pred.get('percent', {}).get('away')
-        
-        if not home_p or not draw_p or not away_p:
-            resp = "Win%: (DATA UNAVAILABLE) "
-        else:
-            resp = f"Win%: H:{pred.get('winner', {}).get('comment', 'N/A')} "
-            resp += f"(Home:{home_p} Draw:{draw_p} Away:{away_p}) "
-        
-        # Expert advice and Sample Size (H2H)
-        advice = pred.get("advice", "No specific advice")
-        h2h_count = len(data.get("h2h", []))
-        resp += f"Sample: {h2h_count} Recent Matches. Advice: {advice}. "
-        
-        # Extract comparison/intensity
-        resp += f"Attack:{comp.get('att', {}).get('home') or 'N/A'}/{comp.get('att', {}).get('away') or 'N/A'} "
-        resp += f"Defense:{comp.get('def', {}).get('home') or 'N/A'}/{comp.get('def', {}).get('away') or 'N/A'} "
-        return resp
+        # We only keep what's necessary for analysis and persist
+        condensed = {
+            "predictions": data.get("predictions", {}),
+            "teams": data.get("teams", {}),
+            "comparison": data.get("comparison", {}),
+            "league": data.get("league", {}),
+            "h2h": data.get("h2h", [])[:5]  # Keep only 5 H2H to save tokens
+        }
+        return json.dumps(condensed)
     except Exception:
-        return raw_json[:500]
+        # Fallback to minimal JSON if parse fails
+        return json.dumps({"error": "Failed to parse intelligence", "raw_prefix": raw_json[:200]})
 
 
 def _condense_odds(raw_json: str) -> str:
-    """Extract best individual odds from single match fetch."""
+    """Extract best odds across ALL bookmakers for 1X2 + Over/Under 2.5."""
     try:
         data = json.loads(raw_json)
-        # Handle list or dict
         if isinstance(data, list) and data:
             data = data[0]
-        
+
         bookmakers = data.get("bookmakers", [])
         if not bookmakers:
             return "No odds found."
-        
-        # Just grab the first bookmaker's 1X2 market to keep it tiny
-        bm = bookmakers[0]
-        market = next((m for m in bm.get("bets", []) if m.get("name") == "Match Winner"), {})
-        values = {v.get("value"): v.get("odd") for v in market.get("values", [])}
-        return f"Market({bm.get('name')}): 1:{values.get('Home')} X:{values.get('Draw')} 2:{values.get('Away')}"
+
+        best = {"Home": ("", 0.0), "Draw": ("", 0.0), "Away": ("", 0.0)}
+        best_ou = {"Over 2.5": ("", 0.0), "Under 2.5": ("", 0.0)}
+
+        for bm in bookmakers:
+            bm_name = bm.get("name", "")
+            for bet in bm.get("bets", []):
+                if bet.get("name") == "Match Winner":
+                    for val in bet.get("values", []):
+                        side = val.get("value", "")
+                        try:
+                            price = float(val.get("odd", 0))
+                        except (ValueError, TypeError):
+                            continue
+                        if side in best and price > best[side][1]:
+                            best[side] = (bm_name, price)
+                elif "Over/Under" in bet.get("name", "") or "Goals" in bet.get("name", ""):
+                    for val in bet.get("values", []):
+                        v = str(val.get("value", ""))
+                        try:
+                            price = float(val.get("odd", 0))
+                        except (ValueError, TypeError):
+                            continue
+                        if "Over" in v and "2.5" in v and price > best_ou["Over 2.5"][1]:
+                            best_ou["Over 2.5"] = (bm_name, price)
+                        elif "Under" in v and "2.5" in v and price > best_ou["Under 2.5"][1]:
+                            best_ou["Under 2.5"] = (bm_name, price)
+
+        parts = [
+            f"1:{best['Home'][1]}({best['Home'][0]})",
+            f"X:{best['Draw'][1]}({best['Draw'][0]})",
+            f"2:{best['Away'][1]}({best['Away'][0]})",
+        ]
+        ou_parts = []
+        if best_ou["Over 2.5"][1] > 0:
+            ou_parts.append(f"O2.5:{best_ou['Over 2.5'][1]}({best_ou['Over 2.5'][0]})")
+        if best_ou["Under 2.5"][1] > 0:
+            ou_parts.append(f"U2.5:{best_ou['Under 2.5'][1]}({best_ou['Under 2.5'][0]})")
+
+        return "BestOdds " + " ".join(parts) + (" " + " ".join(ou_parts) if ou_parts else "")
     except Exception:
         return raw_json[:300]
 

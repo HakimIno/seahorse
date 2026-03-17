@@ -89,6 +89,11 @@ class FootballScanner:
 
             # 2. Fetch Market Odds - Synchronous
             odds_raw = fetchliveodds(fid)
+            
+            # Evaluation Loop: Persist for future outcome tracking
+            from seahorse_ai.analysis.football_eval import extract_and_persist
+            asyncio.create_task(extract_and_persist(fixture_data, [intel_raw, odds_raw]))
+            
             odds_data = json.loads(odds_raw)
             
             # Find 1x2 market

@@ -122,23 +122,24 @@ async def python_interpreter(code: str) -> str:
             "LANG": os.environ.get("LANG", "en_US.UTF-8"),
         }
 
-        async with await anyio.open_process(
-            [_get_python_executable(), tmp_path],
+        import asyncio
+        process = await asyncio.create_subprocess_exec(
+            _get_python_executable(), tmp_path,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             env=safe_env,
-        ) as process:
-            try:
-                with anyio.fail_after(_TIMEOUT_SECONDS):
-                    stdout_bytes, stderr_bytes = await process.communicate()
-                
-                stdout = stdout_bytes.decode().strip()
-                stderr = stderr_bytes.decode().strip()
-                returncode = process.returncode
-            except TimeoutError:
-                process.kill()
-                logger.warning("python_interpreter: code timed out after %ds", _TIMEOUT_SECONDS)
-                return f"Error: Code execution timed out after {_TIMEOUT_SECONDS} seconds."
+        )
+        try:
+            stdout_bytes, stderr_bytes = await asyncio.wait_for(
+                process.communicate(), timeout=_TIMEOUT_SECONDS
+            )
+            stdout = stdout_bytes.decode().strip()
+            stderr = stderr_bytes.decode().strip()
+            returncode = process.returncode
+        except asyncio.TimeoutError:
+            process.kill()
+            logger.warning("python_interpreter: code timed out after %ds", _TIMEOUT_SECONDS)
+            return f"Error: Code execution timed out after {_TIMEOUT_SECONDS} seconds."
 
         logger.info(f"Interpreter stdout: {stdout}")
         if stderr:

@@ -190,9 +190,11 @@ async def memory_store(text: str, importance: int = 3, agent_id: str | None = No
     "Use this before answering questions that may have been discussed before."
 )
 async def memory_search(
-    query: str, k: int = 10, agent_id: str | None = None, min_similarity: float = 0.1
+    query: str, k: int = 10, agent_id: str | None = None, min_similarity: float = 0.1, top_k: int | None = None
 ) -> list[dict] | str:
     """Search memory index. Returns dicts for planner or string for LLM."""
+    if top_k is not None:
+        k = top_k
     k = int(k)
     pipeline = get_pipeline()
     if pipeline.size == 0:

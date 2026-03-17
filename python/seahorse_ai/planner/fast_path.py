@@ -348,18 +348,18 @@ class FastPathRouter:
                 )
             )
 
-            res = await self._llm.complete(msgs, tier="fast")
+            res = await self._llm.complete(msgs, tier="worker")
             content = str(res.get("content", res) if isinstance(res, dict) else res)
 
             return AgentResponse(
                 content=content,
-                steps=1,  # Tool call counts as 1 step
+                steps=1,
                 elapsed_ms=int((time.perf_counter() - start_t) * 1000),
             )
 
         except Exception as e:
-            logger.error(f"Fast web search error: {e}")
-            return None  # Fallback to ReAct on failure
+            logger.error("Fast web search error: %s", e)
+            return None
 
     async def _handle_store(
         self,
@@ -516,7 +516,7 @@ class FastPathRouter:
             if history:
                 msgs.extend(history[-_HISTORY_WINDOW:])
             msgs.append(Message(role="user", content=f"Analysis: {agg_result}\nVisualization: {viz_result}"))
-            final_res = await self._llm.complete(msgs, tier="fast")
+            final_res = await self._llm.complete(msgs, tier="worker")
             content = str(final_res.get("content", final_res) if isinstance(final_res, dict) else final_res)
 
             return AgentResponse(
@@ -532,7 +532,12 @@ class FastPathRouter:
     async def _handle_football_intel(
         self, prompt: str, history: list[Message] | None, start_t: float
     ) -> AgentResponse | None:
-        """Directly fulfill football intelligence requests via optimized tool calls."""
+        """Directly fulfill football intelligence requests via optimized tool calls.
+
+        All mathematical analysis (probabilities, Poisson, edge, Kelly) is
+        pre-computed in Python.  The LLM only handles presentation/synthesis —
+        it is never asked to compute numbers.
+        """
         try:
             today = datetime.date.today().strftime("%Y-%m-%d")
 
@@ -540,13 +545,13 @@ class FastPathRouter:
             System Date: {today}
             Extract football match details for API search.
             Return ONLY valid JSON.
-            
+
             IMPORTANT: For "teamname", use the simplest possible common name (e.g., 'Arsenal').
             If the user asks for "today", "now", or general "Value" without a team, set "teamname" to "ALL".
-            
+
             Context Extraction:
             - If one or more leagues or countries are mentioned (e.g. "Premier League", "La Liga", "England"), extract them into a list.
-            
+
             JSON Fields:
             - "teamname": Team name or "ALL"
             - "leagues": List of league names (e.g., ['Premier League', 'La Liga']) or null
@@ -572,174 +577,130 @@ class FastPathRouter:
             is_ranking = data.get("is_ranking", False)
 
             if not team:
-                return None  # Fallback to ReAct
+                return None
 
-            # 1. Search for fixture
-            # If leagues_req is provided, we use the first one for the tool call as a hint,
-            # but we will manually filter the results by ALL requested leagues below.
             hint_league = leagues_req[0] if leagues_req else None
             fixtures_json = await self._tools.call("searchfixture", {
-                "teamname": team, 
+                "teamname": team,
                 "date": date,
-                "leaguename": hint_league
+                "leaguename": hint_league,
             })
-            
+
             if not (isinstance(fixtures_json, str) and (fixtures_json.startswith("[") or fixtures_json.startswith("{"))):
-                 return AgentResponse(content=fixtures_json, steps=1, elapsed_ms=int((time.perf_counter() - start_t) * 1000))
+                return AgentResponse(content=fixtures_json, steps=1, elapsed_ms=int((time.perf_counter() - start_t) * 1000))
 
             fixtures = json.loads(fixtures_json)
 
             if not fixtures:
-                # If no matches found, check if the league name is valid first
                 league_check = await self._tools.call("searchleague", {"name": hint_league or team})
                 if "No leagues found" in league_check:
                     return AgentResponse(
                         content=f"ไม่พบข้อมูลลีกหรือทีมที่ชื่อ '{hint_league or team}' ครับ รบกวนตรวจสอบชื่ออีกครั้ง",
                         steps=1,
-                        elapsed_ms=int((time.perf_counter() - start_t) * 1000)
+                        elapsed_ms=int((time.perf_counter() - start_t) * 1000),
                     )
-                
+
                 msg = f"ไม่พบข้อมูลการแข่งขันของ {team}"
                 if leagues_req:
                     msg += f" ใน {', '.join(leagues_req)}"
                 msg += f" ในวันที่ {date} ครับ (แต่อาจจะมีในวันอื่น)"
                 return AgentResponse(content=msg, steps=1, elapsed_ms=int((time.perf_counter() - start_t) * 1000))
 
-            # --- Target Selection ---
-            # Stricter Filter: Exclude youth/reserve unless explicitly in the request
-            youth_terms = ("U18", "U21", "U23", "Reserve", "Women", "Youth")
-            is_youth_req = any(ut.lower() in (lreq.lower() for lreq in leagues_req) for ut in youth_terms)
-            
-            # Split leagues_req if LLM returned them as a single string
-            if leagues_req and len(leagues_req) == 1 and "," in leagues_req[0]:
-                leagues_req = [lreq.strip() for lreq in leagues_req[0].split(",")]
-            
-            filtered_fixtures = []
-            for f in fixtures:
-                l_name = f.get("league", "").lower()
-                
-                # If user specified leagues, ONLY include those leagues
-                if leagues_req and not any(lname.lower() in l_name for lname in leagues_req):
-                    continue
-                
-                # If it's a youth/reserve league but user didn't ask for it, skip
-                if not is_youth_req and any(ut.lower() in l_name for ut in youth_terms):
-                    continue
-                filtered_fixtures.append(f)
+            # ── Target Selection ─────────────────────────────────────────
+            targets = _select_targets(fixtures, leagues_req, countries_req, is_ranking)
 
-            if not filtered_fixtures:
-                 # Fallback to original list if filter was too aggressive
-                 filtered_fixtures = fixtures
-
-            # Ranking/Selection
-            major_leagues = ("Premier League", "La Liga", "Serie A", "Bundesliga", "Ligue 1", "UEFA Champions League", "Thai League 1")
-            
-            def score_match(f):
-                score = 0
-                l_name = f.get("league", "").lower()
-                c_name = f.get("country", "").lower()
-                
-                # Priority 1: Exact League Match
-                if leagues_req and any(lname.lower() == l_name for lname in leagues_req):
-                    score += 100
-                elif leagues_req and any(lname.lower() in l_name for lname in leagues_req):
-                    score += 50
-                
-                # Priority 2: Country Match
-                if countries_req and any(cname.lower() in c_name for cname in countries_req):
-                    score += 40
-                
-                # Priority 3: Major Leagues
-                if any(ml.lower() in l_name for ml in major_leagues):
-                    score += 30
-                
-                return score
-
-            filtered_fixtures.sort(key=score_match, reverse=True)
-            
-            # Select targets: 1 if specific, up to 5 if ranking
-            target_limit = 5 if is_ranking else 1
-            targets = filtered_fixtures[:target_limit]
-
-            # ranking detection for Odds API
             from seahorse_ai.tools.football_stats import getsportkey
-            
-            # Guard getsportkey to prevent crash if targets is empty
-            league_for_odds = ""
-            if leagues_req:
-                league_for_odds = leagues_req[0]
-            elif targets:
-                league_for_odds = targets[0].get("league", "")
-                
+
+            league_for_odds = leagues_req[0] if leagues_req else (targets[0].get("league", "") if targets else "")
             sport_key = getsportkey(league_for_odds) if league_for_odds else None
 
-            # 2. Parallel Deep Analysis
-            async def analyze_target(target):
+            # ── Parallel Deep Analysis ───────────────────────────────────
+            async def analyze_target(target: dict) -> dict:
                 fid = target["fixture_id"]
+                h_id = target.get("home_team_id")
+                a_id = target.get("away_team_id")
+                
                 tasks = []
                 if req_type in ("intel", "value"):
                     tasks.append(self._tools.call("getmatchintel", {"fixtureid": fid}))
                 if req_type in ("odds", "value"):
+                    # For Football-Data.org, we prioritize comparemarketodds for bulk
+                    # but we keep fetchliveodds for compatibility
                     tasks.append(self._tools.call("fetchliveodds", {"fixtureid": fid}))
                 
-                results = await asyncio.gather(*tasks)
-                
-                header = f"### {target['match']} ({target.get('league')} - {target.get('country')})\n"
-                body = ""
-                for r in results:
-                    body += f"[DATA]: {r}\n"
-                return header + body
+                # Fetch statistical backup for Poisson
+                if h_id:
+                    tasks.append(self._tools.call("getteamxg", {"teamid": h_id}))
+                if a_id:
+                    tasks.append(self._tools.call("getteamxg", {"teamid": a_id}))
 
-            # Fetch individual match data and league-wide comparison in parallel
+                results = await asyncio.gather(*tasks)
+
+                from seahorse_ai.analysis.football_eval import extract_and_persist, parse_football_data
+
+                parsed_stats = parse_football_data(target, results)
+                asyncio.create_task(extract_and_persist(target, results))
+                return parsed_stats
+
             analysis_tasks = [analyze_target(t) for t in targets]
             if sport_key and is_ranking:
                 analysis_tasks.append(self._tools.call("comparemarketodds", {"sportkey": sport_key}))
-            
-            all_results = await asyncio.gather(*analysis_tasks)
-            
-            # Separate market comparison from match reports
-            match_reports = all_results[:len(targets)]
-            market_comparison = all_results[len(targets)] if len(all_results) > len(targets) else "No multi-bookmaker data available."
 
-            # Synthesis
+            all_results = await asyncio.gather(*analysis_tasks)
+ 
+            match_stats: list[dict] = all_results[:len(targets)]
+            bulk_odds_text = all_results[len(targets)] if len(all_results) > len(targets) else ""
+            
+            # ── Inject Bulk Odds into Individual Stats ───────────────────
+            if bulk_odds_text and isinstance(bulk_odds_text, str):
+                import re
+                for stats in match_stats:
+                    m_name = stats.get("match_name", "")
+                    # Extract MaxOdds(1:X X:Y 2:Z) from bulk text
+                    # Example: "Man Utd vs Aston Villa: MaxOdds(1:1.75 X:4.25 2:5.0)"
+                    pattern = rf"{re.escape(m_name)}: MaxOdds\(1:([\d.]+) X:([\d.]+) 2:([\d.]+)\)"
+                    match = re.search(pattern, bulk_odds_text)
+                    if match:
+                        stats["odds_home"] = float(match.group(1))
+                        stats["odds_draw"] = float(match.group(2))
+                        stats["odds_away"] = float(match.group(3))
+                        # Trigger re-calculation of edge with new odds
+                        from seahorse_ai.analysis.football_eval import parse_football_data
+                        # Re-run parse (it's safe as it's deterministic) to update best_edge
+                        # We pass a fake result that will be parsed as BestOdds
+                        odds_str = f"BestOdds 1:{stats['odds_home']} X:{stats['odds_draw']} 2:{stats['odds_away']}"
+                        stats.update(parse_football_data(stats, [odds_str]))
+
+            # ── Pre-format analysis in Python (LLM only does presentation) ──
+            report_blocks: list[str] = []
+            for stats in match_stats:
+                report_blocks.append(_format_match_report(stats))
+
+            pre_computed = "\n\n".join(report_blocks)
+
             synthesis_prompt = f"""
-            Analyze the following football data and provide a DEEP, QUANTITATIVE, and PROFESSIONAL report in the user's language.
-            Today is: {today}
-            
-            You analyzed {len(targets)} match(es).
-            Target Data:
-            {chr(10).join(match_reports)}
-            
-            Market Comparison (Multi-Bookmaker):
-            {market_comparison}
-            
-            Context: The user asked "{prompt}".
-            
-            CRITICAL RULES FOR ANALYSIS:
-            1. SHOW THE NUMBERS: Include Win Probabilities (%), xG values, and Market Odds. Mention if a specific bookmaker (from Market Comparison) offers significantly better odds.
-            2. CALCULATE THE EDGE: Use the formula: Edge = (Model Prob * Market Odds) - 1.
-            3. STRICT MARKET & LEAGUE ALIGNMENT: 
-               - If comparing against 'Win' odds (1), use ONLY 'Home Win' probability.
-               - DO NOT combine probabilities (e.g., Win + Draw) unless comparing against a 'Double Chance' (1X/X2) market price.
-               - VERIFY LEAGUE/COUNTRY: Check the [DATA] field for each match. If a match is in "Serie A - Brazil", DO NOT label it as "Serie A - Italy". Group by [Country - League] clearly.
-            4. ANTI-HALLUCINATION RULE:
-               - If [DATA] contains "(DATA UNAVAILABLE)" or "No intelligence found", DO NOT report any Win/Draw/Away percentages. 
-               - DO NOT MAKE UP numbers. Just state that modern analytics for this specific match are currently unavailable.
-            5. KELLY CRITERION: 
-               - If an Edge (+EV) is detected, you MUST calculate the Kelly Criterion (Fractional 0.5) to suggest a stake.
-               - FORMULA: f* = ( (Decimal Odds - 1) * Prob - (1 - Prob) ) / (Decimal Odds - 1)
-               - Show the result as: "Kelly Suggestion: X.XX% of Bankroll".
-               - Assume a Total Bankroll of 10,000 units unless the user mentions otherwise, and provide the concrete stake (e.g., "Recommend 250 units").
-            6. CONFIDENCE & UNCERTAINTY: 
-               - Must state the "Sample Size" (H2H Matches) used for analysis.
-               - Provide a qualitative Confidence Level (Low/Medium/High) based on:
-                   - Data availability (is it UNAVAILABLE?)
-                   - Sample Size (Low if < 3 matches)
-                   - Conflict between Model % and Advice/H2H.
-            7. REASONING: Provide a "Data Reason" (1-2 sentences) linking stats to the pick.
-            8. FORMATTING: Bold headers, Thai if query was Thai. Rank by highest Edge/Value.
-            """
-            final_res = await self._llm.complete([Message(role="user", content=synthesis_prompt)], tier="fast")
+You are a football analyst. The user asked: "{prompt}"
+Today: {today}. {len(targets)} match(es) analyzed.
+
+ALL numbers below are PRE-COMPUTED BY PYTHON. Do NOT recalculate or invent numbers.
+Your job is ONLY to present this data in a clear, professional report.
+
+--- PRE-COMPUTED DATA ---
+{pre_computed}
+"""
+            if bulk_odds_text:
+                synthesis_prompt += f"\n--- MARKET COMPARISON ---\n{bulk_odds_text}\n"
+
+            synthesis_prompt += """
+--- REPORT RULES ---
+1. USE the exact numbers above. Copy them, do not modify.
+2. If a value is "N/A" or 0.0, say "Unavailable".
+3. If best_edge > 5%, highlight as HIGH VALUE.  If negative, say SKIP.
+4. Use tables for multi-match summaries. Rank by edge (highest first).
+5. Reply in the same language the user used (Thai/English).
+6. Include the Poisson most likely score and Over/Under 2.5 analysis.
+"""
+            final_res = await self._llm.complete([Message(role="user", content=synthesis_prompt)], tier="worker")
             content = str(final_res.get("content", final_res) if isinstance(final_res, dict) else final_res)
 
             return AgentResponse(
@@ -749,7 +710,7 @@ class FastPathRouter:
             )
 
         except Exception as e:
-            logger.error(f"Fast football intel error: {e}")
+            logger.error("Fast football intel error: %s", e)
             return None
 
 
@@ -775,7 +736,6 @@ def _split_entities(entity: str) -> list[str]:
 def _robust_json_load(text: str) -> dict[str, Any]:
     """Extract and parse JSON from text, handling markdown fences or preamble."""
     text = text.strip()
-    # Find the first '{' and last '}'
     start = text.find("{")
     end = text.rfind("}")
     if start != -1 and end != -1 and end > start:
@@ -786,4 +746,115 @@ def _robust_json_load(text: str) -> dict[str, Any]:
     return {}
 
 
-    return {}
+def _select_targets(
+    fixtures: list[dict],
+    leagues_req: list[str],
+    countries_req: list[str],
+    is_ranking: bool,
+) -> list[dict]:
+    """Filter and rank fixtures, returning up to 5 (ranking) or 1 (specific)."""
+    youth_terms = ("U18", "U21", "U23", "Reserve", "Women", "Youth")
+    is_youth_req = any(
+        ut.lower() in (lreq.lower() for lreq in leagues_req) for ut in youth_terms
+    )
+
+    if leagues_req and len(leagues_req) == 1 and "," in leagues_req[0]:
+        leagues_req[:] = [lreq.strip() for lreq in leagues_req[0].split(",")]
+
+    filtered: list[dict] = []
+    for f in fixtures:
+        l_name = f.get("league", "").lower()
+        if leagues_req and not any(ln.lower() in l_name for ln in leagues_req):
+            continue
+        if not is_youth_req and any(ut.lower() in l_name for ut in youth_terms):
+            continue
+        filtered.append(f)
+
+    if not filtered:
+        filtered = fixtures
+
+    major = ("premier league", "la liga", "serie a", "bundesliga", "ligue 1",
+             "uefa champions league", "thai league 1")
+
+    def score_match(f: dict) -> int:
+        s = 0
+        l_name = f.get("league", "").lower()
+        c_name = f.get("country", "").lower()
+        if leagues_req and any(ln.lower() == l_name for ln in leagues_req):
+            s += 100
+        elif leagues_req and any(ln.lower() in l_name for ln in leagues_req):
+            s += 50
+        if countries_req and any(cn.lower() in c_name for cn in countries_req):
+            s += 40
+        if any(ml in l_name for ml in major):
+            s += 30
+        return s
+
+    filtered.sort(key=score_match, reverse=True)
+    return filtered[: 5 if is_ranking else 1]
+
+
+def _format_match_report(stats: dict) -> str:
+    """Format pre-computed stats into a text block for the LLM to present."""
+    lines = [
+        f"### {stats.get('match_name', 'Unknown')} ({stats.get('league_name', '')} - {stats.get('country', '')})",
+        "",
+        f"API Prob: Home {stats.get('prob_h', 0):.1%}  Draw {stats.get('prob_d', 0):.1%}  Away {stats.get('prob_a', 0):.1%}",
+        f"xG (avg last 5): Home {stats.get('h_xg', 'N/A')}  Away {stats.get('a_xg', 'N/A')}",
+    ]
+
+    if stats.get("poisson_h", 0) > 0:
+        lines.append(
+            f"Poisson Prob: Home {stats['poisson_h']:.1%}  Draw {stats['poisson_d']:.1%}  Away {stats['poisson_a']:.1%}"
+        )
+        lines.append(
+            f"Most Likely Score: {stats.get('most_likely_score', 'N/A')} (prob {stats.get('most_likely_score_prob', 0):.1%})"
+        )
+        lines.append(
+            f"Over 2.5: {stats.get('poisson_over25', 0):.1%}  Under 2.5: {stats.get('poisson_under25', 0):.1%}"
+        )
+
+    lines.append("")
+    lines.append("Market Odds (best across bookmakers):")
+    lines.append(
+        f"  Home: {stats.get('odds_home', 0):.2f} ({stats.get('bk_home', '')})"
+        f"  Draw: {stats.get('odds_draw', 0):.2f} ({stats.get('bk_draw', '')})"
+        f"  Away: {stats.get('odds_away', 0):.2f} ({stats.get('bk_away', '')})"
+    )
+
+    if stats.get("ou_over25_odds", 0) > 0:
+        lines.append(
+            f"  Over 2.5: {stats['ou_over25_odds']:.2f}  Under 2.5: {stats.get('ou_under25_odds', 0):.2f}"
+        )
+
+    lines.append("")
+    lines.append("Edge Analysis (all 3 outcomes):")
+    lines.append(
+        f"  Home edge: {stats.get('edge_home', 0):+.2%}"
+        f"  Draw edge: {stats.get('edge_draw', 0):+.2%}"
+        f"  Away edge: {stats.get('edge_away', 0):+.2%}"
+    )
+    lines.append(
+        f"  >>> BEST VALUE: {stats.get('best_side', 'N/A')}"
+        f" @ {stats.get('best_odds', 0):.2f}"
+        f"  Edge: {stats.get('best_edge', 0):+.2%}"
+        f"  Kelly stake: {stats.get('best_stake', 0):.2%} of bankroll"
+    )
+
+    if stats.get("ou_edge_over25", 0) != 0 or stats.get("ou_edge_under25", 0) != 0:
+        lines.append(
+            f"  Over 2.5 edge: {stats.get('ou_edge_over25', 0):+.2%}"
+            f"  Under 2.5 edge: {stats.get('ou_edge_under25', 0):+.2%}"
+        )
+
+    lines.append("")
+    lines.append(f"H2H matches: {stats.get('h2h_count', 0)}  Advice: {stats.get('advice', 'N/A')}")
+
+    comparison = stats.get("comparison", {})
+    if comparison:
+        lines.append("Form comparison:")
+        for key, val in comparison.items():
+            if isinstance(val, dict):
+                lines.append(f"  {key}: Home {val.get('home', 'N/A')}  Away {val.get('away', 'N/A')}")
+
+    return "\n".join(lines)

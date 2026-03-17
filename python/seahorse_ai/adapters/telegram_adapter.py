@@ -115,6 +115,21 @@ class TelegramAdapter:
             parse_mode=ParseMode.MARKDOWN,
         )
 
+    async def stats_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle /stats command to show performance report."""
+        from seahorse_ai.analysis.football_eval import get_performance_stats
+        
+        chat_id = update.effective_chat.id
+        await context.bot.send_chat_action(chat_id=chat_id, action="typing")
+        
+        report = await get_performance_stats()
+        await self._safe_send_message(
+            context,
+            chat_id,
+            report,
+            parse_mode=ParseMode.MARKDOWN,
+        )
+
     async def _safe_send_message(
         self, context: ContextTypes.DEFAULT_TYPE, chat_id: int, text: str, **kwargs: object
     ) -> None:
@@ -523,11 +538,14 @@ def main() -> None:
 
     app.add_handler(CommandHandler("start", adapter.start_command))
     app.add_handler(CommandHandler("id", adapter.id_command))
+    app.add_handler(CommandHandler("stats", adapter.stats_command))
 
     app.add_handler(MessageHandler(filters.ALL, adapter.handle_message))
 
     app.add_handler(CallbackQueryHandler(adapter.handle_callback))
 
+    import asyncio
+    from seahorse_ai.analysis.football_eval import init_eval_db, resolve_pending_predictions
     from seahorse_ai.analysis.watcher import AnomalyWatcher
 
     watcher = AnomalyWatcher(llm_backend=router)
@@ -535,9 +553,20 @@ def main() -> None:
 
     async def post_init(application: any) -> None:
         interval = int(os.environ.get("SEAHORSE_ALERTS_INTERVAL", "300"))
-        import asyncio
         asyncio.create_task(watcher.start(interval_seconds=interval))
-        logger.info("Telegram: AnomalyWatcher task started via post_init.")
+        asyncio.create_task(init_eval_db())
+        
+        # Phase 2: Result Collector Task (runs every 1 hour)
+        async def result_collector_loop():
+            while True:
+                try:
+                    await resolve_pending_predictions()
+                except Exception as e:
+                    logger.error(f"Telegram: Result collector loop error: {e}")
+                await asyncio.sleep(3600)
+        
+        asyncio.create_task(result_collector_loop())
+        logger.info("Telegram: AnomalyWatcher, FootballEval, and ResultCollector tasks started.")
 
     app.post_init = post_init
 

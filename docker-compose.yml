@@ -24,6 +24,7 @@ services:
       - .env
     environment:
       SEAHORSE_PG_URI: postgresql://seahorse_user:seahorse_password@db:5432/seahorse_enterprise
+      FOOTBALL_PG_URI: postgresql://user:pass@football-db:5432/eval
     volumes:
       - ./workspace:/app/workspace
       - /tmp/seahorse_charts:/tmp/seahorse_charts
@@ -37,6 +38,7 @@ services:
       - .env
     environment:
       SEAHORSE_PG_URI: postgresql://seahorse_user:seahorse_password@db:5432/seahorse_enterprise
+      FOOTBALL_PG_URI: postgresql://user:pass@football-db:5432/eval
     command: ["uv", "run", "python", "-m", "seahorse_ai.analysis.feeder"]
 
   telegram-agent:
@@ -48,6 +50,7 @@ services:
       - .env
     environment:
       SEAHORSE_PG_URI: postgresql://seahorse_user:seahorse_password@db:5432/seahorse_enterprise
+      FOOTBALL_PG_URI: postgresql://user:pass@football-db:5432/eval
     command:
       ["uv", "run", "python", "-m", "seahorse_ai.adapters.telegram_adapter"]
 
@@ -61,6 +64,18 @@ services:
     volumes:
       - neo4j_data:/data
 
+  football-db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: pass
+      POSTGRES_DB: eval
+    ports:
+      - "5433:5432"
+    volumes:
+      - football_data:/var/lib/postgresql/data
+
 volumes:
   postgres_data:
   neo4j_data:
+  football_data:

@@ -179,6 +179,374 @@
         "league": "Serie A",
         "country": "Brazil"
       }
+    ],
+    "search_ALL_Premier League_2026-03-15": [
+      {
+        "fixture_id": 1524198,
+        "match": "Broadbeach United vs North Star",
+        "status": "Match Finished",
+        "league": "Queensland Premier League",
+        "country": "Australia"
+      },
+      {
+        "fixture_id": 1449264,
+        "match": "Wofoo Tai Po vs Southern District",
+        "status": "Match Finished",
+        "league": "Premier League",
+        "country": "Hong-Kong"
+      },
+      {
+        "fixture_id": 1524115,
+        "match": "Brisbane Strikers vs Caboolture",
+        "status": "Match Abandoned",
+        "league": "Queensland Premier League",
+        "country": "Australia"
+      },
+      {
+        "fixture_id": 1435655,
+        "match": "Taichung Futuro vs Tainan City",
+        "status": "Match Finished",
+        "league": "Taiwan Football Premier League",
+        "country": "Chinese-Taipei"
+      },
+      {
+        "fixture_id": 1524116,
+        "match": "St George Willawong vs Holland Park Hawks",
+        "status": "Second Half",
+        "league": "Queensland Premier League",
+        "country": "Australia"
+      },
+      {
+        "fixture_id": 1449265,
+        "match": "Hong Kong FC vs Warriors",
+        "status": "Second Half",
+        "league": "Premier League",
+        "country": "Hong-Kong"
+      },
+      {
+        "fixture_id": 1391568,
+        "match": "Epitsentr Dunayivtsi vs Ruh Lviv",
+        "status": "Not Started",
+        "league": "Premier League",
+        "country": "Ukraine"
+      },
+      {
+        "fixture_id": 1400191,
+        "match": "Akron vs Akhmat",
+        "status": "Not Started",
+        "league": "Premier League",
+        "country": "Russia"
+      },
+      {
+        "fixture_id": 1435644,
+        "match": "Tatung vs AC Taipei",
+        "status": "Not Started",
+        "league": "Taiwan Football Premier League",
+        "country": "Chinese-Taipei"
+      },
+      {
+        "fixture_id": 1470746,
+        "match": "Shabana vs Kariobangi Sharks",
+        "status": "Not Started",
+        "league": "FKF Premier League",
+        "country": "Kenya"
+      },
+      {
+        "fixture_id": 1470749,
+        "match": "Tusker vs Homeboyz",
+        "status": "Not Started",
+        "league": "FKF Premier League",
+        "country": "Kenya"
+      },
+      {
+        "fixture_id": 1531682,
+        "match": "LDF vs Liphakoe",
+        "status": "Not Started",
+        "league": "Premier League",
+        "country": "Lesotho"
+      },
+      {
+        "fixture_id": 1531683,
+        "match": "Linare vs LMPS",
+        "status": "Not Started",
+        "league": "Premier League",
+        "country": "Lesotho"
+      },
+      {
+        "fixture_id": 1512035,
+        "match": "Manzini Wanderers vs Ubombo Sugar",
+        "status": "Not Started",
+        "league": "Premier League",
+        "country": "Eswatini"
+      },
+      {
+        "fixture_id": 1528851,
+        "match": "Pyunik Yerevan vs Alashkert",
+        "status": "Not Started",
+        "league": "Premier League",
+        "country": "Armenia"
+      },
+      {
+        "fixture_id": 1470745,
+        "match": "KCB vs Murang'a SEAL",
+        "status": "Not Started",
+        "league": "FKF Premier League",
+        "country": "Kenya"
+      },
+      {
+        "fixture_id": 1533846,
+        "match": "Wathba vs Jaish",
+        "status": "Not Started",
+        "league": "Premier League",
+        "country": "Syria"
+      },
+      {
+        "fixture_id": 1508061,
+        "match": "Reyady Abaseya vs Safa",
+        "status": "Match Postponed",
+        "league": "Premier League",
+        "country": "Lebanon"
+      },
+      {
+        "fixture_id": 1421850,
+        "match": "Geylang International vs Albirex Niigata S",
+        "status": "Not Started",
+        "league": "Premier League",
+        "country": "Singapore"
+      },
+      {
+        "fixture_id": 1421851,
+        "match": "Balestier Khalsa vs Home United",
+        "status": "Not Started",
+        "league": "Premier League",
+        "country": "Singapore"
+      },
+      {
+        "fixture_id": 1470748,
+        "match": "Ulinzi Stars vs GOR Mahia",
+        "status": "Not Started",
+        "league": "FKF Premier League",
+        "country": "Kenya"
+      },
+      {
+        "fixture_id": 1507575,
+        "match": "Tarxien Rainbows vs Zabbar St. Patrick",
+        "status": "Not Started",
+        "league": "Premier League",
+        "country": "Malta"
+      },
+      {
+        "fixture_id": 1522283,
+        "match": "Mekelle Kenema vs Welayta Dicha",
+        "status": "Not Started",
+        "league": "Premier League",
+        "country": "Ethiopia"
+      },
+      {
+        "fixture_id": 1522284,
+        "match": "Negelle Arsi vs Mebrat Hayl",
+        "status": "Not Started",
+        "league": "Premier League",
+        "country": "Ethiopia"
+      },
+      {
+        "fixture_id": 1391574,
+        "match": "Kolos Kovalivka vs Zorya Luhansk",
+        "status": "Not Started",
+        "league": "Premier League",
+        "country": "Ukraine"
+      },
+      {
+        "fixture_id": 1400195,
+        "match": "Nizhny Novgorod vs Krylia Sovetov",
+        "status": "Not Started",
+        "league": "Premier League",
+        "country": "Russia"
+      },
+      {
+        "fixture_id": 1531684,
+        "match": "Lijabatho vs Machokha",
+        "status": "Not Started",
+        "league": "Premier League",
+        "country": "Lesotho"
+      },
+      {
+        "fixture_id": 1531685,
+        "match": "Matlama vs Lifofane",
+        "status": "Not Started",
+        "league": "Premier League",
+        "country": "Lesotho"
+      },
+      {
+        "fixture_id": 1512030,
+        "match": "Sisonkhe vs Highlanders",
+        "status": "Not Started",
+        "league": "Premier League",
+        "country": "Eswatini"
+      },
+      {
+        "fixture_id": 1379263,
+        "match": "Crystal Palace vs Leeds",
+        "status": "Not Started",
+        "league": "Premier League",
+        "country": "England"
+      },
+      {
+        "fixture_id": 1379265,
+        "match": "Manchester United vs Aston Villa",
+        "status": "Not Started",
+        "league": "Premier League",
+        "country": "England"
+      },
+      {
+        "fixture_id": 1379266,
+        "match": "Nottingham Forest vs Fulham",
+        "status": "Not Started",
+        "league": "Premier League",
+        "country": "England"
+      },
+      {
+        "fixture_id": 1527542,
+        "match": "Ozgon vs Alga",
+        "status": "Not Started",
+        "league": "Premier League",
+        "country": "Kyrgyzstan"
+      },
+      {
+        "fixture_id": 1527543,
+        "match": "Asiagoal vs Talant",
+        "status": "Not Started",
+        "league": "Premier League",
+        "country": "Kyrgyzstan"
+      },
+      {
+        "fixture_id": 1507572,
+        "match": "Mosta vs Hamrun Spartans",
+        "status": "Not Started",
+        "league": "Premier League",
+        "country": "Malta"
+      },
+      {
+        "fixture_id": 1528852,
+        "match": "FC Urartu vs BKMA",
+        "status": "Not Started",
+        "league": "Premier League",
+        "country": "Armenia"
+      },
+      {
+        "fixture_id": 1391573,
+        "match": "Shakhtar Donetsk vs Metalist 1925 Kharkiv",
+        "status": "Not Started",
+        "league": "Premier League",
+        "country": "Ukraine"
+      },
+      {
+        "fixture_id": 1400196,
+        "match": "Rubin vs Lokomotiv",
+        "status": "Not Started",
+        "league": "Premier League",
+        "country": "Russia"
+      },
+      {
+        "fixture_id": 1379264,
+        "match": "Liverpool vs Tottenham",
+        "status": "Not Started",
+        "league": "Premier League",
+        "country": "England"
+      },
+      {
+        "fixture_id": 1526459,
+        "match": "Al Jahra vs Al Arabi",
+        "status": "Match Postponed",
+        "league": "Premier League",
+        "country": "Kuwait"
+      },
+      {
+        "fixture_id": 1526460,
+        "match": "Al Salmiyah vs Al Shabab",
+        "status": "Match Postponed",
+        "league": "Premier League",
+        "country": "Kuwait"
+      },
+      {
+        "fixture_id": 1533847,
+        "match": "Khan Shaykhun SC vs Foutoua",
+        "status": "Not Started",
+        "league": "Premier League",
+        "country": "Syria"
+      },
+      {
+        "fixture_id": 1514411,
+        "match": "Kick Start vs Brittons Hill",
+        "status": "Not Started",
+        "league": "Premier League",
+        "country": "Barbados"
+      },
+      {
+        "fixture_id": 1531840,
+        "match": "Chapelton vs Dunbeholden",
+        "status": "Not Started",
+        "league": "Premier League",
+        "country": "Jamaica"
+      },
+      {
+        "fixture_id": 1531842,
+        "match": "Portmore United vs Harbour View",
+        "status": "Not Started",
+        "league": "Premier League",
+        "country": "Jamaica"
+      },
+      {
+        "fixture_id": 1531843,
+        "match": "Treasure Beach vs Cavalier",
+        "status": "Not Started",
+        "league": "Premier League",
+        "country": "Jamaica"
+      },
+      {
+        "fixture_id": 1514412,
+        "match": "UWI Blackbirds vs Paradise",
+        "status": "Not Started",
+        "league": "Premier League",
+        "country": "Barbados"
+      },
+      {
+        "fixture_id": 1531908,
+        "match": "Nouadhibou vs Gendrim",
+        "status": "Not Started",
+        "league": "Premier League",
+        "country": "Mauritania"
+      }
+    ],
+    "search_Arsenal_None_2026-03-15": [
+      {
+        "fixture_id": 1526668,
+        "match": "Ural vs Arsenal Tula",
+        "status": "Second Half",
+        "league": "First League",
+        "country": "Russia"
+      },
+      {
+        "fixture_id": 1417296,
+        "match": "London City Lionesses vs Arsenal W",
+        "status": "Not Started",
+        "league": "FA WSL",
+        "country": "England"
+      },
+      {
+        "fixture_id": 1522295,
+        "match": "Arsenal vs Slavia Mozyr",
+        "status": "Not Started",
+        "league": "Coppa",
+        "country": "Belarus"
+      },
+      {
+        "fixture_id": 1497889,
+        "match": "Arsenal Tivat vs Bokelj",
+        "status": "Not Started",
+        "league": "First League",
+        "country": "Montenegro"
+      }
     ]
   },
   "leagues": {}

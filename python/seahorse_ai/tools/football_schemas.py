@@ -57,16 +57,29 @@ class PredictionPercent(BaseModel):
     away: str
 
 
-class PredictionTeams(BaseModel):
-    home: Team
-    away: Team
+class PredictionTeamDetail(BaseModel, extra="allow"):
+    """Extended team info from the predictions endpoint.
+
+    ``extra="allow"`` ensures fields like ``last_5``, ``league``, etc.
+    are preserved instead of being silently stripped by Pydantic.
+    """
+
+    id: int
+    name: str | None = None
+    logo: str | None = None
+    winner: bool | Any = None
 
 
-class PredictionData(BaseModel):
+class PredictionTeams(BaseModel, extra="allow"):
+    home: PredictionTeamDetail
+    away: PredictionTeamDetail
+
+
+class PredictionData(BaseModel, extra="allow"):
     predictions: dict[str, Any]
     teams: PredictionTeams
     comparison: dict[str, Any]
-    h2h: list[FullMatchData]
+    h2h: list[Any] = []
 
 
 class OddsValue(BaseModel):
