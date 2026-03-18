@@ -24,7 +24,7 @@ async def run_scenario(scenario: Dict, feedback_mode: str):
     feedback_mode: "baseline", "single", "quorum"
     """
     pipeline = get_pipeline()
-    pipeline._use_rust = False # Force Python mode for benchmark (metadata update support)
+    pipeline._use_rust = True # Ensure Rust mode is tested (Metadata Atomic Update Support)
     await pipeline.clear() # Reset for clean run
     
     # 1. Inject Facts

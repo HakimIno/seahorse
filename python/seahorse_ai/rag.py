@@ -263,15 +263,32 @@ class RAGPipeline:
         return None
 
     async def update_metadata(self, doc_id: int, metadata: dict) -> bool:
-        """Update metadata for an existing record."""
+        """Update metadata for an existing record in-place."""
+        import json
+        
+        # 1. Retrieve current doc to get full existing metadata
+        doc = await self.retrieve(doc_id)
+        if not doc:
+            return False
+            
+        current_meta = doc.get("metadata", {})
+        # Merge new metadata into existing
+        current_meta.update(metadata)
+        
         if not self._use_rust:
             if doc_id in self._texts:
-                self._texts[doc_id]["metadata"].update(metadata)
+                self._texts[doc_id]["metadata"] = current_meta
                 return True
+            return False
         else:
-            # Rust side update would require FFI expansion.
-            pass
-        return False
+            # Atomic update in Rust DashMap via FFI
+            meta_json = json.dumps(current_meta)
+            # FFI signature: update_metadata(doc_id: int, meta_json: str) -> bool
+            try:
+                return self._memory.update_metadata(doc_id, meta_json)
+            except Exception as e:
+                logger.error("rag.update_metadata: Rust FFI failed: %s", e)
+                return False
 
     async def delete_by_text(self, query: str, threshold: float = 0.45) -> dict | None:
         """Search for a matching memory and remove it if distance < threshold.

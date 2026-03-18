@@ -82,6 +82,12 @@ impl PyAgentMemory {
         py.allow_threads(|| self.inner.remove(doc_id))
     }
 
+    /// Atomically update metadata for an existing document.
+    pub fn update_metadata(&self, py: Python<'_>, doc_id: usize, meta_json: String) -> PyResult<bool> {
+        let updated = py.allow_threads(|| self.inner.update_metadata(doc_id, meta_json));
+        Ok(updated)
+    }
+
     #[getter]
     pub fn dim(&self) -> usize {
         self.inner.dim()

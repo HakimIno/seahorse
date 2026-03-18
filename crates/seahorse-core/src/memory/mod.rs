@@ -90,6 +90,17 @@ impl AgentMemory {
         self.metadata.remove(&id).map(|(_, v)| v)
     }
 
+    /// Atomically update the JSON metadata for a specific document ID.
+    /// Returns true if the document existed and was updated, false otherwise.
+    pub fn update_metadata(&self, id: usize, meta_json: String) -> bool {
+        if let Some(mut entry) = self.metadata.get_mut(&id) {
+            entry.value_mut().1 = meta_json;
+            true
+        } else {
+            false
+        }
+    }
+
     pub fn dim(&self) -> usize {
         self.dim
     }
