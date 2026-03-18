@@ -402,6 +402,40 @@ class QdrantRAGPipeline:
         except Exception:
             return 0
 
+    async def retrieve(self, point_id: Any, agent_id: str | None = None) -> dict | None:
+        """Retrieve a specific point by ID from Qdrant."""
+        collection = self._collection_name(agent_id)
+        try:
+            # Try numeric ID first, then search by payload id if it's a UUID string
+            resp = await self._client.retrieve(
+                collection_name=collection,
+                ids=[point_id],
+                with_payload=True
+            )
+            if resp:
+                p = resp[0]
+                payload = dict(p.payload or {})
+                text = payload.pop("text", "")
+                return {"id": p.id, "text": text, "metadata": payload}
+            return None
+        except Exception as e:
+            logger.debug("qdrant.retrieve failed for id=%s: %s", point_id, e)
+            return None
+
+    async def update_metadata(self, point_id: Any, metadata: dict, agent_id: str | None = None) -> bool:
+        """Update/merge metadata for a specific point in Qdrant."""
+        collection = self._collection_name(agent_id)
+        try:
+            await self._client.set_payload(
+                collection_name=collection,
+                payload=metadata,
+                points=[point_id],
+            )
+            return True
+        except Exception as e:
+            logger.error("qdrant.update_metadata failed: %s", e)
+            return False
+
     async def clear(self, agent_id: str | None = None) -> None:
         """Wipe the collection."""
         collection = self._collection_name(agent_id)

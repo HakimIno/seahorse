@@ -69,10 +69,6 @@ class HindsightReranker:
             context_boost = self._calculate_context_boost(doc.get("text", ""), agent_role, current_task)
             
             # 3. Final Utility Formula integration
-            # Utility = ((Integrated Score) + direct_bonus) * recency
-            # Weight distribution: Rel(0.4), Access(0.1), Conf(0.1), Context(0.2)
-            
-            # Base formula with distance decay (for inferences)
             base_score = (
                 (rel * 0.4) + 
                 (access_score * 0.1) + 
@@ -80,14 +76,37 @@ class HindsightReranker:
                 (context_boost * 0.2)
             ) * dist_decay
             
-            # G. Direct Answer Bonus (Priority #1 fix)
+            # G. Success & Context Bonuses (Risk 3)
+            max_bonus = 0.3
+            success_bonus = min(doc.get("metadata", {}).get("success_count", 0) * 0.05, max_bonus)
             direct_bonus = 0.5 if dist == 0 else 0.0
+            total_bonus = success_bonus + direct_bonus
             
-            # Apply Recency (Temporal Decay) as a primary multiplier
-            # This ensures that expired records (recency ~ 0) always rank at the bottom.
-            utility = (base_score + direct_bonus) * recency
+            # H. Penalty & Decay Logic (Risk 1 & 2)
+            # penalty_floor ensures "scars" remain even after long periods
+            penalty_floor = 0.05
+            raw_penalty = min(doc.get("metadata", {}).get("penalty_score", 0.0), 1.0)
+            penalty_role = doc.get("metadata", {}).get("penalty_role")
+            
+            # Correcting double-apply recency bug:
+            # Penalty decays with recency independently but respects the floor
+            penalty_decayed = max(raw_penalty * recency, raw_penalty * penalty_floor)
+            
+            # I. Contextual Multiplier (Risk 4)
+            role_factor = 1.0
+            if penalty_role and penalty_role != str(agent_role).upper():
+                role_factor = 0.4
+                
+            penalty_effective = penalty_decayed * role_factor * 0.8
+            
+            # 3. Final Utility Formula (Refined Separation)
+            # Utility = max(0.0, (Positive Utility * Recency) - (Effective Penalty))
+            positive_utility = (base_score + total_bonus) * recency
+            utility = max(0.0, positive_utility - penalty_effective)
             
             doc["utility_score"] = utility
+            doc["penalty_applied"] = penalty_effective
+            doc["success_bonus"] = success_bonus
             doc["rerank_relevance"] = rel
             doc["context_boost"] = context_boost
 

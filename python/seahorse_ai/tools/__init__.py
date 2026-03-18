@@ -25,6 +25,10 @@ from seahorse_ai.tools.competitor_radar import competitor_radar
 from seahorse_ai.tools.db import database_query, database_schema
 from seahorse_ai.tools.duckdb_analyst import duckdb_sql, sql_to_polars
 from seahorse_ai.tools.filesystem import list_files, read_file, write_file
+from seahorse_ai.tools.graph_memory import (
+    graph_search_neighbors,
+    graph_store_triple,
+)
 from seahorse_ai.tools.football_stats import (
     calculatebetvalue,
     comparemarketodds,
@@ -47,6 +51,7 @@ from seahorse_ai.tools.mcp_client import load_mcp_tools
 from seahorse_ai.tools.memory import (
     memory_clear,
     memory_delete,
+    memory_feedback,
     memory_search,
     memory_store,
 )
@@ -76,6 +81,7 @@ __all__ = [
     "write_file",
     "memory_store",
     "memory_search",
+    "memory_feedback",
     "memory_delete",
     "memory_clear",
     "browser_scan",
@@ -112,6 +118,8 @@ __all__ = [
     "fetchliveodds",
     "searchfixture",
     "searchleague",
+    "graph_store_triple",
+    "graph_search_neighbors",
 ]
 
 
@@ -127,6 +135,7 @@ def make_default_registry() -> SeahorseToolRegistry:
         write_file,
         memory_store,
         memory_search,
+        memory_feedback,
         memory_delete,
         memory_clear,
         browser_scan,
@@ -162,6 +171,8 @@ def make_default_registry() -> SeahorseToolRegistry:
         fetchliveodds,
         searchfixture,
         searchleague,
+        graph_store_triple,
+        graph_search_neighbors,
     ):
         registry.register(fn)
     return registry

@@ -136,7 +136,13 @@ Answer:"""
         try:
             entities = await self._extract_entities_from_query(query)
             if not entities:
-                entities = [w.strip("?,.!") for w in query.split() if len(w) > 3]
+                # Better Thai fallback: Use simple length heuristic or pythainlp if available
+                try:
+                    import pythainlp
+                    entities = pythainlp.tokenize.word_tokenize(query, keep_whitespace=False)
+                    entities = [e for e in entities if len(e) > 1]
+                except ImportError:
+                    entities = [w.strip("?,.!") for w in query.split() if len(w) > 2]
             
             logger.info("Recaller: Graph reasoning for entities: %s (hops=%d)", entities, hops)
             

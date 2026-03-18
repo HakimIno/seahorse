@@ -1,8 +1,9 @@
+import asyncio
 import logging
-import os
-from typing import Any
-from seahorse_ai.tools import tool
+from datetime import UTC, datetime
+
 from seahorse_ai.rag import get_pipeline
+from seahorse_ai.tools import tool
 
 logger = logging.getLogger(__name__)
 
@@ -78,6 +79,83 @@ async def memory_reflect(agent_id: str | None = None, k: int = 50) -> str:
     if models:
         return f"Reflection completed: Synthesized {len(models)} new Mental Models (insights). ✅"
     return "Reflection complete. No new insights found at this time."
+
+
+_feedback_lock = asyncio.Lock()
+
+@tool(
+    "Mark a memory as misleading, incorrect, or low-quality. "
+    "Use this when an agent makes a mistake based on a specific memory. "
+    "Multiple reports from distinct roles increase the penalty (Consensus). "
+    "The memory will be downranked in future retrievals."
+)
+async def memory_feedback(doc_id: str | int, penalty: float = 0.5, reason: str = "", role: str | None = None) -> str:
+    """Apply a penalty score using Consensus Logic with Audit Trail and Role-Uniqueness."""
+    async with _feedback_lock:
+        pipeline = get_pipeline()
+        role_name = (role or "UNKNOWN").upper()
+        
+        # 1. Retrieve existing memory
+        existing = await pipeline.retrieve(doc_id) if hasattr(pipeline, "retrieve") else None
+        
+        history = []
+        if existing and "metadata" in existing:
+            history = existing["metadata"].get("penalty_history", [])
+            
+        # 2. Add new feedback entry (Audit Trail)
+        new_entry = {
+            "role": role_name,
+            "penalty": float(penalty),
+            "reason": reason,
+            "at": datetime.now(UTC).isoformat()
+        }
+        history.append(new_entry)
+        
+        # 3. Calculate Consensus (Quorum) based on UNIQUE ROLES
+        # We use the LATEST reported penalty from each role to allow "changing minds"
+        role_opinions = {}
+        for entry in history:
+            r = entry["role"]
+            if r == "UNKNOWN":
+                continue
+            role_opinions[r] = entry["penalty"]
+        
+        unique_roles = list(role_opinions.keys())
+        quorum_count = len(unique_roles)
+        
+        # Tiered capping (same as before)
+        if quorum_count <= 1:
+            max_allowed = 0.4
+        elif quorum_count == 2:
+            max_allowed = 0.7
+        else:
+            max_allowed = 1.0
+            
+        # Final score is the average of latest role opinions, capped by quorum tier
+        if role_opinions:
+            raw_consensus = sum(role_opinions.values()) / len(role_opinions)
+            final_penalty = max(0.0, min(raw_consensus, max_allowed))
+        else:
+            # Fallback for UNKNOWN role
+            final_penalty = max(0.0, min(float(penalty), 0.2)) 
+        
+        # 4. Update metadata
+        metadata = {
+            "penalty_score": round(final_penalty, 4),
+            "quorum_count": quorum_count,
+            "penalty_at": new_entry["at"],
+            "penalty_role": role_name,
+            "penalty_history": history[-20:] # Keep history for audit
+        }
+        
+        if hasattr(pipeline, "update_metadata"):
+            await pipeline.update_metadata(doc_id, metadata)
+            status = "Consensus Verified ✅"
+        else:
+            status = "Metadata update not supported ⚠️"
+            
+        logger.info("memory_feedback: doc_id=%s quorum=%d penalty=%s", doc_id, quorum_count, final_penalty)
+        return f"Applied penalty {final_penalty} (Quorum: {quorum_count} roles) to record {doc_id}. {status}"
 
 
 @tool(

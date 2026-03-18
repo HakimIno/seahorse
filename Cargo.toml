@@ -71,3 +71,9 @@ must_use_candidate         = "allow"
 module_name_repetitions    = "allow"
 missing_errors_doc         = "allow"
 missing_panics_doc         = "allow"
+
+[profile.dev]
+incremental = false
+
+[profile.release]
+incremental = false

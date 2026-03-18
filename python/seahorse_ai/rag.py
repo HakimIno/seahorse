@@ -245,6 +245,30 @@ class RAGPipeline:
         except Exception as e:
             logger.warning("rag.rerank failed: %s. Falling back to vector search order.", e)
             return results
+    async def retrieve(self, doc_id: int) -> dict | None:
+        """Retrieve a specific memory record by its ID."""
+        if not self._use_rust:
+            if doc_id in self._texts:
+                return {
+                    "id": doc_id,
+                    "text": self._texts[doc_id]["text"],
+                    "metadata": self._texts[doc_id]["metadata"]
+                }
+        else:
+            # Rust HNSW is currently append-only for metadata in this FFI version.
+            pass
+        return None
+
+    async def update_metadata(self, doc_id: int, metadata: dict) -> bool:
+        """Update metadata for an existing record."""
+        if not self._use_rust:
+            if doc_id in self._texts:
+                self._texts[doc_id]["metadata"].update(metadata)
+                return True
+        else:
+            # Rust side update would require FFI expansion.
+            pass
+        return False
 
     async def delete_by_text(self, query: str, threshold: float = 0.45) -> dict | None:
         """Search for a matching memory and remove it if distance < threshold.

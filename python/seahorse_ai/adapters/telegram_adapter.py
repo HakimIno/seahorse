@@ -117,6 +117,10 @@ class TelegramAdapter:
 
     async def stats_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle /stats command to show performance report."""
+        if os.environ.get("SEAHORSE_ENABLE_FOOTBALL") != "true":
+            await update.message.reply_text("⚽ Football stats are currently disabled.")
+            return
+            
         from seahorse_ai.analysis.football_eval import get_performance_stats
         
         chat_id = update.effective_chat.id
@@ -127,6 +131,82 @@ class TelegramAdapter:
             context,
             chat_id,
             report,
+            parse_mode=ParseMode.MARKDOWN,
+        )
+
+    async def reflect_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle /reflect command to consolidate memory."""
+        from seahorse_ai.tools.memory import memory_reflect
+        
+        chat_id = update.effective_chat.id
+        user_id = update.effective_user.id if update.effective_user else chat_id
+        agent_id = f"telegram_{user_id}"
+        
+        await context.bot.send_chat_action(chat_id=chat_id, action="typing")
+        
+        result = await memory_reflect(agent_id=agent_id)
+        await self._safe_send_message(
+            context,
+            chat_id,
+            f"🧠 **Hindsight Reflection**\n{result}",
+            parse_mode=ParseMode.MARKDOWN,
+        )
+
+    async def remember_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle /remember command to explicitly store a fact."""
+        from seahorse_ai.tools.memory import memory_store
+        
+        chat_id = update.effective_chat.id
+        user_id = update.effective_user.id if update.effective_user else chat_id
+        agent_id = f"telegram_{user_id}"
+        
+        # Extract text after /remember
+        text = " ".join(context.args) if context.args else ""
+        if not text:
+            await update.message.reply_text("💡 โปรดใส่ข้อความที่ต้องการให้จำ เช่น: `/remember พรุ่งนี้มีประชุมตอน 10 โมง`", parse_mode=ParseMode.MARKDOWN)
+            return
+
+        await context.bot.send_chat_action(chat_id=chat_id, action="typing")
+        
+        result = await memory_store(text, agent_id=agent_id)
+        await self._safe_send_message(
+            context,
+            chat_id,
+            f"✅ **จดจำสำเร็จ**\n{result}",
+            parse_mode=ParseMode.MARKDOWN,
+        )
+
+    async def search_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle /search command to query memory."""
+        from seahorse_ai.tools.memory import memory_search
+        
+        chat_id = update.effective_chat.id
+        user_id = update.effective_user.id if update.effective_user else chat_id
+        agent_id = f"telegram_{user_id}"
+        
+        query = " ".join(context.args) if context.args else ""
+        if not query:
+            await update.message.reply_text("🔍 โปรดใส่ข้อความที่ต้องการค้นหา เช่น: `/search ประชุมครั้งที่แล้วคุยเรื่องอะไร`", parse_mode=ParseMode.MARKDOWN)
+            return
+
+        await context.bot.send_chat_action(chat_id=chat_id, action="typing")
+        
+        results = await memory_search(query, agent_id=agent_id)
+        
+        if isinstance(results, str):
+            response = results
+        else:
+            response = "🔍 **ผลการค้นหาจากความจำ:**\n\n"
+            for i, res in enumerate(results[:5]):
+                content = res.get("content", res.get("text", "No content"))
+                score = res.get("score", 0.0)
+                category = res.get("category", "WORLD")
+                response += f"{i+1}. [{category}] (Score: {score:.3f})\n{content}\n\n"
+
+        await self._safe_send_message(
+            context,
+            chat_id,
+            response,
             parse_mode=ParseMode.MARKDOWN,
         )
 
@@ -539,36 +619,44 @@ def main() -> None:
     app.add_handler(CommandHandler("start", adapter.start_command))
     app.add_handler(CommandHandler("id", adapter.id_command))
     app.add_handler(CommandHandler("stats", adapter.stats_command))
+    app.add_handler(CommandHandler("remember", adapter.remember_command))
+    app.add_handler(CommandHandler("search", adapter.search_command))
+    app.add_handler(CommandHandler("reflect", adapter.reflect_command))
 
     app.add_handler(MessageHandler(filters.ALL, adapter.handle_message))
 
     app.add_handler(CallbackQueryHandler(adapter.handle_callback))
 
-    import asyncio
-    from seahorse_ai.analysis.football_eval import init_eval_db, resolve_pending_predictions
-    from seahorse_ai.analysis.watcher import AnomalyWatcher
+    # Optional Football Integration
+    if os.environ.get("SEAHORSE_ENABLE_FOOTBALL") == "true":
+        logger.info("Telegram: Football integration enabled. Starting background tasks...")
+        import asyncio
+        from seahorse_ai.analysis.football_eval import init_eval_db, resolve_pending_predictions
+        from seahorse_ai.analysis.watcher import AnomalyWatcher
 
-    watcher = AnomalyWatcher(llm_backend=router)
-    watcher._notify = adapter.send_proactive_alert
+        watcher = AnomalyWatcher(llm_backend=router)
+        watcher._notify = adapter.send_proactive_alert
 
-    async def post_init(application: any) -> None:
-        interval = int(os.environ.get("SEAHORSE_ALERTS_INTERVAL", "300"))
-        asyncio.create_task(watcher.start(interval_seconds=interval))
-        asyncio.create_task(init_eval_db())
-        
-        # Phase 2: Result Collector Task (runs every 1 hour)
-        async def result_collector_loop():
-            while True:
-                try:
-                    await resolve_pending_predictions()
-                except Exception as e:
-                    logger.error(f"Telegram: Result collector loop error: {e}")
-                await asyncio.sleep(3600)
-        
-        asyncio.create_task(result_collector_loop())
-        logger.info("Telegram: AnomalyWatcher, FootballEval, and ResultCollector tasks started.")
+        async def post_init(application: any) -> None:
+            interval = int(os.environ.get("SEAHORSE_ALERTS_INTERVAL", "300"))
+            asyncio.create_task(watcher.start(interval_seconds=interval))
+            asyncio.create_task(init_eval_db())
+            
+            # Phase 2: Result Collector Task (runs every 1 hour)
+            async def result_collector_loop():
+                while True:
+                    try:
+                        await resolve_pending_predictions()
+                    except Exception as e:
+                        logger.error(f"Telegram: Result collector loop error: {e}")
+                    await asyncio.sleep(3600)
+            
+            asyncio.create_task(result_collector_loop())
+            logger.info("Telegram: AnomalyWatcher, FootballEval, and ResultCollector tasks started.")
 
-    app.post_init = post_init
+        app.post_init = post_init
+    else:
+        logger.info("Telegram: Football integration disabled.")
 
     logger.info("Telegram bot starting via run_polling...")
 
