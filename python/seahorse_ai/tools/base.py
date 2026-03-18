@@ -19,15 +19,20 @@ class ToolSpec(Struct):
     name: str
     description: str
     parameters: dict[str, Any]  # JSON Schema subset
+    risk_level: str = "low"
 
 
-def tool(description: str) -> Callable[[F], F]:
+def tool(description: str, risk_level: str = "low") -> Callable[[F], F]:
     """Decorator that marks a function as a Seahorse Agent tool.
 
     Usage::
 
         @tool("Search the web for real-time information")
         async def web_search(query: str) -> str:
+            ...
+            
+        @tool("Execute financial trade", risk_level="high")
+        async def execute_trade(amount: int) -> str:
             ...
     """
 
@@ -36,6 +41,7 @@ def tool(description: str) -> Callable[[F], F]:
             name=fn.__name__,
             description=description,
             parameters=_json_schema_from_fn(fn),
+            risk_level=risk_level,
         )
         return fn
 
@@ -92,11 +98,24 @@ class SeahorseToolRegistry:
             for spec in self.specs
         ]
 
-    async def call(self, name: str, args: dict[str, object]) -> str:
+    async def call(self, name: str, args: dict[str, object], agent_id: str | None = None) -> str:
         """Call a tool by name with the given arguments."""
         if name not in self._tools:
             return f"Error: unknown tool '{name}'. Available: {list(self._tools)}"
-        fn, _ = self._tools[name]
+        fn, spec = self._tools[name]
+        
+        if spec.risk_level == "high":
+            from seahorse_ai.hitl import approval_manager
+            logger.warning("Tool '%s' is marked as high-risk. Requesting approval...", name)
+            
+            # Use provided agent_id, or try to extract from args
+            effective_agent_id = agent_id or args.get("agent_id")
+            
+            approved = await approval_manager.request_approval(name, args, effective_agent_id)
+            if not approved:
+                logger.info("Human rejected execution of '%s'", name)
+                return "ERROR: Action rejected by human overseer. Do not attempt this action again without permission."
+
         try:
             if inspect.iscoroutinefunction(fn):
                 result = await fn(**args)

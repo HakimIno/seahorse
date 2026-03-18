@@ -505,6 +505,29 @@ class TelegramAdapter:
         await query.answer()
 
         cb_key = query.data
+        
+        # ── Handle HITL Approvals ──
+        if cb_key.startswith("hitl:"):
+            _, action, approval_id = cb_key.split(":")
+            from seahorse_ai.hitl import approval_manager
+            
+            approved = (action == "approve")
+            success = approval_manager.resolve_approval(approval_id, approved)
+            
+            status = "✅ APPROVED" if approved else "❌ REJECTED"
+            if success:
+                new_text = f"{query.message.text}\n\n**Result:** {status} by User."
+            else:
+                new_text = f"{query.message.text}\n\n**Result:** Request {approval_id} expired or already resolved."
+                
+            try:
+                await query.edit_message_text(new_text, parse_mode=ParseMode.MARKDOWN)
+            except Exception as e:
+                logger.warning(f"Failed to edit hitl message: {e}")
+                await query.edit_message_text(new_text)
+            return
+
+        # ── Handle Option Selection ──
         choice = self._callback_data_map.get(cb_key, cb_key)
 
         chat_id = update.effective_chat.id
@@ -613,6 +636,42 @@ def main() -> None:
         .pool_timeout(120.0)
         .build()
     )
+
+    # ── Register HITL Notifier ──
+    from seahorse_ai.hitl import approval_manager
+    import json
+    
+    async def on_hitl_approval(approval_id: str, tool_name: str, kwargs: dict, agent_id: str | None) -> None:
+        if not agent_id or not agent_id.startswith("telegram_"):
+            logger.warning("HITL requested for unknown chat_id from agent_id: %s", agent_id)
+            return
+        chat_id = int(agent_id.split("_")[1])
+        
+        keyboard = [
+            [
+                InlineKeyboardButton("✅ Approve", callback_data=f"hitl:approve:{approval_id}"),
+                InlineKeyboardButton("❌ Reject", callback_data=f"hitl:reject:{approval_id}")
+            ]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        message_text = (
+            f"🚨 **HIGH RISK ACTION DETECTED** 🚨\n\n"
+            f"**Tool:** `{tool_name}`\n"
+            f"**Args:** `{json.dumps(kwargs, ensure_ascii=False)}`\n\n"
+            f"*Please review and approve this action.*"
+        )
+        try:
+            await app.bot.send_message(
+                chat_id=chat_id,
+                text=message_text,
+                reply_markup=reply_markup,
+                parse_mode=ParseMode.MARKDOWN
+            )
+        except Exception as e:
+            logger.error("Failed to send HITL approval message: %s", e)
+            
+    approval_manager.register_notifier(on_hitl_approval)
 
     app.add_handler(TypeHandler(Update, adapter.handle_update), group=-1)
 

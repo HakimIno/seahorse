@@ -294,7 +294,7 @@ class ReActExecutor:
                 args["agent_id"] = agent_id
 
             logger.info("executor tool.call step=%d tool=%s", step, tool_name)
-            result = await self._tools.call(tool_name, args)  # type: ignore[union-attr]
+            result = await self._tools.call(tool_name, args, agent_id=agent_id)  # type: ignore[call-arg]
             logger.info("executor tool.result step=%d tool=%s len=%d", step, tool_name, len(result))
             return result
 

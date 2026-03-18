@@ -123,10 +123,17 @@ __all__ = [
 ]
 
 
+@tool("คำสั่งทดสอบที่มีความเสี่ยงสูง (HITL)", risk_level="high")
+async def test_high_risk_action(reason: str) -> str:
+    """ใช้สำหรับทดสอบระบบ Human-in-the-Loop เท่านั้น"""
+    return f"ดำเนินการ '{reason}' สำเร็จหลังจากได้รับอนุมัติ"
+
+
 def make_default_registry() -> SeahorseToolRegistry:
     """Return a SeahorseToolRegistry pre-loaded with all built-in tools."""
     registry = SeahorseToolRegistry()
     for fn in (
+        test_high_risk_action,
         execute_auto_seahorse,
         web_search,
         python_interpreter,
