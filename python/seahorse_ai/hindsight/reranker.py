@@ -50,7 +50,7 @@ class HindsightReranker:
             
             # B. Recency Score (Exponential Decay from meta)
             # Recaller already calculates 'temporal_decay'
-            recency = doc.get("temporal_decay", 0.5)
+            recency = doc.get("temporal_decay", 1.0)
             
             # C. Access Frequency (Cold start logic)
             # Default to 1.0 (new/fresh) if not tracked, or normalized count
@@ -79,8 +79,12 @@ class HindsightReranker:
             # G. Success & Context Bonuses (Risk 3)
             max_bonus = 0.3
             success_bonus = min(doc.get("metadata", {}).get("success_count", 0) * 0.05, max_bonus)
+            # importance ranges from 1-5, center at 3
+            imp = doc.get("metadata", {}).get("importance", 3)
+            importance_bonus = (imp - 3) * 0.1
+            
             direct_bonus = 0.5 if dist == 0 else 0.0
-            total_bonus = success_bonus + direct_bonus
+            total_bonus = success_bonus + direct_bonus + importance_bonus
             
             # H. Penalty & Decay Logic (Risk 1 & 2)
             # penalty_floor ensures "scars" remain even after long periods

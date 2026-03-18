@@ -89,6 +89,10 @@ class RAGPipeline:
         self._dim = dim
         self._next_id = 0
 
+        # Initialize Python fallback structures always (safety/hybrid)
+        self._vectors: dict[int, np.ndarray] = {}
+        self._texts: dict[int, dict] = {}
+
         py_agent_memory = _try_import_ffi_memory()
         if py_agent_memory is not None:
             self._memory = py_agent_memory(dim=dim, max_elements=_MAX_DOCS)
@@ -97,9 +101,6 @@ class RAGPipeline:
         else:
             self._memory = None
             self._use_rust = False
-            # pure-Python fallback: dict of numpy vectors
-            self._vectors: dict[int, np.ndarray] = {}
-            self._texts: dict[int, dict] = {}  # doc_id -> {"text": str, "metadata": dict}
 
     async def store(
         self,
@@ -166,7 +167,7 @@ class RAGPipeline:
             if self._use_rust and self._memory is not None:
                 import seahorse_ffi
                 raw = seahorse_ffi.search_memory(self._memory, embedding.tobytes(), top_candidate_k)
-                for doc_id, dist, text, meta_json in raw:
+                for doc_id, dist, meta_json, text in raw:
                     try:
                         meta = json.loads(meta_json) if meta_json else {}
                     except Exception:
@@ -201,11 +202,13 @@ class RAGPipeline:
                     if all(r["metadata"].get(key) == v for key, v in filter_metadata.items())
                 ]
 
-            # 4. Adaptive RAG: Re-ranking
+            # 4. Adaptive RAG: Re-ranking with Hindsight
             if rerank and len(results) > 1:
-                results = await self._rerank_results(query, results, k)
+                from seahorse_ai.hindsight.reranker import HindsightReranker
+                reranker = HindsightReranker()
+                results = await reranker.rerank(query, results, top_n=k)
 
-            return results[:k]
+            return results
 
     async def _rerank_results(self, query: str, results: list[dict], k: int) -> list[dict]:
         """Use LiteLLM rerank API to re-order candidates."""
@@ -332,7 +335,7 @@ class RAGPipeline:
 
             return None
 
-    def clear(self) -> None:
+    async def clear(self) -> None:
         """Wipe all stored memories."""
         self._next_id = 0
         if self._use_rust and self._memory is not None:

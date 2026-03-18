@@ -1,0 +1,90 @@
+{
+  "results": [
+    {
+      "scenario_id": "fictional_code_mismatch",
+      "mode": "baseline",
+      "p_at_1": 0.0,
+      "mrr": 1.0,
+      "noise_rank": 1,
+      "top_source": "noise"
+    },
+    {
+      "scenario_id": "fictional_code_mismatch",
+      "mode": "single",
+      "p_at_1": 0.0,
+      "mrr": 1.0,
+      "noise_rank": 1,
+      "top_source": "noise"
+    },
+    {
+      "scenario_id": "fictional_code_mismatch",
+      "mode": "quorum",
+      "p_at_1": 0.0,
+      "mrr": 1.0,
+      "noise_rank": 1,
+      "top_source": "noise"
+    },
+    {
+      "scenario_id": "project_name_mismatch",
+      "mode": "baseline",
+      "p_at_1": 0.0,
+      "mrr": 1.0,
+      "noise_rank": 1,
+      "top_source": "noise"
+    },
+    {
+      "scenario_id": "project_name_mismatch",
+      "mode": "single",
+      "p_at_1": 0.0,
+      "mrr": 1.0,
+      "noise_rank": 1,
+      "top_source": "noise"
+    },
+    {
+      "scenario_id": "project_name_mismatch",
+      "mode": "quorum",
+      "p_at_1": 0.0,
+      "mrr": 1.0,
+      "noise_rank": 1,
+      "top_source": "noise"
+    },
+    {
+      "scenario_id": "thai_entity_mismatch",
+      "mode": "baseline",
+      "p_at_1": 0.0,
+      "mrr": 1.0,
+      "noise_rank": 1,
+      "top_source": "noise"
+    },
+    {
+      "scenario_id": "thai_entity_mismatch",
+      "mode": "single",
+      "p_at_1": 1.0,
+      "mrr": 0.5,
+      "noise_rank": 2,
+      "top_source": "truth"
+    },
+    {
+      "scenario_id": "thai_entity_mismatch",
+      "mode": "quorum",
+      "p_at_1": 1.0,
+      "mrr": 0.5,
+      "noise_rank": 2,
+      "top_source": "truth"
+    }
+  ],
+  "summary": {
+    "baseline": {
+      "avg_p1": 0.0,
+      "avg_mrr": 1.0
+    },
+    "single": {
+      "avg_p1": 0.3333333333333333,
+      "avg_mrr": 0.8333333333333334
+    },
+    "quorum": {
+      "avg_p1": 0.3333333333333333,
+      "avg_mrr": 0.8333333333333334
+    }
+  }
+}

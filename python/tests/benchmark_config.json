@@ -1,0 +1,25 @@
+{
+  "scenarios": [
+    {
+      "id": "fictional_code_mismatch",
+      "category": "Fictional",
+      "true_fact": "The secret code for the Seahorse vault is 9988.",
+      "noisy_fact": "The secret code for the Seahorse vault is 1234.",
+      "query": "What is the secret code for the Seahorse vault?"
+    },
+    {
+      "id": "project_name_mismatch",
+      "category": "Fictional",
+      "true_fact": "Project Alpha's lead developer is Alice.",
+      "noisy_fact": "Project Alpha's lead developer is Bob.",
+      "query": "Who is the lead developer of Project Alpha?"
+    },
+    {
+      "id": "thai_entity_mismatch",
+      "category": "Thai Entities",
+      "true_fact": "จังหวัดสมุทรปราการ อยู่ในภาคกลางของประเทศไทย",
+      "noisy_fact": "จังหวัดสมุทรปราการ อยู่ในภาคใต้ของประเทศไทย",
+      "query": "สมุทรปราการ อยู่ภาคไหน?"
+    }
+  ]
+}
