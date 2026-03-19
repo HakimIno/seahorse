@@ -53,6 +53,7 @@
             
             # Ensure Python environment is clean and uses uv
             export PYTHONNOUSERSITE=1
+            export UV_PYTHON_PREFERENCE=only-system
             
             echo "🌊 Seahorse development environment loaded!"
             echo "Rust: $(rustc --version)"
