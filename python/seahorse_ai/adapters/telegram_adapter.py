@@ -65,6 +65,8 @@ def _extract_choices(text: str) -> list[str]:
     """Extract numbered/bulleted choices from an AI response."""
     matches = _CHOICE_PATTERN.findall(text)
     choices = [m.strip() for m in matches if len(m.strip()) < 80]
+    if choices:
+        logger.info("Telegram: Extracted %d choices from response", len(choices))
     return choices if 2 <= len(choices) <= 5 else []
 
 
@@ -208,6 +210,22 @@ class TelegramAdapter:
             chat_id,
             response,
             parse_mode=ParseMode.MARKDOWN,
+        )
+
+    async def button_test_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Diagnostic command to test buttons."""
+        chat_id = update.effective_chat.id
+        keyboard = [
+            [
+                InlineKeyboardButton("🧪 Test callback", callback_data="test:callback"),
+            ]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text="🔘 **Button Diagnostic**\nClick the button below to test if the bot receives callbacks.",
+            reply_markup=reply_markup,
+            parse_mode=ParseMode.MARKDOWN
         )
 
     async def _safe_send_message(
@@ -502,9 +520,10 @@ class TelegramAdapter:
         if not query or not query.data:
             return
 
-        await query.answer()
-
         cb_key = query.data
+        logger.info("Telegram: Received callback with data: %s", cb_key)
+
+        await query.answer()
         
         # ── Handle HITL Approvals ──
         if cb_key.startswith("hitl:"):
@@ -634,6 +653,7 @@ def main() -> None:
         .read_timeout(360.0)
         .write_timeout(120.0)
         .pool_timeout(120.0)
+        .concurrent_updates(True)
         .build()
     )
 
@@ -642,10 +662,10 @@ def main() -> None:
     import json
     
     async def on_hitl_approval(approval_id: str, tool_name: str, kwargs: dict, agent_id: str | None) -> None:
-        if not agent_id or not agent_id.startswith("telegram_"):
-            logger.warning("HITL requested for unknown chat_id from agent_id: %s", agent_id)
-            return
-        chat_id = int(agent_id.split("_")[1])
+        logger.info("Telegram: HITL requested for %s (tool: %s)", agent_id, tool_name)
+        # Handle both simple (telegram_123) and hybrid (telegram_123:sub_t1) IDs
+        main_part = agent_id.split(":")[0]
+        chat_id = int(main_part.split("_")[1])
         
         keyboard = [
             [
@@ -662,6 +682,7 @@ def main() -> None:
             f"*Please review and approve this action.*"
         )
         try:
+            logger.info("Telegram: Sending HITL approval message to chat %s", chat_id)
             await app.bot.send_message(
                 chat_id=chat_id,
                 text=message_text,
@@ -681,6 +702,7 @@ def main() -> None:
     app.add_handler(CommandHandler("remember", adapter.remember_command))
     app.add_handler(CommandHandler("search", adapter.search_command))
     app.add_handler(CommandHandler("reflect", adapter.reflect_command))
+    app.add_handler(CommandHandler("button_test", adapter.button_test_command))
 
     app.add_handler(MessageHandler(filters.ALL, adapter.handle_message))
 

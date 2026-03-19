@@ -40,11 +40,20 @@ echo "⚙️  Building Rust Router & FFI..."
 uv run maturin develop -m crates/seahorse-ffi/Cargo.toml --quiet
 
 # Start Rust Router in the background if not already running
-if ! lsof -i:8000 > /dev/null; then
+if ! lsof -iTCP:8000 -sTCP:LISTEN > /dev/null; then
   echo "🚀 Starting Rust Router (Background)..."
   # Use nohup or just & to keep it alive
   cargo run --release -p seahorse-router > /tmp/seahorse_router.log 2>&1 &
-  sleep 3 # Give it a moment to boot
+  
+  # Wait for port 8000 to be active
+  echo "⏳ Waiting for Router to be ready on port 8000..."
+  for i in {1..30}; do
+    if lsof -i:8000 > /dev/null; then
+      echo "✅ Router is READY."
+      break
+    fi
+    sleep 2
+  done
 fi
 
 echo "📱 Starting Seahorse Telegram Bot..."

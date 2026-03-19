@@ -197,6 +197,31 @@ class HybridOrchestrator:
             len(memory.trials),
         )
 
+        # ── 7. Final Strategist Synthesis ─────────────────────────────
+        # If we reached here without a 'pass' and have some content,
+        # OR if content is empty (budget exhausted), synthesize final reason.
+        if not best_content or (len(memory.trials) >= self._cfg.max_trials):
+            logger.info("hybrid.run: synthesizing final failure/budget response")
+            # Pull the late verdict and artifacts to explain 'why'
+            last_verdict = verdict.reason if 'verdict' in locals() else "Budget exhausted"
+            
+            # Simple synthesis prompt for the main planner
+            final_prompt = [
+                Message(role="system", content=(
+                    "You are Seahorse Strategic Analyst. "
+                    "The agent failed to fully complete the goal. "
+                    f"Goal: {request.prompt}\n"
+                    f"Reason: {last_verdict}\n"
+                    "Provide a polite, professional explanation in the user's language."
+                ))
+            ]
+            try:
+                final_res = await self._llm.complete(final_prompt, tier="worker")
+                best_content = str(final_res.get("content", final_res) if isinstance(final_res, dict) else final_res)
+            except Exception as e:
+                logger.error("hybrid final synthesis failed: %s", e)
+                best_content = best_content or "ขออภัยครับ ระบบไม่สามารถดำเนินการตามคำขอได้สำเร็จในขณะนี้"
+
         return AgentResponse(
             content=best_content,
             steps=total_steps,
@@ -251,7 +276,7 @@ class HybridOrchestrator:
 
         try:
             result: ExecutorResult = await executor.run(
-                messages, openai_tools, agent_id=f"sub_{node.id}"
+                messages, openai_tools, agent_id=f"{request.agent_id}:sub_{node.id}"
             )
         except Exception as exc:
             logger.error("hybrid subtask %s failed: %s", node.id, exc)
