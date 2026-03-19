@@ -32,6 +32,22 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+_pipeline = None
+
+
+def get_pipeline() -> RAGPipeline:
+    """Singleton getter for the RAG pipeline."""
+    global _pipeline
+    if _pipeline is None:
+        backend = os.environ.get("SEAHORSE_VECTOR_DB", "hnsw").lower()
+        if backend == "qdrant":
+            from seahorse_ai.rag_qdrant import QdrantRAGPipeline
+
+            _pipeline = QdrantRAGPipeline()
+        else:
+            _pipeline = RAGPipeline()
+    return _pipeline
+
 # Embedding model + dimensionality — configurable via env vars
 # Default uses OpenRouter so the same OPENROUTER_API_KEY works for both chat + embeddings
 _EMBED_MODEL = os.environ.get(
@@ -73,6 +89,10 @@ class RAGPipeline:
         self._dim = dim
         self._next_id = 0
 
+        # Initialize Python fallback structures always (safety/hybrid)
+        self._vectors: dict[int, np.ndarray] = {}
+        self._texts: dict[int, dict] = {}
+
         py_agent_memory = _try_import_ffi_memory()
         if py_agent_memory is not None:
             self._memory = py_agent_memory(dim=dim, max_elements=_MAX_DOCS)
@@ -81,37 +101,32 @@ class RAGPipeline:
         else:
             self._memory = None
             self._use_rust = False
-            # pure-Python fallback: dict of numpy vectors
-            self._vectors: dict[int, np.ndarray] = {}
-            self._texts: dict[int, dict] = {}  # doc_id -> {"text": str, "metadata": dict}
 
     async def store(
         self,
         text: str,
         doc_id: int | None = None,
         metadata: dict | None = None,
+        importance: int = 3,
+        agent_id: str | None = None,
         knowledge_triples: list[dict] | None = None,
     ) -> int:
-        """Embed `text` and store it in the HNSW index along with metadata and Knowledge Graph triples.
-
-        Returns the assigned doc_id.
-        """
+        """Embed `text` and store it in the HNSW index along with metadata and Knowledge Graph triples."""
         tracer = get_tracer("seahorse.rag")
-        with tracer.start_as_current_span("rag.store") as span:
+        with tracer.start_as_current_span("rag.store"):
             if doc_id is None:
                 doc_id = self._next_id
                 self._next_id += 1
 
-            try:
-                span.set_attribute("rag.doc_id", doc_id)
-                span.set_attribute("rag.text_len", len(text))
-            except Exception:  # noqa: BLE001
-                pass
-
             embedding = await self._embed(text)
+            
+            meta = metadata.copy() if metadata else {}
+            if agent_id:
+                meta["agent_id"] = agent_id
+            meta["importance"] = importance
 
             if self._use_rust and self._memory is not None:
-                self._memory.insert(doc_id, embedding.tobytes(), text, json.dumps(metadata or {}))
+                self._memory.insert(doc_id, embedding.tobytes(), json.dumps(meta), text)
 
                 # Push extracted Triples into Knowledge Graph
                 if knowledge_triples:
@@ -122,29 +137,22 @@ class RAGPipeline:
                             triple.get("object"),
                         )
                         if subj and pred and obj:
-                            # Default weight 1.0, assign edge to doc_id so we can trace back
                             self._memory.add_node(subj, "Entity", doc_id)
                             self._memory.add_node(obj, "Entity", None)
                             self._memory.add_edge(subj, obj, pred, 1.0)
-                            logger.debug("rag.store: graph edge [%s] -(%s)-> [%s]", subj, pred, obj)
-
-                logger.debug("rag.store: rust insert doc_id=%d", doc_id)
             else:
-                self._texts[doc_id] = {
-                    "text": text,
-                    "metadata": metadata or {},
-                }
+                self._texts[doc_id] = {"text": text, "metadata": meta}
                 self._vectors[doc_id] = embedding
-                logger.debug("rag.store: python insert doc_id=%d", doc_id)
 
             return doc_id
 
     async def search(
         self, query: str, k: int = 5, filter_metadata: dict | None = None, rerank: bool = True
     ) -> list[dict]:
-        """Embed `query` and return the k most similar stored texts with metadata.
+        """Search for the k most similar stored texts using Vector + Graph Hybrid Search.
 
-        If `rerank` is True, uses a Cross-Encoder (via LiteLLM) to refine the top results.
+        Uses Reciprocal Rank Fusion (RRF) to merge vector results with adjacent records
+        found in the Knowledge Graph.
         """
         k = int(k)
         tracer = get_tracer("seahorse.rag")
@@ -152,67 +160,55 @@ class RAGPipeline:
             span.set_attribute("rag.query_len", len(query))
             embedding = await self._embed(query)
 
-            # Fetch more candidates if we plan to re-rank
-            top_k = k * 4 if rerank else k
-            if filter_metadata:
-                top_k *= 2
-
+            # 1. Primary Vector Search
+            vector_results: list[dict] = []
+            top_candidate_k = k * 4
+            
             if self._use_rust and self._memory is not None:
                 import seahorse_ffi
-
-                raw = seahorse_ffi.search_memory(self._memory, embedding.tobytes(), top_k)
-                results = []
-                for _i, (doc_id, dist, text, meta_json) in enumerate(raw):
-                    metadata = json.loads(meta_json)
-                    if filter_metadata:
-                        matches = all(metadata.get(key) == v for key, v in filter_metadata.items())
-                        if not matches:
-                            continue
-
-                    results.append(
-                        {
-                            "text": text,
-                            "metadata": metadata,
-                            "distance": dist,
-                            "doc_id": doc_id,
-                        }
-                    )
+                raw = seahorse_ffi.search_memory(self._memory, embedding.tobytes(), top_candidate_k)
+                for doc_id, dist, meta_json, text in raw:
+                    try:
+                        meta = json.loads(meta_json) if meta_json else {}
+                    except Exception:
+                        meta = {}
+                    vector_results.append({
+                        "text": text,
+                        "metadata": meta,
+                        "distance": dist,
+                        "id": doc_id,
+                        "doc_id": doc_id,
+                    })
             else:
-                if not self._texts:
-                    return []
-
-                # Python fallback (simplified here for brevity, keeping old logic but with top_k)
-                if not self._vectors:
-                    return []
-                scores: list[tuple[int, float]] = []
+                # Python fallback (vector calculation)
                 for vid, vec in self._vectors.items():
                     norm = float(np.linalg.norm(embedding) * np.linalg.norm(vec) + 1e-9)
                     cos = float(np.dot(embedding, vec)) / norm
-                    scores.append((vid, 1.0 - cos))
-                scores.sort(key=lambda x: x[1])
-                results = []
-                for vid, dist in scores[:top_k]:
-                    entry = self._texts[vid]
-                    if filter_metadata:
-                        matches = all(
-                            entry["metadata"].get(k) == v for k, v in filter_metadata.items()
-                        )
-                        if not matches:
-                            continue
-                    results.append(
-                        {
-                            "text": entry["text"],
-                            "metadata": entry["metadata"],
-                            "distance": dist,
-                            "doc_id": vid,
-                        }
-                    )
+                    vector_results.append({
+                        "text": self._texts[vid]["text"],
+                        "metadata": self._texts[vid]["metadata"],
+                        "distance": 1.0 - cos,
+                        "id": vid,
+                        "doc_id": vid,
+                    })
+                vector_results.sort(key=lambda x: x["distance"])
+                vector_results = vector_results[:top_candidate_k]
 
-            # ── Adaptive RAG: Re-ranking ──
+            # 2. Hybrid Recall (Future: Graph/Keywords logic moved to Hindsight package)
+            results = vector_results
+            if filter_metadata:
+                results = [
+                    r for r in results 
+                    if all(r["metadata"].get(key) == v for key, v in filter_metadata.items())
+                ]
+
+            # 4. Adaptive RAG: Re-ranking with Hindsight
             if rerank and len(results) > 1:
-                results = await self._rerank_results(query, results, k)
+                from seahorse_ai.hindsight.reranker import HindsightReranker
+                reranker = HindsightReranker()
+                results = await reranker.rerank(query, results, top_n=k)
 
-            return results[:k]
+            return results
 
     async def _rerank_results(self, query: str, results: list[dict], k: int) -> list[dict]:
         """Use LiteLLM rerank API to re-order candidates."""
@@ -252,6 +248,47 @@ class RAGPipeline:
         except Exception as e:
             logger.warning("rag.rerank failed: %s. Falling back to vector search order.", e)
             return results
+    async def retrieve(self, doc_id: int) -> dict | None:
+        """Retrieve a specific memory record by its ID."""
+        if not self._use_rust:
+            if doc_id in self._texts:
+                return {
+                    "id": doc_id,
+                    "text": self._texts[doc_id]["text"],
+                    "metadata": self._texts[doc_id]["metadata"]
+                }
+        else:
+            # Rust HNSW is currently append-only for metadata in this FFI version.
+            pass
+        return None
+
+    async def update_metadata(self, doc_id: int, metadata: dict) -> bool:
+        """Update metadata for an existing record in-place."""
+        import json
+        
+        # 1. Retrieve current doc to get full existing metadata
+        doc = await self.retrieve(doc_id)
+        if not doc:
+            return False
+            
+        current_meta = doc.get("metadata", {})
+        # Merge new metadata into existing
+        current_meta.update(metadata)
+        
+        if not self._use_rust:
+            if doc_id in self._texts:
+                self._texts[doc_id]["metadata"] = current_meta
+                return True
+            return False
+        else:
+            # Atomic update in Rust DashMap via FFI
+            meta_json = json.dumps(current_meta)
+            # FFI signature: update_metadata(doc_id: int, meta_json: str) -> bool
+            try:
+                return self._memory.update_metadata(doc_id, meta_json)
+            except Exception as e:
+                logger.error("rag.update_metadata: Rust FFI failed: %s", e)
+                return False
 
     async def delete_by_text(self, query: str, threshold: float = 0.45) -> dict | None:
         """Search for a matching memory and remove it if distance < threshold.
@@ -315,7 +352,7 @@ class RAGPipeline:
 
             return None
 
-    def clear(self) -> None:
+    async def clear(self) -> None:
         """Wipe all stored memories."""
         self._next_id = 0
         if self._use_rust and self._memory is not None:
@@ -330,15 +367,12 @@ class RAGPipeline:
 
     async def _embed(self, text: str) -> np.ndarray:
         """Call LiteLLM embedding API and return a numpy float32 array."""
-        import asyncio
-
+        import anyio
         import litellm  # local import to avoid top-level cost
 
         try:
-            response = await asyncio.wait_for(
-                litellm.aembedding(model=self._embed_model, input=text),
-                timeout=_EMBED_TIMEOUT,
-            )
+            with anyio.fail_after(_EMBED_TIMEOUT):
+                response = await litellm.aembedding(model=self._embed_model, input=text)
         except TimeoutError as err:
             raise RuntimeError(
                 f"Embedding API timed out after {_EMBED_TIMEOUT}s. "

@@ -1,0 +1,108 @@
+@import url("https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap");
+
+/* Light Theme Variables */
+:root {
+  --bg-primary: #ffffff;
+  --bg-secondary: #f8f9fa;
+  --bg-sidebar: #ffffff; /* Telegram sidebar is white */
+
+  --text-primary: #202124;
+  --text-secondary: #707579;
+  --text-on-accent: #ffffff;
+
+  --accent-blue: #3390ec;
+  --accent-blue-hover: #2b80d0;
+  --accent-soft-blue: rgba(51, 144, 236, 0.1);
+
+  --border-light: #e5e7eb;
+  --bubble-ai: #ffffff;
+  --bubble-user: #effdde;
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.1);
+  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+
+  --radius-pill: 24px;
+  --radius-lg: 16px;
+  --radius-md: 12px;
+
+  --transition-smooth: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Dark Theme Variables */
+.dark {
+  --bg-primary: #1c1c1c;
+  --bg-secondary: #242424;
+  --bg-sidebar: #1c1c1c;
+
+  --text-primary: #ffffff;
+  --text-secondary: #aaaaaa;
+
+  --accent-blue: #3390ec;
+  --accent-blue-hover: #4ea4ff;
+  --accent-soft-blue: rgba(51, 144, 236, 0.2);
+
+  --border-light: #333333;
+  --bubble-ai: #242424;
+  --bubble-user: #2b5278; /* Telegram dark user bubble */
+}
+
+/* View Transitions Customization */
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation: none;
+  mix-blend-mode: normal;
+}
+
+::view-transition-old(root) {
+  z-index: 1;
+}
+
+::view-transition-new(root) {
+  z-index: 9999;
+}
+
+.dark::view-transition-old(root) {
+  z-index: 9999;
+}
+
+.dark::view-transition-new(root) {
+  z-index: 1;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body,
+html {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  font-family: "Outfit", sans-serif;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  -webkit-font-smoothing: antialiased;
+}
+
+#root {
+  height: 100%;
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #dadce0;
+  border-radius: 10px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #bdc1c6;
+  background-clip: content-box;
+}

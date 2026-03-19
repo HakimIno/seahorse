@@ -30,7 +30,11 @@ from qdrant_client.models import (
     MatchValue,
     PointStruct,
     VectorParams,
+    TextIndexParams,
+    TokenizerType,
+    MatchText,
 )
+import contextlib
 
 logger = logging.getLogger(__name__)
 
@@ -56,7 +60,7 @@ class QdrantRAGPipeline:
         self._collection_base = collection
         self._embed_model = embed_model
         self._dim = dim
-        self._client = AsyncQdrantClient(url=url)
+        self._client = AsyncQdrantClient(url=url, timeout=60.0)
         self._initialized_collections: set[str] = set()
 
         logger.info(
@@ -83,29 +87,49 @@ class QdrantRAGPipeline:
             await self._client.get_collection(collection)
             self._initialized_collections.add(collection)
             return
-        except Exception:
-            pass  # Collection doesn't exist, create it
+        except Exception as e:
+            if "already exists" in str(e).lower() or "409" in str(e):
+                 self._initialized_collections.add(collection)
+                 return
+            pass  # Try creating it if get_collection failed for other reasons
 
-        await self._client.create_collection(
-            collection_name=collection,
-            vectors_config=VectorParams(
-                size=self._dim,
-                distance=Distance.COSINE,
-            ),
-        )
-        self._initialized_collections.add(collection)
-        logger.info("QdrantRAGPipeline: created collection=%s", collection)
+        try:
+            await self._client.create_collection(
+                collection_name=collection,
+                vectors_config=VectorParams(
+                    size=self._dim,
+                    distance=Distance.COSINE,
+                ),
+            )
+            self._initialized_collections.add(collection)
+            logger.info("QdrantRAGPipeline: created collection=%s", collection)
+        except Exception as e:
+            if "already exists" in str(e).lower() or "409" in str(e):
+                 self._initialized_collections.add(collection)
+                 return
+            logger.error("Failed to ensure collection %s: %s", collection, e)
+            raise
 
     async def _embed(self, text: str) -> np.ndarray:
-        """Embed text using the configured model via LiteLLM."""
-        import litellm
+        """Embed text using the configured model via LiteLLM with local caching."""
+        # 1. Check local cache first
+        if not hasattr(self, "_embed_cache"):
+            self._embed_cache: dict[str, np.ndarray] = {}
+        
+        if text in self._embed_cache:
+            return self._embed_cache[text]
 
+        import litellm
         resp = await litellm.aembedding(
             model=self._embed_model,
             input=[text],
         )
         vec = resp.data[0]["embedding"]
-        return np.array(vec, dtype=np.float32)
+        embedding = np.array(vec, dtype=np.float32)
+        
+        # 2. Save to cache
+        self._embed_cache[text] = embedding
+        return embedding
 
     # ── Public API (same as RAGPipeline) ──────────────────────────────────────
 
@@ -114,9 +138,11 @@ class QdrantRAGPipeline:
         text: str,
         doc_id: int | None = None,
         metadata: dict | None = None,
+        importance: int = 3,
+        agent_id: str | None = None,
     ) -> int:
         """Embed text and store in Qdrant. Returns a numeric doc_id."""
-        agent_id = (metadata or {}).get("agent_id")
+        agent_id = agent_id or (metadata or {}).get("agent_id")
         collection = self._collection_name(agent_id)
         await self._ensure_collection(collection)
 
@@ -126,7 +152,14 @@ class QdrantRAGPipeline:
         point_uuid = str(uuid.uuid4())
         numeric_id = abs(hash(point_uuid)) % (2**63)
 
-        payload: dict[str, Any] = {"text": text, **(metadata or {})}
+        payload: dict[str, Any] = {
+            "text": text, 
+            "id": point_uuid, # Keep the original UUID in payload for consistent retrieval
+            "importance": importance,
+            **(metadata or {})
+        }
+        if agent_id:
+            payload["agent_id"] = agent_id
 
         await self._client.upsert(
             collection_name=collection,
@@ -146,17 +179,35 @@ class QdrantRAGPipeline:
         )
         return numeric_id
 
+    async def keyword_search(self, query: str, agent_id: str | None, k: int) -> list[dict[str, Any]]:
+        """Perform only full-text keyword search."""
+        collection = self._collection_name(agent_id)
+        from qdrant_client.models import Filter, FieldCondition, MatchText
+        
+        results = await self._client.scroll(
+            collection_name=collection,
+            scroll_filter=Filter(
+                must=[FieldCondition(key="text", match=MatchText(text=query))]
+            ),
+            limit=k,
+            with_payload=True
+        )
+        
+        points, _ = results
+        return [
+            {"id": p.id, "text": p.payload["text"], "metadata": p.payload, "distance": 0.5} 
+            for p in points
+        ]
+
     async def search(
         self,
         query: str,
         k: int = 5,
         filter_metadata: dict | None = None,
-        rerank: bool = False,  # Qdrant scores are already good — skip LLM rerank
+        rerank: bool = False,
     ) -> list[dict]:
-        """Search for the k most similar stored texts."""
+        """Search for the k most similar stored texts using Hybrid Search (Vector + Full-text)."""
         k = int(k)
-
-        # Determine collection from agent_id in filter
         agent_id = (filter_metadata or {}).get("agent_id")
         collection = self._collection_name(agent_id)
 
@@ -167,7 +218,7 @@ class QdrantRAGPipeline:
 
         embedding = await self._embed(query)
 
-        # Build Qdrant filter from metadata (excluding agent_id which is in collection)
+        # Build Qdrant filter from metadata
         qdrant_filter = None
         extra_filters = {k: v for k, v in (filter_metadata or {}).items() if k != "agent_id"}
         if extra_filters:
@@ -177,27 +228,86 @@ class QdrantRAGPipeline:
             ]
             qdrant_filter = Filter(must=conditions)
 
-        response = await self._client.query_points(
+        # 1. Vector Search
+        vector_resp = await self._client.query_points(
             collection_name=collection,
             query=embedding.tolist(),
             query_filter=qdrant_filter,
-            limit=k,
+            limit=k * 2,
             with_payload=True,
         )
 
+        # Ensure text index exists (idempotent-ish in this context)
+        with contextlib.suppress(Exception):
+            await self._client.create_payload_index(
+                collection_name=collection,
+                field_name="text",
+                field_schema=TextIndexParams(
+                    type="text",
+                    tokenizer=TokenizerType.MULTILINGUAL,
+                    lowercase=True,
+                ),
+            )
+
+        keyword_filter = Filter(
+            must=[FieldCondition(key="text", match=MatchText(text=query))]
+        )
+        if qdrant_filter:
+            keyword_filter.must.extend(qdrant_filter.must)
+
+        keyword_resp = await self._client.scroll(
+            collection_name=collection,
+            scroll_filter=keyword_filter,
+            limit=k * 2,
+            with_payload=True,
+        )
+
+        # 3. Reciprocal Rank Fusion (RRF)
+        # RRF Score = sum(1 / (rank + constant))
+        constant = 60
+        scores: dict[Any, float] = {}
+        point_map: dict[Any, Any] = {}
+
+        # Vector rankings
+        for i, hit in enumerate(vector_resp.points):
+            scores[hit.id] = scores.get(hit.id, 0.0) + 1.0 / (i + 1 + constant)
+            point_map[hit.id] = hit
+
+        # Keyword rankings
+        for i, hit in enumerate(keyword_resp[0]):
+            scores[hit.id] = scores.get(hit.id, 0.0) + 1.0 / (i + 1 + constant)
+            point_map[hit.id] = hit
+
+        # Merge and sort
+        sorted_ids = sorted(scores.keys(), key=lambda x: scores[x], reverse=True)
+        
         formatted: list[dict] = []
-        for hit in response.points:
+        for pid in sorted_ids[:k]:
+            hit = point_map[pid]
             payload = dict(hit.payload or {})
             text = payload.pop("text", "")
-            # Qdrant cosine score is in [-1, 1] where 1 = identical
-            # Convert to distance: distance = 1 - score (lower = more similar)
-            distance = 1.0 - float(hit.score)
+            
+            # Use UUID from payload if available, else numeric point ID
+            record_uuid = payload.get("id")
+            effective_id = str(record_uuid) if record_uuid else str(hit.id)
+            
+            similarity = getattr(hit, 'score', 0.5)
+            try:
+                similarity = float(similarity)
+            except (TypeError, ValueError):
+                similarity = 0.5
+            
+            # Standardize: Qdrant Cosine is similarity (1.0 = match). 
+            # We return distance (0.0 = match) for Hindsight.
+            distance = max(0.0, min(1.0, 1.0 - similarity))
+            
             formatted.append(
                 {
+                    "id": effective_id,
                     "text": text,
                     "distance": distance,
                     "metadata": payload,
-                    "id": hit.id,
+                    "rrf_score": scores[pid],
                 }
             )
 
@@ -257,6 +367,32 @@ class QdrantRAGPipeline:
         """Returns -1 (async call needed) — use size_async instead."""
         return -1
 
+    async def delete_by_id(self, point_id: Any) -> bool:
+        """Delete a specific point from Qdrant by its ID."""
+        collection = self._collection_name(None)
+        try:
+            await self._client.delete(
+                collection_name=collection,
+                points_selector=[point_id],
+            )
+            return True
+        except Exception:
+            return False
+
+    async def delete_by_filter(self, filter_obj: Filter, agent_id: str | None = None) -> int:
+        """Delete points matching a specific filter. Returns number of deleted points (if available)."""
+        collection = self._collection_name(agent_id)
+        try:
+            result = await self._client.delete(
+                collection_name=collection,
+                points_selector=FilterSelector(filter=filter_obj),
+            )
+            logger.info("qdrant.delete_by_filter: executed on collection=%s", collection)
+            return 1 # Qdrant delete returns UpdateResult, actual count not easily available in async without scroll
+        except Exception as e:
+            logger.error("qdrant.delete_by_filter failed: %s", e)
+            return 0
+
     async def size_async(self, agent_id: str | None = None) -> int:
         """Return the number of stored vectors in the agent's collection."""
         collection = self._collection_name(agent_id)
@@ -265,3 +401,47 @@ class QdrantRAGPipeline:
             return info.points_count or 0
         except Exception:
             return 0
+
+    async def retrieve(self, point_id: Any, agent_id: str | None = None) -> dict | None:
+        """Retrieve a specific point by ID from Qdrant."""
+        collection = self._collection_name(agent_id)
+        try:
+            # Try numeric ID first, then search by payload id if it's a UUID string
+            resp = await self._client.retrieve(
+                collection_name=collection,
+                ids=[point_id],
+                with_payload=True
+            )
+            if resp:
+                p = resp[0]
+                payload = dict(p.payload or {})
+                text = payload.pop("text", "")
+                return {"id": p.id, "text": text, "metadata": payload}
+            return None
+        except Exception as e:
+            logger.debug("qdrant.retrieve failed for id=%s: %s", point_id, e)
+            return None
+
+    async def update_metadata(self, point_id: Any, metadata: dict, agent_id: str | None = None) -> bool:
+        """Update/merge metadata for a specific point in Qdrant."""
+        collection = self._collection_name(agent_id)
+        try:
+            await self._client.set_payload(
+                collection_name=collection,
+                payload=metadata,
+                points=[point_id],
+            )
+            return True
+        except Exception as e:
+            logger.error("qdrant.update_metadata failed: %s", e)
+            return False
+
+    async def clear(self, agent_id: str | None = None) -> None:
+        """Wipe the collection."""
+        collection = self._collection_name(agent_id)
+        try:
+            await self._client.delete_collection(collection)
+            self._initialized_collections.discard(collection)
+            logger.info("Qdrant: collection %s cleared", collection)
+        except Exception as e:
+            logger.warning("Qdrant: clear failed: %s", e)

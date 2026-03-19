@@ -9,6 +9,7 @@
 #![allow(clippy::must_use_candidate, clippy::module_name_repetitions)]
 
 pub mod agent;
+pub mod analysis;
 pub mod bus;
 pub mod config;
 pub mod error;
@@ -16,10 +17,13 @@ pub mod fast_path;
 pub mod graph;
 pub mod memory;
 pub mod scheduler;
+pub mod viz;
 pub mod wasm;
 pub mod worker;
+pub mod networking;
 
 pub use agent::RigAgent;
+pub use analysis::PolarsAnalyst;
 pub use bus::MessageBus;
 pub use config::Config;
 pub use error::{CoreError, CoreResult};
@@ -27,6 +31,7 @@ pub use memory::AgentMemory;
 pub use fast_path::FastPath;
 pub use scheduler::{AgentScheduler, AgentTask};
 pub use worker::{spawn_worker_loop, PythonRunner};
+pub use viz::ChartGenerator;
 
 use std::sync::Arc;
 use tracing::info;

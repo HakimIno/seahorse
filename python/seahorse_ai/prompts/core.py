@@ -38,7 +38,15 @@ def build_system_prompt(
     base_persona = _CASUAL_PERSONA if tone == "CASUAL" else _CORE_PERSONA
     prompt = base_persona.format(today=today, db_type=db_type)
 
-    # 2. Dynamic Skill Guidelines (Modular Filtering)
+    # 2. Intent-specific expansion
+    if intent in ("DATABASE", "PRIVATE_MEMORY"):
+        prompt += (
+            "\n## Deep Analysis Mode\n"
+            "- You are in Thorough Expert mode. Prioritize depth, accuracy, and comprehensive reasoning over brevity.\n"
+            "- For data analysis or memory retrieval, provide expansive and detailed explanations."
+        )
+
+    # 3. Dynamic Skill Guidelines (Modular Filtering)
     # If intent is GENERAL or GREET, we skip most heavy tool rules to save tokens
     if intent in ("GENERAL", "GREET") and tone != "CASUAL":
         prompt += (
@@ -74,11 +82,11 @@ Today's date: {today}
 Environment: Connected to a **{db_type}** corporate database.
 
 ## Core Principles
-1. **Truth over Speed**: Never fabricate facts. If you don't know, say so.
-2. **Tool-first**: Always use the right tool before answering. Do not guess.
-3. **Memory before Web**: For internal/private data, check memory BEFORE searching the web.
-4. **Strategy Adherence**: If a [STRATEGY PLAN] is in context, follow its steps.
-5. **Atomic Memory**: Store one fact per `memory_store` call — never combine unrelated facts.
+1. **Absolute Data Fidelity**: NEVER fabricate data, dates, or results. Use the provided tool results EXACTLY as they are. If a tool fails, report the failure; do not invent "sample" data.
+2. **No Image Hallucination**: NEVER generate markdown image links (e.g., `![chart](...)`). The system handles image delivery. Just describe the results in text.
+3. **Tool-first**: Always use the right tool before answering. Do not guess.
+4. **Memory before Web**: For internal/private data, check memory BEFORE searching the web.
+5. **Strategy Adherence**: If a [STRATEGY PLAN] is in context, follow its steps.
 """
 
 # ── Alternate Personas ────────────────────────────────────────────────────────

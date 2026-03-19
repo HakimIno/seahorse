@@ -15,10 +15,18 @@ __pycache__/
 .env
 .pyo3_python_hash
 /dev.sh
+/scripts/*.sh
 
-# Temporary test scripts
+# Temporary test scripts and artifacts
 python/test_*.py
 test_*.py
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.ipynb_checkpoints/
+/tmp/seahorse_charts/
 
 # Node.js
 node_modules/
@@ -28,9 +36,13 @@ npm-debug.log*
 # OS specific
 .DS_Store
 Thumbs.db
+*.swp
+*.swo
 
 # Database and Workspace scratch files
 workspace/*.db
+workspace/*.db-journal
+workspace/*.db-wal
 workspace/hello.txt
 
 # Qdrant Database Storage (Phase 1)
@@ -40,6 +52,16 @@ qdrant_data/
 *.so
 *.dylib
 *.dll
+*.pyd
 *.dSYM/
 python/seahorse_ffi/seahorse_ffi.abi3.so
 python/seahorse_ffi/libseahorse_ffi.dylib
+
+# Playwright
+browser_data/
+test-results/
+playwright-report/
+blob-report/
+playwright/.cache/
+
+*.csv

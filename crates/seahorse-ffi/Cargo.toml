@@ -17,6 +17,9 @@ bytemuck      = { workspace = true }
 thiserror     = { workspace = true }
 anyhow        = { workspace = true }
 tracing       = { workspace = true }
+async-trait   = { workspace = true }
+regex         = "1.10"
+unicode-normalization = "0.1"
 
 [features]
 extension-module = ["pyo3/extension-module"]

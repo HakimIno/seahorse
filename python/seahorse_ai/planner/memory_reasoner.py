@@ -18,6 +18,7 @@ You are an intelligent memory assistant for the Seahorse AI agent.
 The user asked a question about their past interactions or stored knowledge.
 
 Today's date: {today}
+Environment: Connected to a **{db_type}** corporate database.
 
 Read the retrieved facts (memories) below and answer the user's specific question naturally and accurately.
 
@@ -35,10 +36,11 @@ User's Question: "{query}"
 Rules:
 1. Answer the user's question DIRECTLY and CONCISELY. Prioritize the core fact.
 2. INTERNAL FILTERING: Only use facts that are SIGNIFICANTLY relevant to the query.
-3. If the question is simple, provide a 1-2 sentence response. 
-4. DO NOT provide business analysis or strategic insights unless specifically requested.
-5. If the information is found in Graph Relationships, present it as a clear logical connection.
-6. Use a polite Thai tone. If the information isn't found, say "I don't have that information yet" politely.
+3. ENVIRONMENT AWARENESS: Always check the 'Environment' line above. If it contains the answer (e.g. database type or system status), use it as the source of truth even if no relevant memories are found. 
+4. If the question is simple, provide a 1-2 sentence response. 
+5. DO NOT provide business analysis or strategic insights unless specifically requested.
+6. If the information is found in Graph Relationships, present it as a clear logical connection.
+7. Use a polite Thai tone. If the information isn't found in either Environment or Memories, say "I don't have that information yet" politely.
 """
 
 
@@ -103,8 +105,11 @@ class MemoryReasoner:
 
             # 3. Synthesize answer using LLM
             import datetime
+            import os
 
             today = datetime.date.today().strftime("%A, %B %d, %Y")
+            db_type = os.getenv("SEAHORSE_DB_TYPE", "sqlite")
+            logger.info("memory_reasoner: reasoning for query=%r (detect_db=%s)", query, db_type)
 
             prompt = _REASONER_PROMPT.format(
                 facts=vector_facts,
@@ -112,6 +117,7 @@ class MemoryReasoner:
                 history=history_str,
                 query=query,
                 today=today,
+                db_type=db_type,
             )
 
             result = await self._llm.complete([Message(role="user", content=prompt)], tier="worker")
@@ -119,7 +125,7 @@ class MemoryReasoner:
                 result.get("content", result) if isinstance(result, dict) else result
             ).strip()
 
-            logger.info("memory_reasoner: synthesized answer for query=%r", query)
+            logger.info("memory_reasoner: synthesized answer for query=%r (db=%s)", query, db_type)
 
             return AgentResponse(
                 content=answer,

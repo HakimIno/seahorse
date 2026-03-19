@@ -1,0 +1,276 @@
+.sidebar {
+  width: 400px;
+  height: 100%;
+  background: white;
+  border-right: 1px solid #e5e7eb;
+  display: flex;
+  flex-direction: column;
+  overflow: visible; /* Changed to visible to let drawer slide out */
+  position: relative;
+}
+
+.sidebar-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 16px;
+  height: 56px;
+  flex-shrink: 0;
+}
+
+.menu-btn {
+  background: none;
+  border: none;
+  font-size: 1.5rem;
+  color: #707579;
+  cursor: pointer;
+  padding: 8px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.2s;
+}
+
+.menu-btn:hover {
+  background: #f4f4f5;
+}
+
+.search-wrapper {
+  flex-grow: 1;
+  position: relative;
+}
+
+.sidebar-search {
+  width: 100%;
+  padding: 8px 16px;
+  background: #f4f4f5;
+  border: 1px solid transparent;
+  border-radius: 20px;
+  font-size: 0.95rem;
+  outline: none;
+  transition: all 0.2s;
+}
+
+.sidebar-search:focus {
+  background: white;
+  border-color: #3390ec;
+}
+
+.chat-list {
+  flex-grow: 1;
+  overflow-y: auto;
+}
+
+.chat-item {
+  display: flex;
+  align-items: center;
+  padding: 10px 16px;
+  cursor: pointer;
+  transition: background 0.1s;
+  gap: 12px;
+}
+
+.chat-item:hover {
+  background: #f4f4f5;
+}
+
+.chat-item.active {
+  background: #3390ec;
+  color: white;
+}
+
+.chat-avatar-wrapper {
+  position: relative;
+}
+
+.chat-avatar {
+  width: 54px;
+  height: 54px;
+  border-radius: 50%;
+  background: #eee;
+}
+
+.online-indicator {
+  position: absolute;
+  bottom: 2px;
+  right: 2px;
+  width: 12px;
+  height: 12px;
+  background: #4ade80;
+  border: 2px solid white;
+  border-radius: 50%;
+}
+
+.chat-item.active .online-indicator {
+  border-color: #3390ec;
+}
+
+.chat-info {
+  flex-grow: 1;
+  min-width: 0;
+}
+
+.chat-name-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 4px;
+}
+
+.chat-name {
+  font-weight: 500;
+  font-size: 1rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.chat-time {
+  font-size: 0.8rem;
+  color: #707579;
+}
+
+.chat-item.active .chat-time {
+  color: rgba(255, 255, 255, 0.8);
+}
+
+.chat-message-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+}
+
+.chat-last-message {
+  font-size: 0.9rem;
+  color: #707579;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  line-height: 1.25;
+}
+
+.chat-item.active .chat-last-message {
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.unread-badge {
+  background: #cdd1d5;
+  color: white;
+  font-size: 0.75rem;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-weight: 600;
+}
+
+.chat-item.active .unread-badge {
+  background: white;
+  color: #3390ec;
+}
+
+/* Side Drawer Styles */
+.drawer-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.2);
+  z-index: 1000;
+  backdrop-filter: blur(1px);
+}
+
+.side-drawer {
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 280px;
+  height: 100%;
+  background: white;
+  z-index: 1001;
+  box-shadow: 2px 0 10px rgba(0, 0, 0, 0.1);
+  transition: left 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  display: flex;
+  flex-direction: column;
+}
+
+.side-drawer.open {
+  left: 0;
+}
+
+.drawer-header {
+  padding: 24px 16px;
+  background: #3390ec;
+  color: white;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+}
+
+.drawer-avatar {
+  width: 60px;
+  height: 60px;
+  border-radius: 50%;
+  background: white url("https://api.dicebear.com/7.x/avataaars/svg?seed=Lucky")
+    no-repeat center;
+  background-size: cover;
+  margin-bottom: 12px;
+}
+
+.drawer-user-name {
+  font-weight: 600;
+  font-size: 1.1rem;
+}
+
+.drawer-user-phone {
+  font-size: 0.85rem;
+  opacity: 0.8;
+}
+
+.drawer-theme-toggle {
+  background: none;
+  border: none;
+  color: white;
+  font-size: 1.5rem;
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 50%;
+}
+
+.drawer-theme-toggle:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.drawer-nav {
+  padding: 8px 0;
+  flex-grow: 1;
+}
+
+.drawer-item {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  padding: 12px 24px;
+  color: #444;
+  text-decoration: none;
+  font-size: 0.95rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.1s;
+}
+
+.drawer-item:hover {
+  background: #f4f4f5;
+}
+
+.drawer-item svg {
+  font-size: 1.5rem;
+  color: #707579;
+}
+
+.drawer-divider {
+  height: 1px;
+  background: #eee;
+  margin: 8px 0;
+}

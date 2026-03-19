@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import asyncio
+import anyio
 import json
 import logging
 import os
@@ -45,7 +45,7 @@ class AnomalyWatcher:
                 await self._check_for_anomalies()
             except Exception as e:
                 logger.error("AnomalyWatcher loop error: %s", e)
-            await asyncio.sleep(interval_seconds)
+            await anyio.sleep(interval_seconds)
 
     async def stop(self) -> None:
         self._is_running = False

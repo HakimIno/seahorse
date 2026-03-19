@@ -1,4 +1,3 @@
-use super::*;
 use crate::error::{CoreError, CoreResult};
 use crate::scheduler::AgentTask;
 use std::sync::Arc;
@@ -6,13 +5,18 @@ use tokio::sync::mpsc;
 use crate::worker::runner::PythonRunner;
 use crate::worker::task_loop::spawn_worker_loop;
 
+use async_trait::async_trait;
+
 struct EchoPythonRunner;
 
+#[async_trait]
 impl PythonRunner for EchoPythonRunner {
-    fn run(
+    async fn run(
         &self,
         _task_id: &str,
+        _agent_id: &str,
         prompt: &str,
+        _history: &[crate::scheduler::Message],
         _token_tx: mpsc::Sender<String>,
     ) -> CoreResult<String> {
         Ok(format!("Echo: {prompt}"))
@@ -25,11 +29,14 @@ impl PythonRunner for EchoPythonRunner {
 
 struct FailingPythonRunner;
 
+#[async_trait]
 impl PythonRunner for FailingPythonRunner {
-    fn run(
+    async fn run(
         &self,
         _task_id: &str,
+        _agent_id: &str,
         _prompt: &str,
+        _history: &[crate::scheduler::Message],
         _token_tx: mpsc::Sender<String>,
     ) -> CoreResult<String> {
         Err(CoreError::ChannelClosed)
@@ -50,7 +57,9 @@ async fn worker_echoes_response() {
     task_tx
         .send(AgentTask {
             id: "t1".into(),
+            agent_id: "a1".into(),
             prompt: "hello world".into(),
+            history: vec![],
             response_tx,
         })
         .await
@@ -70,7 +79,9 @@ async fn worker_sends_error_on_runner_failure() {
     task_tx
         .send(AgentTask {
             id: "t2".into(),
+            agent_id: "a2".into(),
             prompt: "boom".into(),
+            history: vec![],
             response_tx,
         })
         .await

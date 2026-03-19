@@ -6,13 +6,15 @@ Only allows a curated set of safe imports.
 
 from __future__ import annotations
 
-import asyncio
 import contextlib
 import logging
 import os
+import subprocess
 import sys
 import tempfile
 import textwrap
+
+import anyio
 
 from seahorse_ai.tools.base import tool
 
@@ -120,14 +122,13 @@ async def python_interpreter(code: str) -> str:
             "LANG": os.environ.get("LANG", "en_US.UTF-8"),
         }
 
+        import asyncio
         process = await asyncio.create_subprocess_exec(
-            _get_python_executable(),
-            tmp_path,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
+            _get_python_executable(), tmp_path,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             env=safe_env,
         )
-
         try:
             stdout_bytes, stderr_bytes = await asyncio.wait_for(
                 process.communicate(), timeout=_TIMEOUT_SECONDS
@@ -135,9 +136,8 @@ async def python_interpreter(code: str) -> str:
             stdout = stdout_bytes.decode().strip()
             stderr = stderr_bytes.decode().strip()
             returncode = process.returncode
-        except TimeoutError:
+        except asyncio.TimeoutError:
             process.kill()
-            await process.wait()
             logger.warning("python_interpreter: code timed out after %ds", _TIMEOUT_SECONDS)
             return f"Error: Code execution timed out after {_TIMEOUT_SECONDS} seconds."
 

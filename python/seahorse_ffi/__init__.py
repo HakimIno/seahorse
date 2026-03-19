@@ -1,11 +1,16 @@
 from .seahorse_ffi import (
     PyAgentMemory,
+    PyChartGenerator,
     PyPlannerRunner,
+    PyPolarsAnalyst,
     PyWasmManager,
+    fetch_football_data,
     is_system_healthy,
     make_py_runner,
     record_global_failure,
     search_memory,
+    normalize_text,
+    deduplicate_by_text,
 )
 
 __all__ = [
@@ -16,4 +21,9 @@ __all__ = [
     "record_global_failure",
     "is_system_healthy",
     "PyWasmManager",
+    "PyPolarsAnalyst",
+    "PyChartGenerator",
+    "fetch_football_data",
+    "normalize_text",
+    "deduplicate_by_text",
 ]

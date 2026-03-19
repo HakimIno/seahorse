@@ -1,6 +1,6 @@
 """seahorse_ai.analysis.feeder — Real-time sales simulator for Seahorse."""
 
-import asyncio
+import anyio
 import contextlib
 import logging
 import os
@@ -64,7 +64,7 @@ class RealTimeFeeder:
             return
         branch = random.choice(self.branches)
         self.anomaly_branch_id = branch["id"]
-        self.anomaly_end_time = asyncio.get_event_loop().time() + duration_sec
+        self.anomaly_end_time = anyio.current_time() + duration_sec
         logger.warning(
             "🚨 SIMULATING ANOMALY: Branch '%s' (ID: %s) has stopped selling for %ds!",
             branch["name"],
@@ -80,14 +80,14 @@ class RealTimeFeeder:
 
         # Initial anomaly for testing context
         logger.warning("🚨 TEST MODE: Forcing initial anomaly for branch ID 1 (Silom Complex)")
-        self.anomaly_end_time = asyncio.get_event_loop().time() + 1800
+        self.anomaly_end_time = anyio.current_time() + 1800
 
         while True:
             try:
                 # 1. Decide how many sales in this tick
                 num_sales = random.randint(1, 4)
 
-                current_loop_time = asyncio.get_event_loop().time()
+                current_loop_time = anyio.current_time()
 
                 for _ in range(num_sales):
                     branch = random.choice(self.branches)
@@ -127,12 +127,12 @@ class RealTimeFeeder:
                     self.trigger_anomaly()
 
                 wait_time = random.uniform(15, 30)
-                await asyncio.sleep(wait_time)
+                await anyio.sleep(wait_time)
 
             except Exception as e:
                 logger.error("Feeder loop error: %s", e)
                 # Attempt to reconnect if lost
-                await asyncio.sleep(10)
+                await anyio.sleep(10)
                 with contextlib.suppress(BaseException):
                     await self._init_db()
 
@@ -144,6 +144,6 @@ async def main() -> None:
 
 if __name__ == "__main__":
     try:
-        asyncio.run(main())
+        anyio.run(main)
     except KeyboardInterrupt:
         logger.info("Feeder stopped.")

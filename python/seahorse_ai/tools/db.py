@@ -16,6 +16,7 @@ logger = logging.getLogger(__name__)
 _DB_TYPE = os.environ.get("SEAHORSE_DB_TYPE", "sqlite")
 _SQLITE_PATH = os.environ.get("SEAHORSE_DB_PATH", "workspace/corporate.db")
 _PG_URI = os.environ.get("SEAHORSE_PG_URI")
+_MAX_ROWS = int(os.environ.get("SEAHORSE_MAX_DB_ROWS", "50000"))
 
 
 class DataEncoder(json.JSONEncoder):
@@ -102,9 +103,11 @@ async def database_query(query: str) -> str:
     # ── 1. Basic Security Guard ───────────────────────────────────────────────
     q_lower = query.strip().lower()
 
-    # Block destructive commands
+    import re
     forbidden = ["insert", "update", "delete", "drop", "truncate", "alter", "create", "replace"]
-    if any(cmd in q_lower for cmd in forbidden) or not (
+    # Use regex with word boundaries to avoid matching keywords inside column names (e.g., 'created_at')
+    pattern = r"\b(" + "|".join(forbidden) + r")\b"
+    if re.search(pattern, q_lower) or not (
         q_lower.startswith("select") or q_lower.startswith("with")
     ):
         logger.warning("database_query: blocked potentially destructive query: %r", query)
@@ -137,11 +140,11 @@ async def database_query(query: str) -> str:
             return "Query executed successfully, but no rows were returned."
 
         # ── 3. Formatting Results ──────────────────────────────────────────────
-        max_rows = 20
+        max_rows = _MAX_ROWS
         total_count = len(results)
         header = (
             f"[DATA CONFIDENCE: Total {total_count} records found in database]\n"
-            f"Showing top {max_rows} results:\n"
+            f"Showing top {min(max_rows, total_count)} results:\n"
         )
 
         formatted = json.dumps(results[:max_rows], indent=2, ensure_ascii=False, cls=DataEncoder)

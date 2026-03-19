@@ -120,8 +120,9 @@ impl PyGraphRunner {
     }
 }
 
+#[async_trait::async_trait]
 impl PythonRunner for PyGraphRunner {
-    fn run(
+    async fn run(
         &self,
         task_id: &str,
         agent_id: &str,
@@ -148,13 +149,8 @@ impl PythonRunner for PyGraphRunner {
         initial_state.insert("messages".to_string(), serde_json::Value::Array(messages));
         
         // Run Graph
-        // `graph.run()` is async, but PythonRunner::run is synchronous (runs inside spawn_blocking).
-        // So we need a Tokio runtime or block_on here to drive the graph future.
-        // Wait, since we are inside `spawn_blocking`, we can use a Handle or block_on.
-        let handle = tokio::runtime::Handle::current();
-        let exec_result = handle.block_on(async {
-            graph.run(initial_state).await
-        });
+        // Now PyGraphRunner::run is async, so we can await the graph execution directly.
+        let exec_result = graph.run(initial_state).await;
         
         match exec_result {
             Ok(execution) => {

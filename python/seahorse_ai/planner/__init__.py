@@ -25,11 +25,12 @@ The API is identical to the legacy planner.py for full backward compatibility.
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import os
 import uuid
 from typing import Any, Protocol, runtime_checkable
+
+import anyio
 
 from seahorse_ai.observability import get_tracer, setup_telemetry
 from seahorse_ai.planner.circuit_breaker import CircuitBreaker
@@ -49,6 +50,23 @@ from seahorse_ai.schemas import AgentRequest, AgentResponse, Message
 from seahorse_ai.skills.base import SeahorseSkill
 
 logger = logging.getLogger(__name__)
+
+
+# ── Database Pooling (Finding #17) ───────────────────────────────────────────
+
+_pool: Any | None = None
+
+
+async def _get_pool() -> Any:
+    global _pool
+    import asyncpg
+
+    if _pool is None:
+        pg_uri = os.environ.get("SEAHORSE_PG_URI")
+        if not pg_uri:
+            return None
+        _pool = await asyncpg.create_pool(pg_uri, min_size=2, max_size=10)
+    return _pool
 
 
 # ── Protocols (kept for type-safety and mocking in tests) ─────────────────────
@@ -112,6 +130,8 @@ class ReActPlanner:
         step_timeout_seconds: int = 120,
         global_timeout_seconds: int = 600,
         identity_prompt: str | None = None,
+        enable_hybrid: bool = True,
+        hybrid_complexity_threshold: int = 4,
     ) -> None:
         """Initialize the ReActPlanner with its sub-components.
 
@@ -124,6 +144,8 @@ class ReActPlanner:
             step_timeout_seconds: Timeout per iteration.
             global_timeout_seconds: Total execution timeout.
             identity_prompt: Optional extra system instruction for identity.
+            enable_hybrid: Enable the hybrid orchestrator for complex tasks.
+            hybrid_complexity_threshold: Minimum complexity to activate hybrid mode.
 
         """
         self._llm = llm
@@ -131,6 +153,8 @@ class ReActPlanner:
         self._skills = skills or []
         self._default_tier = default_tier
         self._identity_prompt = identity_prompt
+        self._enable_hybrid = enable_hybrid
+        self._hybrid_complexity_threshold = hybrid_complexity_threshold
 
         # Build sub-components
         self._circuit_breaker = CircuitBreaker()
@@ -142,6 +166,10 @@ class ReActPlanner:
             step_timeout_seconds=step_timeout_seconds,
             global_timeout_seconds=global_timeout_seconds,
         )
+
+        # Hybrid orchestrator (lazy — only used when complexity >= threshold)
+        self._hybrid: Any | None = None
+
         setup_telemetry()  # idempotent
 
     # ── Public API ─────────────────────────────────────────────────────────────
@@ -171,22 +199,20 @@ class ReActPlanner:
             self._circuit_breaker = CircuitBreaker()
 
             # ── 1. Structured Intent (1 LLM call → intent+action+entity) ──
-            # OPTIMIZATION: Skip classification for sub-agents (crew_*)
-            is_crew = request.agent_id.startswith("crew_")
-            if is_crew:
+            # OPTIMIZATION: Skip classification for sub-agents (crew_*, sub_*)
+            is_subagent = request.agent_id.startswith(("crew_", "sub_"))
+            if is_subagent:
                 from seahorse_ai.planner.fast_path import StructuredIntent
 
                 si = StructuredIntent(intent="GENERAL", action="CHAT", complexity=3)
             else:
                 try:
-                    si = await asyncio.wait_for(
-                        classify_structured_intent(
+                    with anyio.fail_after(15.0):
+                        si = await classify_structured_intent(
                             request.prompt,
                             self._llm,
                             request.history,
-                        ),
-                        timeout=15.0,  # Reduced timeout for fast worker
-                    )
+                        )
                 except TimeoutError:
                     logger.warning(
                         "agent.run intent classification timed out — falling back to GENERAL"
@@ -202,7 +228,7 @@ class ReActPlanner:
                 si.action,
                 si.entity,
                 request.agent_id,
-                is_crew,
+                is_subagent,
             )
 
             # ── 2. Fast Path — bypass ReAct if action is simple ────────────
@@ -225,33 +251,23 @@ class ReActPlanner:
                 )
                 return fast  # Done! 1 LLM call total ⚡
 
-            # ── 2.5 Auto-Seahorse Mode - trigger multi-agent for complex tasks ──
-            # NEVER trigger Auto-Seahorse Mode for sub-agents (crew_*) to avoid infinite recursion
-            if si.complexity >= 4 and not request.agent_id.startswith("crew_"):
+            # ── 2.5 Hybrid Orchestrator — iterative multi-agent for complex tasks ──
+            # NEVER trigger for sub-agents (crew_*, sub_*) to avoid infinite recursion
+            is_subagent = request.agent_id.startswith(("crew_", "sub_"))
+            if (
+                self._enable_hybrid
+                and si.complexity >= self._hybrid_complexity_threshold
+                and not is_subagent
+            ):
                 logger.info(
-                    "agent.run CROSS-OVER to Auto-Seahorse complexity=%d agent_id=%s",
+                    "agent.run HYBRID mode complexity=%d agent_id=%s",
                     si.complexity,
                     request.agent_id,
                 )
-                from seahorse_ai.tools.auto_seahorse import execute_auto_seahorse
-
-                crew_result = await execute_auto_seahorse(request.prompt, team_hint=si.intent)
-
-                # Unpack if execute_auto_seahorse returns a dict (content, image_paths)
-                is_str = isinstance(crew_result, str)
-                content = crew_result if is_str else crew_result.get("content", "")
-                images = [] if is_str else crew_result.get("image_paths") or []
-
                 _set_span(
-                    span, {"agent.auto_seahorse_mode": True, "agent.complexity": si.complexity}
+                    span, {"agent.hybrid_mode": True, "agent.complexity": si.complexity}
                 )
-                return AgentResponse(
-                    content=content,
-                    steps=1,  # Abstraction level
-                    agent_id=request.agent_id,
-                    elapsed_ms=0,  # Calculation delegated
-                    image_paths=images if images else None,
-                )
+                return await self._run_hybrid(request)
 
             # ── 3. Build system messages (full ReAct path) ─────────────────
             sys_prompt = build_system_prompt(skills=self._skills, tone=si.tone, intent=intent)
@@ -322,7 +338,7 @@ class ReActPlanner:
                 if (
                     not result.terminated
                     and not skip_synthesis
-                    and not is_crew
+                    and not is_subagent
                     and not is_elite_already
                     and is_data_intent
                 ):
@@ -332,8 +348,8 @@ class ReActPlanner:
                         request.prompt,
                     )
 
-                # 8. Background memory (rate-limited, non-blocking)
-                asyncio.create_task(self._memory.record(messages, agent_id=request.agent_id))
+                # 8. Background memory (rate-limited)
+                await self._memory.record(messages, agent_id=request.agent_id)
 
                 _set_span(
                     span,
@@ -357,6 +373,27 @@ class ReActPlanner:
             except Exception as e:
                 await self._update_execution(execution_id, messages, status="FAILED")
                 raise e
+
+    # ── Hybrid orchestrator ──────────────────────────────────────────────────
+
+    async def _run_hybrid(self, request: AgentRequest) -> AgentResponse:
+        """Delegate to the HybridOrchestrator for complex multi-step tasks."""
+        if self._hybrid is None:
+            from seahorse_ai.planner.hybrid_orchestrator import HybridOrchestrator
+            from seahorse_ai.planner.hybrid_schemas import HybridConfig
+
+            self._hybrid = HybridOrchestrator(
+                llm=self._llm,
+                tools=self._tools,
+                config=HybridConfig(
+                    max_steps_per_subtask=self._cfg.max_steps,
+                    step_timeout_seconds=self._cfg.step_timeout_seconds,
+                    global_timeout_seconds=self._cfg.global_timeout_seconds,
+                ),
+                identity_prompt=self._identity_prompt,
+            )
+
+        return await self._hybrid.run(request)
 
     # ── Private helpers ────────────────────────────────────────────────────────
 
@@ -393,15 +430,16 @@ class ReActPlanner:
         """Create initial execution record in Postgres."""
         import json
 
-        import asyncpg
-
-        pg_uri = os.environ.get("SEAHORSE_PG_URI")
-        if not pg_uri:
+        pool = await _get_pool()
+        if not pool:
             return
         try:
-            conn = await asyncpg.connect(pg_uri)
-            try:
-                hist_json = json.dumps([h.model_dump() for h in history]) if history else None
+            async with pool.acquire() as conn:
+                import msgspec
+
+                hist_json = (
+                    json.dumps([msgspec.to_builtins(h) for h in history]) if history else None
+                )
                 await conn.execute(
                     """
                     INSERT INTO seahorse_executions (id, agent_id, prompt, history, status)
@@ -412,8 +450,6 @@ class ReActPlanner:
                     prompt,
                     hist_json,
                 )
-            finally:
-                await conn.close()
         except Exception as e:
             logger.error("planner._persist_execution failed: %s", e)
 
@@ -423,15 +459,14 @@ class ReActPlanner:
         """Update existing execution record with current conversation state."""
         import json
 
-        import asyncpg
-
-        pg_uri = os.environ.get("SEAHORSE_PG_URI")
-        if not pg_uri:
+        pool = await _get_pool()
+        if not pool:
             return
         try:
-            conn = await asyncpg.connect(pg_uri)
-            try:
-                msgs_json = json.dumps([m.model_dump() for m in messages])
+            async with pool.acquire() as conn:
+                import msgspec
+
+                msgs_json = json.dumps([msgspec.to_builtins(m) for m in messages])
                 await conn.execute(
                     """
                     UPDATE seahorse_executions 
@@ -443,8 +478,6 @@ class ReActPlanner:
                     execution_id,
                 )
                 logger.info("planner._update_execution: updated id=%s", execution_id)
-            finally:
-                await conn.close()
         except Exception as e:
             logger.error("planner._update_execution failed: %s", e)
 

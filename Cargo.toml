@@ -4,6 +4,7 @@ members = [
     "crates/seahorse-core",
     "crates/seahorse-router",
     "crates/seahorse-ffi",
+    "seahorse-desktop/src-tauri",
 ]
 
 [workspace.package]
@@ -54,6 +55,13 @@ wasmtime    = "20"
 bytemuck    = { version = "1", features = ["derive"] }
 # AI Framework
 rig-core    = "0.6.0"
+# Data Engineering
+polars      = { version = "0.41", features = ["lazy", "sql", "json", "parquet", "dtype-datetime"] }
+# Visualization
+charming = "0.3" # Effective Echarts wrapper for Rust
+# Rate Limiting
+governor = "0.6"
+async-trait = "0.1"
 
 [workspace.lints.clippy]
 all       = "warn"
@@ -63,3 +71,9 @@ must_use_candidate         = "allow"
 module_name_repetitions    = "allow"
 missing_errors_doc         = "allow"
 missing_panics_doc         = "allow"
+
+[profile.dev]
+incremental = false
+
+[profile.release]
+incremental = false

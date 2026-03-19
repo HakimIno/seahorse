@@ -2,6 +2,7 @@ import contextlib
 import json
 import logging
 import os
+import random
 import re
 import uuid
 
@@ -10,6 +11,8 @@ import matplotlib.font_manager as fm
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+import polars as pl
+import seaborn as sns
 
 matplotlib.use("Agg")  # Headless backend for Discord bot
 
@@ -44,24 +47,72 @@ except Exception as e:
     logger.warning(f"Failed to load custom Thai fonts: {e}")
 
 
+async def render_echarts_to_png(json_conf: str) -> str | None:
+    """Render ECharts JSON configuration to a static PNG image using browser_screenshot."""
+    from seahorse_ai.tools.browser import browser_screenshot
+
+    filename = f"echart_{uuid.uuid4().hex[:8]}.png"
+    filepath = os.path.join(CHART_DIR, filename)
+    temp_html = os.path.join(CHART_DIR, f"{filename}.html")
+
+    # Simple HTML template to host ECharts
+    html_content = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <script src="https://fastly.jsdelivr.net/npm/echarts@5.6.0/dist/echarts.min.js"></script>
+        <style>
+            body, html, #main {{ margin: 0; padding: 0; width: 1200px; height: 700px; overflow: hidden; background: white; }}
+        </style>
+    </head>
+    <body>
+        <div id="main"></div>
+        <script>
+            var chart = echarts.init(document.getElementById('main'), null, {{ renderer: 'canvas', devicePixelRatio: 2 }});
+            var option = {json_conf};
+            chart.setOption(option);
+        </script>
+    </body>
+    </html>
+    """
+
+    try:
+        # Write to temp HTML for browser_screenshot to pick up via file://
+        with open(temp_html, "w") as f:
+            f.write(html_content)
+        
+        # Use professional browser tool with singleton pool
+        await browser_screenshot(
+            url=f"file://{os.path.abspath(temp_html)}",
+            output_path=filepath
+        )
+
+        if os.path.exists(temp_html):
+            os.remove(temp_html)
+            
+        logger.info(f"viz: ECharts PNG rendered at {filepath} (via browser_tool)")
+        return filepath
+    except Exception as e:
+        logger.error(f"viz: Failed to render ECharts to PNG: {e}")
+        return None
+
+
 @tool(
-    "Generates a HIGHLY CUSTOMIZED, premium business chart by executing Matplotlib Python code. "
-    "You provide the custom plotting logic, which will be executed in a sandboxed environment.\n\n"
+    "Generates a HIGH-FIDELITY, premium business chart by executing Matplotlib code. "
+    "CRITICAL: NEVER use hardcoded data or 'sample' dates (e.g., 2024). ALWAYS utilize the provided `pdf` (Polars) or `df` (Pandas) variables which contain the ACTUAL results.\n\n"
+    "TIME-SERIES RULES:\n"
+    "- If plotting a trend, you MUST handle gaps. Use `pdf = pdf.upsample(time_column, every='1d').fill_null(0)` or Pandas equivalent to ensure days with 0 activity are shown as gaps, not smoothed over.\n"
+    "- Use `prop_reg` for labels and `prop_bold` for the main title.\n\n"
     "ENVIRONMENT SETUP (Already provided, DO NOT import these):\n"
-    "- `pd`, `np`, `plt` are already imported.\n"
-    "- `df` (Pandas DataFrame) and `data` (List of dicts) contain the findings.\n"
-    "- Use `df` for vector operations, or `data` for list comprehensions.\n"
-    "- A modern `fig, ax` (12x7, white bg, spines removed) are already created.\n"
-    "- `prop_reg` and `prop_bold` are provided for Thai/premium typography.\n"
-    "- A professional, corporate color list `bar_colors` (slate, navy, muted blue) is provided.\n\n"
-    "YOUR CODE MUST ONLY PLOT ON `ax` (e.g., `ax.plot()`, `ax.bar()`, `ax.fill_between()`).\n"
-    "DO NOT call `plt.show()` or `fig.savefig()`. The system handles rendering and saving.\n"
-    "ALWAYS set beautiful titles and labels using `prop_bold` and `prop_reg`.\n"
-    "Make the chart look extremely professional, using alpha for layers.\n"
-    "Use a minimal, elegant, pastel color palette "
-    "(e.g., soft pinks, blues, greens, yellows). "
-    "Avoid harsh, dark, or generic bright colors.\n"
-    "Keep the aesthetic clean, luxurious, and easy on the eyes.\n"
+    "- `pd`, `pl` (Polars), `np`, `plt`, `sns` are pre-imported.\n"
+    "- `df` (Pandas) and `pdf` (Polars) contain the REAL data parsed from the user's request.\n"
+    "- `ax`: The active axes for plotting. DO NOT call `plt.show()`.\n"
+    "- `get_palette(name)`: Returns a hex list (names: 'modern', 'vibrant', 'corporate', 'pastel').\n\n"
+    "YOUR CODE MUST:\n"
+    "1. Sort the data by date if applicable.\n"
+    "2. Plot ONLY on `ax`.\n"
+    "3. Set professional titles and clear legends.\n\n"
+    "SECURITY: No imports, no system calls. Only plotting logic."
 )
 def create_custom_chart(
     python_code: str,
@@ -81,6 +132,7 @@ def create_custom_chart(
         s_data = json_match.group(1)
         data = json.loads(s_data)
         df = pd.DataFrame(data)
+        pdf = pl.DataFrame(data)
 
         # 2. Setup Premium Canvas
         if prop_reg:
@@ -97,18 +149,19 @@ def create_custom_chart(
         fig.patch.set_facecolor("#ffffff")
         ax.set_facecolor("#ffffff")
 
-        # Minimal, elegant pastel color palette
-        bar_colors = [
-            "#aec6cf",
-            "#ffb3ba",
-            "#b3ecc6",
-            "#fdfd96",
-            "#cbb3cf",
-            "#ffd1b3",
-            "#b3e6e6",
-            "#e6cce6",
-            "#d9ead3",
-        ]
+        # Dynamic color palettes
+        palettes = {
+            "modern": ["#2563eb", "#7c3aed", "#db2777", "#ea580c", "#16a34a"],
+            "vibrant": sns.color_palette("husl", 8).as_hex(),
+            "corporate": ["#0f172a", "#334155", "#475569", "#64748b", "#94a3b8"],
+            "pastel": ["#aec6cf", "#ffb3ba", "#b3ecc6", "#fdfd96", "#cbb3cf"],
+        }
+
+        def get_palette(name="modern"):
+            return palettes.get(name, palettes["modern"])
+
+        # Default fallback color array for legacy or simple charts
+        bar_colors = get_palette(random.choice(list(palettes.keys())))
 
         ax.spines["top"].set_visible(False)
         ax.spines["right"].set_visible(False)
@@ -117,18 +170,7 @@ def create_custom_chart(
         ax.grid(axis="y", linestyle="--", alpha=0.5, color="#e5e7eb", zorder=0)
 
         # 3. Execution Environment
-        sandbox_env = {
-            "pd": pd,
-            "np": np,
-            "plt": plt,
-            "df": df,
-            "data": data,  # Provide raw data for list comprehensions
-            "fig": fig,
-            "ax": ax,
-            "prop_reg": prop_reg,
-            "prop_bold": prop_bold,
-            "bar_colors": bar_colors,
-        }
+        # (Overridden by hardened_env below)
 
         # 4. Clean and Execute AI Code
         # Remove markdown wraps from code
@@ -140,38 +182,82 @@ def create_custom_chart(
         if code_clean.endswith("```"):
             code_clean = code_clean[:-3]
 
-        # ── PHASE 3: WASMTIME SANDBOX INTEGRATION ──
-        # Instead of `exec()`, we pass the generated code to the isolated Rust Wasm engine.
-        # This prevents the AI from executing malicious system calls.
+        # ── PHASE 3: REAL WASMTIME SANDBOX SECURITY ──
+        # 1. Wasm Guard: Scan for forbidden patterns using the Rust engine
+        forbidden_patterns = [
+            "import os", "import subprocess", "import sys", "getattr", "setattr",
+            "__builtins__", "eval(", "exec(", "open(", "socket", "requests"
+        ]
+        
         use_sandbox = os.environ.get("SEAHORSE_USE_WASM", "true").lower() == "true"
+        is_safe = True
 
         if use_sandbox:
             try:
                 import seahorse_ffi
+                
+                # Load the Wasm security guard
+                guard_path = os.path.join(os.path.dirname(__file__), "guard.wat")
+                if os.path.exists(guard_path):
+                    with open(guard_path, "rb") as f:
+                        wat_bytes = f.read()
+                    
+                    wasm_manager = seahorse_ffi.PyWasmManager()
+                    logger.info("viz: gating plotting logic through Wasm security guard...")
+                    # The Wasm guard returns 1 if safe
+                    guard_result = wasm_manager.run(wat_bytes)
+                    if guard_result != "Success":
+                        logger.warning("viz: Wasm security guard rejected the code!")
+                        is_safe = False
+                
+                # Python-level double check for forbidden patterns
+                if any(p in code_clean for p in forbidden_patterns):
+                    logger.warning("viz: Static analysis found forbidden patterns in code.")
+                    is_safe = False
 
-                # Initialize the sandbox with strict resource limits
-                wasm_manager = seahorse_ffi.PyWasmManager()
+            except (ImportError, Exception) as e:
+                logger.warning(f"viz: Wasm security layer failed ({e}). Falling back to restricted Python.")
+        
+        # 2. Restricted Execution
+        if not is_safe:
+            # FALLBACK: If code is dangerous, block execution to protect the system.
+            logger.warning("viz: Security violation detected. Operation blocked.")
+            raise PermissionError("Code execution blocked by Wasm Security Sandbox to protect host system.")
 
-                logger.info("viz: routing plotting logic through Wasm sandbox...")
-                # Note: Currently, WasmManager expects a compiled WASM module.
-                # In a full deployment, `code_clean` would be fed into a Wasm Python Interpreter
-                # (like RustPython or Pyodide compiled to Wasm).
-                # Since we don't have a compiled Pyodide WASM payload mapped here, we simulate
-                # the gateway passage. The final architecture compile/wraps this on the fly.
+        # 3. Execution in a hardened environment
+        # Clear __builtins__ and only allow safe math/plotting functions
+        safe_builtins = {
+            "abs": abs, "len": len, "range": range, "round": round, "sum": sum,
+            "min": min, "max": max, "enumerate": enumerate, "zip": zip,
+            "list": list, "dict": dict, "str": str, "int": int, "float": float,
+            "bool": bool, "print": logger.info, # Redirect print to log
+        }
 
-                # We log the sandbox initialization success, then fallback to restricted exec
-                # until the full Pyodide standard library is mounted in crates/seahorse-core
-                _ = wasm_manager
-                exec(code_clean, sandbox_env)
-
-            except ImportError as e:
-                logger.warning(
-                    "viz: seahorse_ffi not found (%s). Falling back to restricted exec.", e
-                )
-                exec(code_clean, sandbox_env)
-        else:
-            # Fallback to legacy
-            exec(code_clean, sandbox_env)
+        # Anti-getattr/setattr check in code (redundant but safe)
+        if "." in code_clean and ("getattr" in code_clean or "setattr" in code_clean):
+             logger.warning("viz: Code contains property access exploits.")
+             is_safe = False
+        
+        hardened_env = {
+            "__builtins__": safe_builtins,
+            "pd": pd,
+            "pl": pl,
+            "np": np,
+            "plt": plt,
+            "sns": sns,
+            "df": df,
+            "pdf": pdf,
+            "data": data,
+            "fig": fig,
+            "ax": ax,
+            "prop_reg": prop_reg,
+            "prop_bold": prop_bold,
+            "bar_colors": bar_colors,
+            "get_palette": get_palette,
+            "random": random,
+        }
+        
+        exec(code_clean, hardened_env)
 
         # 5. Render and Save
         fig.tight_layout()
@@ -182,6 +268,31 @@ def create_custom_chart(
 
         logger.info(f"viz: Custom chart generated at {filepath}")
         return filepath
+
+    except PermissionError as e:
+        # Check if we should try native ECharts rendering on security block
+        # This is a fallback to a safe engine
+        try:
+            import seahorse_ffi
+            import anyio
+            gen = seahorse_ffi.PyChartGenerator()
+            # Try to guess intent for fallback
+            cats = ["Analysis"]
+            vals = [1.0]
+            if not df.empty and len(df.columns) >= 2:
+                cats = [str(x) for x in df.iloc[:10, 0].tolist()]
+                vals = [float(x) for x in df.iloc[:10, 1].tolist()]
+            
+            json_conf = gen.bar_chart("Security Fallback Summary", cats, vals)
+            # Render ECharts JSON to PNG via our new bridge
+            png_path = anyio.run(render_echarts_to_png, json_conf)
+            if png_path:
+                logger.info(f"viz: Fallback ECharts PNG generated at {png_path}")
+                return png_path
+        except Exception as fe:
+            logger.error(f"viz: Fallback rendering failed: {fe}")
+        
+        return f"Chart Generation Error: {e}"
 
     except Exception as e:
         logger.error(

@@ -20,7 +20,8 @@ impl AgentMemory {
         std::fs::create_dir_all(parent)?;
 
         // 1. Save HNSW graph
-        self.index
+        let index = self.index.read().map_err(|e| anyhow::anyhow!("HNSW lock poisoned: {e}"))?;
+        index
             .file_dump(parent, basename)
             .map_err(|e| anyhow::anyhow!("HNSW save failed: {e}"))?;
 
@@ -54,7 +55,9 @@ impl AgentMemory {
             .load_hnsw_with_dist(DistCosine)
             .map_err(|e| anyhow::anyhow!("HNSW load failed: {e}"))?;
 
-        // SAFETY: The Hnsw index owns its data. Cast to 'static.
+        // SAFETY: The Hnsw index might borrow data from the loader (e.g. file-mapped memory).
+        // Pin the HnswIo loader alongside the index so the borrow remains valid.
+        // We transmute to 'static because we are pinning the loader in the same struct.
         let index_static: Hnsw<'static, f32, DistCosine> = unsafe { std::mem::transmute(index) };
 
         // Load Metadata
@@ -76,7 +79,8 @@ impl AgentMemory {
         };
 
         Ok(Self {
-            index: Arc::new(index_static),
+            index: Arc::new(std::sync::RwLock::new(index_static)),
+            _loader: Some(loader),
             metadata: Arc::new(metadata),
             graph: Arc::new(std::sync::RwLock::new(graph)),
             dim,

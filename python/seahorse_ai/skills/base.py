@@ -3,12 +3,12 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from pydantic import BaseModel
+import msgspec
 
 logger = logging.getLogger(__name__)
 
 
-class SeahorseSkill(BaseModel):
+class SeahorseSkill(msgspec.Struct):
     """A collection of tools and prompt rules that define a specific agent capability."""
 
     name: str

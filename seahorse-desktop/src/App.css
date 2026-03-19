@@ -1,0 +1,322 @@
+@import url("https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap");
+
+:root {
+  /* Modern Palette */
+  --bg-primary: #ffffff;
+  --bg-secondary: #f8f9fa;
+  --bg-sidebar: #f1f3f4;
+
+  --text-primary: #202124;
+  --text-secondary: #5f6368;
+  --text-on-accent: #ffffff;
+
+  --accent-blue: #1a73e8;
+  --accent-blue-hover: #1765cc;
+  --accent-soft-blue: #e8f0fe;
+
+  --border-light: #dadce0;
+  --bubble-ai: #f1f3f4;
+  --bubble-user: #1a73e8;
+
+  --shadow-sm:
+    0 1px 2px 0 rgba(60, 64, 67, 0.3), 0 1px 3px 1px rgba(60, 64, 67, 0.15);
+  --shadow-md:
+    0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+
+  --radius-pill: 24px;
+  --radius-lg: 16px;
+  --radius-md: 12px;
+
+  --transition-smooth: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Dark Mode Context */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg-primary: #202124;
+    --bg-secondary: #2d2e31;
+    --bg-sidebar: #202124;
+
+    --text-primary: #e8eaed;
+    --text-secondary: #9aa0a6;
+
+    --accent-blue: #8ab4f8;
+    --accent-blue-hover: #aecbfa;
+    --accent-soft-blue: rgba(138, 180, 248, 0.1);
+
+    --border-light: #3c4043;
+    --bubble-ai: #3c4043;
+    --bubble-user: #8ab4f8;
+  }
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body,
+html {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  font-family: "Outfit", sans-serif;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  -webkit-font-smoothing: antialiased;
+}
+
+#root {
+  height: 100%;
+}
+
+.app-container {
+  display: flex;
+  width: 100%;
+  height: 100vh;
+  background: var(--bg-primary);
+}
+
+/* Sidebar */
+.sidebar {
+  width: 320px;
+  height: 100%;
+  background: var(--bg-sidebar);
+  border-right: 1px solid var(--border-light);
+  display: flex;
+  flex-direction: column;
+  padding: 16px;
+  transition: var(--transition-smooth);
+}
+
+.logo-section {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  margin-bottom: 16px;
+}
+
+.logo-icon {
+  font-size: 1.5rem;
+}
+
+.logo-text {
+  font-weight: 600;
+  font-size: 1.2rem;
+  color: var(--text-primary);
+}
+
+.search-container {
+  padding: 0 8px;
+  margin-bottom: 24px;
+}
+
+.sidebar-search {
+  width: 100%;
+  padding: 12px 16px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-pill);
+  font-family: inherit;
+  font-size: 0.9rem;
+  color: var(--text-primary);
+  transition: var(--transition-smooth);
+}
+
+.sidebar-search:focus {
+  outline: none;
+  border-color: var(--accent-blue);
+  box-shadow: 0 0 0 1px var(--accent-blue);
+}
+
+.nav-links {
+  list-style: none;
+  flex-grow: 1;
+}
+
+.nav-item {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 14px 20px;
+  border-radius: var(--radius-pill);
+  margin-bottom: 4px;
+  cursor: pointer;
+  color: var(--text-secondary);
+  font-weight: 500;
+  transition: var(--transition-smooth);
+}
+
+.nav-item:hover {
+  background: var(--accent-soft-blue);
+  color: var(--accent-blue);
+}
+
+.nav-item.active {
+  background: var(--accent-soft-blue);
+  color: var(--accent-blue);
+  font-weight: 600;
+}
+
+.user-profile {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px;
+  background: var(--bg-primary);
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border-light);
+  margin-top: auto;
+}
+
+.avatar {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #fecaca 0%, #f9a8d4 100%);
+  flex-shrink: 0;
+}
+
+/* Main Content */
+.main-content {
+  flex-grow: 1;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-primary);
+}
+
+.header {
+  height: 72px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 32px;
+  border-bottom: 1px solid var(--border-light);
+}
+
+.chat-container {
+  flex-grow: 1;
+  overflow-y: auto;
+  padding: 24px 48px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* Messages */
+.message {
+  max-width: 70%;
+  padding: 14px 20px;
+  font-size: 0.95rem;
+  line-height: 1.6;
+  position: relative;
+  animation: messageIn 0.3s cubic-bezier(0, 0.5, 0.5, 1);
+}
+
+@keyframes messageIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.message.ai {
+  align-self: flex-start;
+  background: var(--bubble-ai);
+  color: var(--text-primary);
+  border-radius: 20px 20px 20px 4px;
+}
+
+.message.user {
+  align-self: flex-end;
+  background: var(--bubble-user);
+  color: var(--text-on-accent);
+  border-radius: 20px 20px 4px 20px;
+}
+
+/* Input Area */
+.input-area {
+  padding: 24px 48px 32px;
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
+.input-wrapper {
+  flex-grow: 1;
+  position: relative;
+  display: flex;
+  align-items: center;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-pill);
+  padding-right: 8px;
+  transition: var(--transition-smooth);
+}
+
+.input-wrapper:focus-within {
+  border-color: var(--accent-blue);
+  background: var(--bg-primary);
+  box-shadow: var(--shadow-sm);
+}
+
+.chat-input {
+  flex-grow: 1;
+  background: transparent;
+  border: none;
+  padding: 16px 24px;
+  font-family: inherit;
+  font-size: 1rem;
+  color: var(--text-primary);
+}
+
+.chat-input:focus {
+  outline: none;
+}
+
+.send-btn {
+  width: 44px;
+  height: 44px;
+  background: var(--accent-blue);
+  color: white;
+  border: none;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: var(--transition-smooth);
+}
+
+.send-btn:hover {
+  background: var(--accent-blue-hover);
+  transform: scale(1.05);
+}
+
+.send-btn:active {
+  transform: scale(0.95);
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #dadce0;
+  border-radius: 10px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #bdc1c6;
+  background-clip: content-box;
+}

@@ -68,21 +68,32 @@ The pipeline supports sophisticated content parsing and graph-based grounding fo
 
 ## Quick Start
 
-### Prerequisites
-
 - **Rust** 1.75+
-- **Python** 3.11+
+- **Python** 3.12+ (managed via `uv` or Nix)
+- **Nix** (Optional but recommended for reproducible environments)
 - **uv** (Ultra-fast package manager)
 
 ### Installation
 
-1. **Clone & Sync**
+#### 1. Unified Setup (Recommended)
 
-   ```bash
-   git clone https://github.com/HakimIno/seahorse.git
-   cd seahorse
-   uv sync
-   ```
+If you have [Nix](https://nixos.org/) installed, simply run:
+
+```bash
+nix develop
+```
+
+Or if you use `direnv`, run `direnv allow`. This will set up the correct Rust toolchain, Python 3.12, and all system dependencies (OpenSSL, etc.) automatically.
+
+#### 2. Manual Setup
+
+1.  **Clone & Sync:**
+
+```bash
+git clone https://github.com/HakimIno/seahorse.git
+cd seahorse
+uv sync
+```
 
 2. **Build FFI Core**
 

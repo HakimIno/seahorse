@@ -108,29 +108,12 @@ MEMORY_KEYWORDS: tuple[str, ...] = (
     "internal",
 )
 
-# ── Tier 2: LLM Semantic Intent Classification ─────────────────────────────────
-# Used when Tier 0 and Tier 1 keywords don't provide a confident classification.
-
-INTENT_CLASSIFY_PROMPT = """\
-You are a routing classifier for an AI agent. Classify the user query into ONE category.
-
-Categories:
-- GENERAL: Greetings, simple chat, questions, coding, writing, math, general knowledge
-- PUBLIC_REALTIME: Public market prices (gold/crypto/stocks), news feeds, weather, live scores
-- PRIVATE_MEMORY: Internal business data, product prices set by user, past conversations
-- DATABASE: Queries about corporate database tables, sales figures, customer records
-
-Important rules:
-- Short greetings ("Hi", "Hello", "สวัสดี", "ขอบคุณ") → ALWAYS GENERAL
-- "ราคาทอง" or "Gold price today" → PUBLIC_REALTIME
-- "ราคา [internal product]" (Package A/B, Plan X) → PRIVATE_MEMORY
-- "ยอดขาย" or "sales data" → DATABASE
-- "เขียนโค้ด", "explain X", general questions → GENERAL
-
-Query: "{query}"
-
-Respond with ONLY one of: GENERAL, PUBLIC_REALTIME, PRIVATE_MEMORY, DATABASE
-"""
+# ── Tier 2: LLM Semantic Intent Classification (DEPRECATED) ───────────────────
+#
+# NOTE: Semantic intent classification has been moved to the Structured Intent 
+# pipeline in `seahorse_ai.planner.fast_path`. This module now only handles 
+# low-latency keyword pattern matching.
+# ─────────────────────────────────────────────────────────────────────────────
 
 # ── Nudge messages injected into the conversation ─────────────────────────────
 
@@ -143,7 +126,7 @@ REALTIME_NUDGE = (
 MEMORY_NUDGE = (
     "[SYSTEM] This query refers to previously stored information. "
     "You MUST call `memory_search` NOW before checking the web. "
-    "Only fall back to `web_search` if memory returns empty AND the topic is public data."
+    "If memory is insufficient or empty, feel free to use `web_search` or `database_query` to provide a complete answer."
 )
 
 
@@ -170,22 +153,8 @@ async def classify_intent(query: str, llm_backend: object | None = None) -> str:
     if any(k.lower() in q_lower for k in MEMORY_KEYWORDS):
         return "PRIVATE_MEMORY"
 
-    # Tier 2: Slow path: ambiguous — use LLM if available
-    if llm_backend is not None:
-        try:
-            from seahorse_ai.schemas import Message
-
-            prompt = INTENT_CLASSIFY_PROMPT.format(query=query)
-            result = await llm_backend.complete(  # type: ignore[union-attr]
-                [Message(role="user", content=prompt)], tier="worker"
-            )
-            text = str(result).strip().upper()
-            for cat in ("PUBLIC_REALTIME", "PRIVATE_MEMORY", "DATABASE", "GENERAL"):
-                if cat in text:
-                    return cat
-        except Exception:  # noqa: BLE001
-            pass
-
+    # Tier 2: Slow path (REMOVED)
+    # Semantic classification is now handled by the Structured Intent pipeline (FastPath).
     return "GENERAL"
 
 

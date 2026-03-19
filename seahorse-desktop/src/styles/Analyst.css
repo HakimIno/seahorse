@@ -1,0 +1,120 @@
+.analyst-page {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  position: relative;
+  overflow: hidden;
+  background: linear-gradient(135deg, #3e84ec 0%, #b8e2b1 100%);
+}
+
+.analyst-page::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-image: url("https://neuronexul.github.io/telegram-patterns/patterns/pattern-12.svg");
+  background-size: 400px;
+  opacity: 0.15; /* Faded effect */
+  pointer-events: none;
+  z-index: 0;
+}
+
+.header,
+.message-list-container,
+.input-area {
+  position: relative;
+  z-index: 1;
+}
+
+.header {
+  height: 60px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 16px;
+  background: white;
+  border-bottom: 1px solid #e5e7eb;
+  z-index: 100;
+}
+
+.header-left {
+  display: flex;
+  flex-direction: column;
+}
+
+.header-title {
+  font-weight: 600;
+  font-size: 1rem;
+  color: #000;
+}
+
+.header-status {
+  font-size: 0.8rem;
+  color: #707579;
+}
+
+.header-actions {
+  display: flex;
+  gap: 16px;
+  color: #707579;
+}
+
+.header-actions .icon-btn {
+  font-size: 1.25rem;
+  color: #707579;
+}
+
+.input-area {
+  padding: 8px 16px 16px;
+  background: transparent;
+  display: flex;
+  justify-content: center;
+}
+
+.input-wrapper {
+  max-width: 800px;
+  width: 100%;
+  background: white;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  padding: 4px 12px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+}
+
+.chat-input {
+  flex-grow: 1;
+  background: transparent;
+  border: none;
+  padding: 10px;
+  font-size: 1rem;
+  outline: none;
+}
+
+.send-btn {
+  background: transparent;
+  color: #3390ec;
+  border: none;
+  font-size: 1.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: transform 0.2s;
+}
+
+.send-btn:hover {
+  transform: scale(1.1);
+}
+
+.error-banner {
+  background: rgba(255, 255, 255, 0.9);
+  color: #e53935;
+  padding: 4px 16px;
+  font-size: 0.8rem;
+  text-align: center;
+  margin: 4px auto;
+  border-radius: 4px;
+}

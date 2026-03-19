@@ -4,11 +4,15 @@
 #![allow(clippy::must_use_candidate)]
 
 pub mod agent;
+pub mod analysis;
 pub mod bus;
 pub mod circuit_breaker;
 pub mod graph_runner;
 pub mod memory;
+pub mod viz;
 pub mod wasm;
+pub mod networking;
+pub mod optimizer;
 
 use pyo3::prelude::*;
 
@@ -23,6 +27,11 @@ fn seahorse_ffi(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(circuit_breaker::is_system_healthy, m)?)?;
     m.add_class::<bus::PyMessageBus>()?;
     m.add_class::<bus::PyMessageReceiver>()?;
+    m.add_class::<analysis::PyPolarsAnalyst>()?;
+    m.add_class::<viz::PyChartGenerator>()?;
+    m.add_function(wrap_pyfunction!(networking::fetch_football_data, m)?)?;
+    m.add_function(wrap_pyfunction!(optimizer::normalize_text, m)?)?;
+    m.add_function(wrap_pyfunction!(optimizer::deduplicate_by_text, m)?)?;
     wasm::register(m)?;
     Ok(())
 }

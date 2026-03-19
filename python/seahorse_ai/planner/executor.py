@@ -14,12 +14,14 @@ Architecture:
 
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
+
+import anyio
 
 if TYPE_CHECKING:
     from seahorse_ai.schemas import Message
@@ -65,7 +67,7 @@ class ReActExecutor:
         tools: object,
         circuit_breaker: object,
         config: ExecutorConfig | None = None,
-        step_callback: callable | None = None,
+        step_callback: Callable[..., Any] | None = None,
     ) -> None:
         self._llm = llm
         self._tools = tools
@@ -101,10 +103,8 @@ class ReActExecutor:
 
             # Run one step
             try:
-                response_data, step_ms = await asyncio.wait_for(
-                    self._run_step(messages, openai_tools, step),
-                    timeout=self._cfg.step_timeout_seconds,
-                )
+                with anyio.fail_after(self._cfg.step_timeout_seconds):
+                    response_data, step_ms = await self._run_step(messages, openai_tools, step)
             except TimeoutError:
                 logger.error("executor step=%d timed out", step)
                 messages.append(
@@ -117,7 +117,7 @@ class ReActExecutor:
                         ),
                     )
                 )
-                self._cb.record_error(None)  # type: ignore[union-attr]
+                await self._cb.record_error(None)  # type: ignore[union-attr]
                 terminate, reason = self._cb.should_terminate()  # type: ignore[union-attr]
                 if terminate:
                     return ExecutorResult(
@@ -132,12 +132,14 @@ class ReActExecutor:
                 raise
 
             # Normalize to Message
+            import msgspec
             if isinstance(response_data, str):
                 response_msg = Msg(role="assistant", content=response_data)
             else:
                 if "role" not in response_data:
                     response_data["role"] = "assistant"
-                response_msg = Msg(**response_data)  # type: ignore[arg-type]
+                # Use msgspec.convert since Msg is a Struct
+                response_msg = msgspec.convert(response_data, Msg)
 
             messages.append(response_msg)
             logger.debug("executor step=%d ms=%d", step, step_ms)
@@ -147,9 +149,18 @@ class ReActExecutor:
 
             # ── Tool calls ────────────────────────────────────────────────────
             if tool_calls:
-                # Execute all tools concurrently
-                tasks = [self._execute_tool(tc, step, agent_id) for tc in tool_calls]
-                results = await asyncio.gather(*tasks, return_exceptions=True)
+                # Execute all tools concurrently using AnyIO TaskGroup
+                results: list[Any] = [None] * len(tool_calls)
+
+                async def _run_tool(idx: int, tc: dict, step=step, results=results):
+                    try:
+                        results[idx] = await self._execute_tool(tc, step, agent_id)
+                    except Exception as e:
+                        results[idx] = e
+
+                async with anyio.create_task_group() as tg:
+                    for i, tc in enumerate(tool_calls):
+                        tg.start_soon(_run_tool, i, tc)
 
                 found_crash = False
                 any_success = False
@@ -169,7 +180,7 @@ class ReActExecutor:
                         found_crash = True
 
                     if is_error:
-                        self._cb.record_error(tool_name)  # type: ignore[union-attr]
+                        await self._cb.record_error(tool_name)  # type: ignore[union-attr]
                         observation = self._cb.get_nudge(tool_name, str(result))  # type: ignore[union-attr]
                     else:
                         any_success = True
@@ -283,7 +294,7 @@ class ReActExecutor:
                 args["agent_id"] = agent_id
 
             logger.info("executor tool.call step=%d tool=%s", step, tool_name)
-            result = await self._tools.call(tool_name, args)  # type: ignore[union-attr]
+            result = await self._tools.call(tool_name, args, agent_id=agent_id)  # type: ignore[call-arg]
             logger.info("executor tool.result step=%d tool=%s len=%d", step, tool_name, len(result))
             return result
 
