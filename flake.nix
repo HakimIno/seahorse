@@ -29,6 +29,7 @@
           cargo-nextest
           python311
           ncurses
+          lsof
         ];
 
         # Libraries required at runtime or link-time
