@@ -16,38 +16,38 @@ services:
       retries: 5
 
   agent:
-    build: .
+    build: ..
     depends_on:
       db:
         condition: service_healthy
     env_file:
-      - .env
+      - ../.env
     environment:
       SEAHORSE_PG_URI: postgresql://seahorse_user:seahorse_password@db:5432/seahorse_enterprise
       FOOTBALL_PG_URI: postgresql://user:pass@football-db:5432/eval
     volumes:
-      - ./workspace:/app/workspace
+      - ../workspace:/app/workspace
       - /tmp/seahorse_charts:/tmp/seahorse_charts
 
   feeder:
-    build: .
+    build: ..
     depends_on:
       db:
         condition: service_healthy
     env_file:
-      - .env
+      - ../.env
     environment:
       SEAHORSE_PG_URI: postgresql://seahorse_user:seahorse_password@db:5432/seahorse_enterprise
       FOOTBALL_PG_URI: postgresql://user:pass@football-db:5432/eval
     command: ["uv", "run", "python", "-m", "seahorse_ai.analysis.feeder"]
 
   telegram-agent:
-    build: .
+    build: ..
     depends_on:
       db:
         condition: service_healthy
     env_file:
-      - .env
+      - ../.env
     environment:
       SEAHORSE_PG_URI: postgresql://seahorse_user:seahorse_password@db:5432/seahorse_enterprise
       FOOTBALL_PG_URI: postgresql://user:pass@football-db:5432/eval

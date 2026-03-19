@@ -5,4 +5,4 @@
 {"text": "The SEAHORSE_MAX_STEPS variable limits the number of ReAct reasoning steps per agent run. Default is 10.", "source": "setup_guide"}
 {"text": "To enable OpenTelemetry tracing export to Jaeger, set OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317 and run docker compose up -d.", "source": "setup_guide"}
 {"text": "The agent workspace for file operations is controlled by SEAHORSE_WORKSPACE. Default: ./workspace directory.", "source": "setup_guide"}
-{"text": "dev.sh is a convenience script that sets all required environment variables and rebuilds the binary when dependencies change.", "source": "setup_guide"}
+{"text": "scripts/dev.sh is a convenience script that sets all required environment variables and rebuilds the binary when dependencies change.", "source": "setup_guide"}

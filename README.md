@@ -103,7 +103,7 @@ uv sync
 
 3. **Run Server**
    ```bash
-   ./dev.sh
+   ./scripts/dev.sh
    ```
 
 ---
