@@ -9,7 +9,8 @@ UV_PYTHON="$(uv python find 2>/dev/null | grep -v warning | head -1)"
 PYTHON_LIBDIR="$($(uv python find 2>/dev/null | grep -v warning | head -1) -c 'import sysconfig; print(sysconfig.get_config_var("LIBDIR"))' 2>/dev/null | grep -v warning)"
 
 export DYLD_LIBRARY_PATH="$PYTHON_LIBDIR:${DYLD_LIBRARY_PATH:-}"
-export PYTHONPATH="$(pwd)/python:$VENV/lib/python3.12/site-packages:${PYTHONPATH:-}"
+PV=$($UV_PYTHON -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
+export PYTHONPATH="$(pwd)/python:$VENV/lib/python$PV/site-packages:${PYTHONPATH:-}"
 export PYO3_PYTHON="$UV_PYTHON"
 
 # Load environment variables from .env if it exists

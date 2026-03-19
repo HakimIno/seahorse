@@ -27,7 +27,7 @@
           sccache
           maturin
           cargo-nextest
-          python311
+          python312
           ncurses
           lsof
         ];
