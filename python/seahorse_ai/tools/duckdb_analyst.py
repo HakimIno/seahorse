@@ -43,6 +43,20 @@ class _DuckDBPool:
         conn.execute("SET memory_limit = '1GB'")
         conn.execute("SET enable_progress_bar = false")
         conn.execute("SET enable_object_cache = true")
+        conn.execute("SET file_search_path = 'workspace'")
+        
+        # --- Postgres Integration ---
+        pg_uri = os.getenv("SEAHORSE_PG_URI")
+        if pg_uri:
+            try:
+                conn.execute("INSTALL postgres; LOAD postgres;")
+                conn.execute(f"ATTACH '{pg_uri}' AS pg (TYPE postgres);")
+                # Set search path to prioritize Postgres public schema for Shabu data
+                conn.execute("SET search_path = 'pg.public,main'")
+                logger.info("DuckDB: Successfully attached PostgreSQL database.")
+            except Exception as e:
+                logger.warning(f"DuckDB: Failed to attach PostgreSQL: {e}")
+        
         return conn
 
     @asynccontextmanager
@@ -107,7 +121,7 @@ def _format(
     elapsed_ms: float,
     truncated: bool = False,
 ) -> str:
-    trunc_note = f"  ⚠ truncated to {_MAX_ROWS:,} rows" if truncated else ""
+    trunc_note = f"  [TRUNCATED] to {_MAX_ROWS:,} rows" if truncated else ""
     return "\n".join([
         f"Query   : {sql[:120]}{'...' if len(sql) > 120 else ''}",
         f"Result  : {df.shape[0]:,} rows × {df.shape[1]} cols{trunc_note}",
@@ -119,6 +133,27 @@ def _format(
 
 
 # ── Tools ─────────────────────────────────────────────────────────────────────
+
+@tool(
+    "Run a SQL query via DuckDB and return the results as a raw JSON string (list of objects). "
+    "BEST FOR: Tool-to-tool data transfer and programmatic analysis where markdown tables are too heavy."
+)
+async def duckdb_query_json(
+    sql_query: str,
+    max_rows: int = 5000,
+) -> str:
+    """Run SQL via DuckDB and return JSON result."""
+    try:
+        limit = min(max_rows, _MAX_ROWS)
+        df = await _execute(sql_query, max_rows=limit)
+        # Use Polars native JSON export (orient='records')
+        import json
+        records = df.to_dicts()
+        return json.dumps(records, ensure_ascii=False)
+    except Exception as e:
+        logger.error("duckdb_query_json failed: %s", e)
+        return json.dumps({"error": str(e)})
+
 
 @tool(
     "Execute high-performance SQL on local files (Parquet, CSV, JSON) or in-memory "
@@ -137,7 +172,7 @@ def _format(
 )
 async def duckdb_sql(
     sql_query: str,
-    max_rows: int = 2000,
+    max_rows: int = 5000,
 ) -> str:
     """Run SQL via DuckDB with connection pooling, timeout, and Arrow zero-copy."""
     t0 = time.perf_counter()
@@ -145,7 +180,7 @@ async def duckdb_sql(
     try:
         max_rows = int(max_rows)
     except (ValueError, TypeError):
-        max_rows = 2000
+        max_rows = 5000
 
     try:
         limit = min(max_rows, _MAX_ROWS)

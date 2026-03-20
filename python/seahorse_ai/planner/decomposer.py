@@ -71,6 +71,7 @@ class TaskDecomposer:
         goal: str,
         history: list[Message] | None = None,
         complexity: int = 3,
+        skill_context: str | None = None,
     ) -> DecompositionGraph:
         """Return a dependency graph for the given goal.
 
@@ -81,8 +82,8 @@ class TaskDecomposer:
             return self._single_node_graph(goal)
 
         try:
-            with anyio.fail_after(30):
-                return await self._llm_decompose(goal, history)
+            with anyio.fail_after(60):
+                return await self._llm_decompose(goal, history, skill_context, complexity=complexity)
         except TimeoutError:
             logger.warning("decomposer: LLM timed out — falling back to single node")
             return self._single_node_graph(goal)
@@ -105,7 +106,11 @@ class TaskDecomposer:
         )
 
     async def _llm_decompose(
-        self, goal: str, history: list[Message] | None
+        self,
+        goal: str,
+        history: list[Message] | None,
+        skill_context: str | None = None,
+        complexity: int = 4,
     ) -> DecompositionGraph:
         context = ""
         if history:
@@ -118,12 +123,19 @@ class TaskDecomposer:
         if context:
             user_msg = f"Recent context:\n{context}\n\nGoal: {goal}"
 
+        system_prompt = DECOMPOSE_SYSTEM_PROMPT
+        if skill_context:
+            system_prompt = f"{DECOMPOSE_SYSTEM_PROMPT}\n\nACTIVE SKILL RULES:\n{skill_context}"
+
         messages = [
-            Message(role="system", content=DECOMPOSE_SYSTEM_PROMPT),
+            Message(role="system", content=system_prompt),
             Message(role="user", content=user_msg),
         ]
 
-        result = await self._llm.complete(messages, tier="worker")
+        # Smart tier: strategist for complex (≥4), thinker for medium (3)
+        tier = "strategist" if complexity >= 4 else "thinker"
+        logger.info("decomposer: using tier=%s for complexity=%d", tier, complexity)
+        result = await self._llm.complete(messages, tier=tier)
         raw = str(result.get("content", result) if isinstance(result, dict) else result)
 
         return self._parse_graph(raw, goal)

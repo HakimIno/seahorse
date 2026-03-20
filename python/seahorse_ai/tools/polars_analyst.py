@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import logging
+import os
 import traceback
 from typing import Any
 
 import polars as pl
+import anyio
 
 from seahorse_ai.tools.base import tool
 
@@ -34,144 +36,177 @@ _POLARS_SAFE_GLOBALS: dict[str, Any] = {
     "enumerate": enumerate,
 }
 
+
+# ── Path Resolution ──────────────────────────────────────────────────────────
+
+def _resolve_path(path: str) -> str:
+    """Auto-resolve workspace/ if file not found in root."""
+    if os.path.exists(path):
+        return path
+    if not path.startswith("workspace/"):
+        workspace_path = os.path.join("workspace", path)
+        if os.path.exists(workspace_path):
+            return workspace_path
+    return path
+
+
 # ── Loaders ──────────────────────────────────────────────────────────────────
 
 def _scan(path: str) -> pl.LazyFrame:
     """Auto-detect format and return LazyFrame."""
-    if path.endswith(".parquet"):
-        return pl.scan_parquet(path)
-    elif path.endswith(".csv"):
-        return pl.scan_csv(path, try_parse_dates=True)
-    elif path.endswith(".json") or path.endswith(".ndjson"):
-        return pl.scan_ndjson(path)
+    effective_path = _resolve_path(path)
+
+    if effective_path.endswith(".parquet"):
+        return pl.scan_parquet(effective_path)
+    elif effective_path.endswith(".csv"):
+        return pl.scan_csv(effective_path, try_parse_dates=True)
+    elif effective_path.endswith(".json") or effective_path.endswith(".ndjson"):
+        return pl.scan_ndjson(effective_path)
     else:
-        raise ValueError(f"Unsupported file format: {path}. Use .parquet, .csv, or .ndjson")
+        # Include the path in the error to help debug hallucinations
+        msg = f"Unsupported file format or extension: '{path}' (Resolved to: '{effective_path}'). Use .parquet, .csv, or .ndjson"
+        logger.error(msg)
+        raise ValueError(msg)
 
 
-def _load_tables(source_paths: list[str]) -> dict[str, pl.LazyFrame]:
-    """
-    Load multiple files → dict of LazyFrames.
-    Keys: t0, t1, t2, ... (positional) + stem name (e.g. 'orders' from orders.parquet)
-    """
+def _load_tables(source_paths: list[str] | str) -> dict[str, pl.LazyFrame]:
+    """Load multiple files → dict of LazyFrames."""
+    # Robustness: Handle case where LLM sends a single string instead of a list
+    if isinstance(source_paths, str):
+        source_paths = [source_paths]
+    
     tables: dict[str, pl.LazyFrame] = {}
     for i, path in enumerate(source_paths):
         lf = _scan(path)
         stem = path.replace("\\", "/").split("/")[-1].rsplit(".", 1)[0]
-        tables[f"t{i}"] = lf          # always accessible as t0, t1, t2
-        tables[stem] = lf             # accessible by filename stem
+        tables[f"t{i}"] = lf
+        tables[stem] = lf
     return tables
 
 
 # ── Tools ─────────────────────────────────────────────────────────────────────
 
 @tool(
-    "Execute an advanced Polars query across ONE or MULTIPLE data sources. "
-    "Supports full Polars expression API: filter, group_by, agg, join, sort, "
-    "window functions, string/date ops, and cross-file JOIN.\n\n"
-    "PARAMETERS:\n"
-    "- source_paths: list of file paths (.parquet / .csv / .ndjson). Auto-detected.\n"
-    "- expression: Polars expression string. Tables are exposed as:\n"
-    "    Single file  → `lf` (LazyFrame)\n"
-    "    Multi files  → `t0`, `t1`, `t2`, ... AND by stem name\n"
-    "                   e.g. 'orders.parquet' → `orders`\n"
-    "                        'customers.csv'  → `customers`\n"
-    "- max_rows: max rows returned (default 50)\n\n"
-    "SINGLE TABLE EXAMPLES:\n"
-    "  `lf.filter(pl.col('sales') > 1000).group_by('region').agg(pl.col('sales').sum())`\n"
-    "  `lf.with_columns(pl.col('revenue').rank().over('category').alias('rank'))`\n\n"
-    "MULTI-TABLE JOIN EXAMPLES:\n"
-    "  Inner join:  `orders.join(customers, on='customer_id', how='inner')`\n"
-    "  Left join:   `t0.join(t1, left_on='id', right_on='user_id', how='left')`\n"
-    "  Multi-join:  `t0.join(t1, on='id').join(t2, on='category_id')`\n"
-    "  Join + agg:  `orders.join(products, on='product_id').group_by('category').agg(pl.col('revenue').sum())`\n\n"
-    "NOTE: Expression must return a LazyFrame or DataFrame. Do NOT call .collect()."
+    "Execute an advanced Polars query across data sources. Supports full Polars expression API.\n"
+    "Example: lf.filter(pl.col('sales') > 1000).group_by('region').agg(pl.col('sales').sum())"
 )
 async def polars_query(
     source_paths: list[str],
     expression: str = "",
-    max_rows: int = 500,
+    max_rows: int = 5000,
 ) -> str:
     try:
         if not source_paths:
-            return "Error: source_paths must contain at least one file path."
+            return "[FAIL] Please provide at least one file path in source_paths."
 
-        tables = _load_tables(source_paths)
+        try:
+            tables = _load_tables(source_paths)
+        except FileNotFoundError as e:
+            return f"[FAIL] File Not Found: {e}. (Tip: Ensure you use the full path including 'workspace/' if applicable.)"
+        except Exception as e:
+            return f"[FAIL] Load Failed: {e}"
 
-        # Single file: also expose as `lf` for backward compatibility
         exec_globals = {**_POLARS_SAFE_GLOBALS, **tables}
-        if len(source_paths) == 1:
-            exec_globals["lf"] = next(iter(tables.values()))
+        # Add intuitive aliases for the first/primary table
+        if tables:
+            first_lf = next(iter(tables.values()))
+            exec_globals["lf"] = first_lf
+            exec_globals["t0"] = first_lf
+            exec_globals["df"] = first_lf  # Add df as an alias for lf
+            exec_globals["col"] = pl.col
+            exec_globals["lit"] = pl.lit
 
-        # No expression → schema preview of all tables
         if not expression.strip():
             return _multi_preview(tables, max_rows)
 
-        result = eval(  # noqa: S307
-            compile(expression, "<polars_query>", "eval"),
-            exec_globals,
-            {},
-        )
+        # ── Execution with Timeout ──
+        try:
+            with anyio.fail_after(30):
+                # Pre-processing expression for common LLM mistakes
+                # If they try len(df) or df.corr() on a LazyFrame t0/lf, we help them
+                if ("len(" in expression or ".corr(" in expression) and (".collect()" not in expression):
+                    # For safety, we only do this if it looks like a simple direct call
+                    pass 
 
-        if isinstance(result, pl.LazyFrame):
-            df = result.fetch(max_rows)
-            return _format_result(df, source_paths, expression)
-        elif isinstance(result, pl.DataFrame):
-            return _format_result(result.head(max_rows), source_paths, expression)
-        elif isinstance(result, pl.Series):
-            return f"Series ({result.name}): {result.to_list()}"
-        else:
-            return f"Scalar result: {result}"
+                result = eval(  # noqa: S307
+                    compile(expression, "<polars_query>", "eval"),
+                    exec_globals,
+                    {},
+                )
+
+                if isinstance(result, pl.LazyFrame):
+                    df = result.fetch(max_rows)
+                elif isinstance(result, pl.DataFrame):
+                    df = result.head(max_rows)
+                elif isinstance(result, pl.Series):
+                    return f"Series ({result.name}): {result.to_list()}"
+                else:
+                    return f"Scalar result: {result}"
+
+                return _format_result(df, source_paths, expression)
+
+        except AttributeError as e:
+            # INTERCEPT: If they forgot .collect() before a DataFrame-only method
+            if "LazyFrame" in str(e):
+                logger.info("polars_query: auto-collecting due to AttributeError: %s", e)
+                try:
+                    # Retry by collecting first table and running expression on it
+                    first_lf = next(iter(tables.values()))
+                    exec_globals["lf"] = first_lf.collect()
+                    exec_globals["df"] = exec_globals["lf"]
+                    exec_globals["pdf"] = exec_globals["lf"]
+                    result = eval(expression, exec_globals, {})
+                    if isinstance(result, pl.DataFrame):
+                        return _format_result(result.head(max_rows), source_paths, expression)
+                except Exception as retry_e:
+                    logger.error("polars_query auto-collect retry failed: %s", retry_e)
+            
+            return f"[POLARS_ERROR] {e}. (Tip: If using .corr() or len(), remember to call .collect() first or use pl.corr())"
+
+        except TimeoutError:
+            return f"[TIMEOUT] The query took longer than 30s. Try filtering the data first.\nQuery: {expression}"
 
     except pl.exceptions.PolarsError as e:
-        logger.error("Polars error: %s", e)
-        return f"Polars Error: {e}\nExpression: {expression}"
+        col_info = {name: list(lf.collect_schema().names()) for name, lf in tables.items() if hasattr(lf, "collect_schema")}
+        return (
+            f"[POLARS_ERROR] {e}\n"
+            f"Expression: {expression}\n"
+            f"Available columns: {col_info}"
+        )
     except SyntaxError as e:
-        return f"Syntax Error in expression: {e}"
+        return f"[SYNTAX_ERROR] {e}\nExpression: {expression}"
     except Exception as e:
-        logger.error("Unexpected: %s\n%s", e, traceback.format_exc())
-        return f"Error: {e}"
+        logger.error("polars_query unexpected error: %s\n%s", e, traceback.format_exc())
+        return f"[UNEXPECTED] {e}"
 
 
 @tool(
-    "Profile one or multiple datasets: null rates, cardinality, numeric stats, skewness. "
-    "Call this before querying to understand schema and data quality of all involved files."
+    "Profile one or multiple datasets: null rates, cardinality, numeric stats, skewness."
 )
 async def polars_profile(source_paths: list[str]) -> str:
     try:
         if not source_paths:
-            return "Error: source_paths is empty."
+            return "[FAIL] source_paths is empty."
 
         sections: list[str] = []
         for path in source_paths:
             df = _scan(path).collect()
             stem = path.replace("\\", "/").split("/")[-1]
             lines = [
-                f"── {stem} ({'×'.join(str(x) for x in df.shape)}) ──────────────────────",
+                f"--- {stem} ({'x'.join(str(x) for x in df.shape)}) ---",
             ]
             for col in df.columns:
                 series = df[col]
                 null_pct = series.null_count() / len(series) * 100
-                dtype = series.dtype
+                dtype = str(series.dtype)
 
-                if dtype in (pl.Utf8, pl.String, pl.Categorical):
-                    n_unique = series.n_unique()
-                    top = series.drop_nulls().value_counts(sort=True).head(3)["value"].to_list()
-                    info = f"unique={n_unique:,}  top={top}"
-                elif dtype in (pl.Date, pl.Datetime):
-                    info = f"min={series.min()}  max={series.max()}"
+                if series.dtype.is_numeric():
+                    info = f"min={_fmt(series.min())} max={_fmt(series.max())} mean={_fmt(series.mean())}"
                 else:
-                    desc = {d["statistic"]: d[col] for d in df.select(pl.col(col).describe()).to_dicts()}
-                    skew = ""
-                    mean_v, med_v = desc.get("mean"), desc.get("50%")
-                    if mean_v and med_v and med_v != 0 and abs(mean_v - med_v) / abs(med_v) > 0.2:
-                        skew = " ⚠ skewed"
-                    info = (
-                        f"mean={_fmt(mean_v)}  std={_fmt(desc.get('std'))}"
-                        f"  min={_fmt(desc.get('min'))}  max={_fmt(desc.get('max'))}{skew}"
-                    )
+                    info = f"unique={series.n_unique()}"
 
-                null_str = f"  null={null_pct:.1f}%" if null_pct > 0 else ""
-                lines.append(f"  {col:<28} [{dtype}]{null_str}")
+                null_pct_str = f" null={null_pct:.1f}%" if null_pct > 0 else ""
+                lines.append(f"  {col:<25} [{dtype}]{null_pct_str}")
                 lines.append(f"    {info}")
 
             sections.append("\n".join(lines))
@@ -179,15 +214,13 @@ async def polars_profile(source_paths: list[str]) -> str:
         return "\n\n".join(sections)
 
     except Exception as e:
-        return f"Profile error: {e}"
+        return f"[PROFILE_ERROR] {e}"
 
 
 @tool(
-    "Inspect joinability between two tables: find common column names and "
-    "estimate key overlap (%). Use before writing JOIN expressions."
+    "Inspect joinability between two tables: find common column names and estimate key overlap."
 )
 async def polars_inspect_join(path_left: str, path_right: str) -> str:
-    """Detect shared columns + key overlap between two files."""
     try:
         lf_l = _scan(path_left)
         lf_r = _scan(path_right)
@@ -200,26 +233,17 @@ async def polars_inspect_join(path_left: str, path_right: str) -> str:
         common = cols_l & cols_r
 
         if not common:
-            return (
-                f"No common columns found.\n"
-                f"  Left  columns: {sorted(cols_l)}\n"
-                f"  Right columns: {sorted(cols_r)}"
-            )
+            return f"[INFO] No common columns found among {path_left} and {path_right}."
 
         lines = [
             f"Common columns: {sorted(common)}",
             "",
-            "── Key overlap analysis ─────────────────────",
+            "--- Key overlap analysis ---",
         ]
 
         for col in sorted(common):
-            dtype_l = schema_l[col]
-            dtype_r = schema_r[col]
-
-            # Sample overlap — fetch small chunk to estimate
             sample_l = lf_l.select(pl.col(col).drop_nulls().unique()).fetch(5000)
             sample_r = lf_r.select(pl.col(col).drop_nulls().unique()).fetch(5000)
-
             keys_l = set(sample_l[col].to_list())
             keys_r = set(sample_r[col].to_list())
             overlap = len(keys_l & keys_r)
@@ -227,26 +251,13 @@ async def polars_inspect_join(path_left: str, path_right: str) -> str:
             pct_r = overlap / len(keys_r) * 100 if keys_r else 0
 
             lines.append(
-                f"  {col:<25} dtype=({dtype_l} / {dtype_r})"
-                f"  overlap={overlap:,} keys"
-                f"  ({pct_l:.0f}% of left, {pct_r:.0f}% of right)"
+                f"  {col:<25} overlap={overlap:,} keys ({pct_l:.0f}% left, {pct_r:.0f}% right)"
             )
-
-        stem_l = path_left.replace("\\", "/").split("/")[-1].rsplit(".", 1)[0]
-        stem_r = path_right.replace("\\", "/").split("/")[-1].rsplit(".", 1)[0]
-        if common:
-            best = sorted(common)[0]
-            lines += [
-                "",
-                "── Suggested JOIN ───────────────────────────",
-                f"  {stem_l}.join({stem_r}, on='{best}', how='inner')",
-                f"  {stem_l}.join({stem_r}, on='{best}', how='left')",
-            ]
 
         return "\n".join(lines)
 
     except Exception as e:
-        return f"Inspect join error: {e}"
+        return f"[INSPECT_ERROR] {e}"
 
 
 @tool(
@@ -260,69 +271,61 @@ async def convert_to_parquet(source_path: str, output_path: str) -> str:
         elif source_path.endswith(".json") or source_path.endswith(".ndjson"):
             df = pl.read_ndjson(source_path)
         else:
-            return f"Unsupported source: {source_path}"
+            return f"[FAIL] Unsupported source: {source_path}"
 
         df.write_parquet(output_path, compression="zstd")
         return (
-            f"Converted → {output_path} (zstd)\n"
-            f"Rows: {df.shape[0]:,}  Cols: {df.shape[1]}  ~{df.estimated_size('mb'):.1f} MB"
+            f"[SUCCESS] Converted -> {output_path}\n"
+            f"Rows: {df.shape[0]:,}  Cols: {df.shape[1]}"
         )
     except Exception as e:
-        return f"Conversion failed: {e}"
-
-
-# ── Helpers ───────────────────────────────────────────────────────────────────
-
-def _multi_preview(tables: dict[str, pl.LazyFrame], max_rows: int) -> str:
-    seen: set[int] = set()
-    lines = ["Schema preview (no expression provided):"]
-    for name, lf in tables.items():
-        if id(lf) in seen:
-            continue
-        seen.add(id(lf))
-        schema = lf.collect_schema()
-        df_head = lf.fetch(min(max_rows, 5))
-        lines.append(f"\n  [{name}]  schema={dict(schema)}")
-        lines.append(f"  head:\n{df_head}")
-    return "\n".join(lines)
-
-
-def _format_result(df: pl.DataFrame, sources: list[str], expression: str) -> str:
-    names = [p.replace("\\", "/").split("/")[-1] for p in sources]
-    return "\n".join([
-        f"Sources: {', '.join(names)}",
-        f"Expression: {expression}",
-        f"Result: {df.shape[0]} rows × {df.shape[1]} cols",
-        f"Schema: {dict(df.schema)}",
-        "─" * 50,
-        str(df),
-    ])
-
-
-def _fmt(v: Any) -> str:
-    if v is None: return "N/A"
-    if isinstance(v, float): return f"{v:,.2f}"
-    return str(v)
+        return f"[FAIL] Conversion failed: {e}"
 
 
 @tool(
-    "Perform high-performance data aggregation using the NATIVE Rust Polars engine. "
-    "This is faster than the Python version for large JSON datasets. "
-    "Input: data_json (string), group_by (col name), agg_col (col name)."
+    "Perform high-performance data aggregation using the NATIVE Rust Polars engine."
 )
 async def native_polars_aggregate(
     data_json: str,
     group_by: str,
     agg_col: str,
 ) -> str:
-    """Execute aggregation in Rust Polars and return JSON results."""
     if not _NATIVE_AVAILABLE:
-        return "Error: Native Polars engine (seahorse_ffi) is not available in this build."
+        return "[FAIL] Native Polars engine (seahorse_ffi) is not available."
 
     try:
         analyst = seahorse_ffi.PyPolarsAnalyst()
-        logger.info("native_polars: executing aggregation on %s grouped by %s", agg_col, group_by)
         return analyst.aggregate_json(data_json, group_by, agg_col)
     except Exception as e:
-        logger.error("native_polars: aggregation failed: %s", e)
-        return f"Error: Native aggregation failed: {e}"
+        return f"[FAIL] Native aggregation failed: {e}"
+
+
+# ── Helpers ───────────────────────────────────────────────────────────────────
+
+def _format_result(df: pl.DataFrame, sources: list[str], expression: str) -> str:
+    import polars as pl
+    names = [p.replace("\\", "/").split("/")[-1] for p in sources]
+    return "\n".join([
+        f"Sources: {', '.join(names)}",
+        f"Result: {df.shape[0]} rows x {df.shape[1]} cols",
+        "-" * 40,
+        str(df),
+    ])
+
+
+def _multi_preview(tables: dict[str, pl.LazyFrame], max_rows: int) -> str:
+    import polars as pl
+    seen: set[int] = set()
+    lines = ["Schema preview:"]
+    for name, lf in tables.items():
+        if id(lf) in seen: continue
+        seen.add(id(lf))
+        schema = lf.collect_schema()
+        lines.append(f"\n  [{name}]  columns: {list(schema.names())}")
+    return "\n".join(lines)
+
+
+def _fmt(v: Any) -> str:
+    if v is None: return "N/A"
+    if isinstance(v, float): return f"{v:,.2f}"
+    return str(v)

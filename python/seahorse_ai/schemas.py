@@ -36,7 +36,7 @@ class LLMConfig(Struct, omit_defaults=True):
 
     model: str = field(
         default_factory=lambda: os.environ.get(
-            "SEAHORSE_MODEL_WORKER", "openrouter/google/gemini-3-flash-preview"
+            "SEAHORSE_MODEL_WORKER", "openrouter/z-ai/glm-5-turbo"
         )
     )
     thinker_model: str = field(

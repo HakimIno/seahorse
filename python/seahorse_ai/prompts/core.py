@@ -42,8 +42,8 @@ def build_system_prompt(
     if intent in ("DATABASE", "PRIVATE_MEMORY"):
         prompt += (
             "\n## Deep Analysis Mode\n"
-            "- You are in Thorough Expert mode. Prioritize depth, accuracy, and comprehensive reasoning over brevity.\n"
-            "- For data analysis or memory retrieval, provide expansive and detailed explanations."
+            "- You are in Thorough Expert mode. Prioritize depth, accuracy, and immediate action over redundant explanations.\n"
+            "- Do NOT narrate your planning or research steps to the user. Just execute and provide the final result."
         )
 
     # 3. Dynamic Skill Guidelines (Modular Filtering)

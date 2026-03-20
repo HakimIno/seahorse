@@ -166,7 +166,7 @@ impl PythonRunner for PyGraphRunner {
                     "Graph returned empty messages.".to_string()
                 };
                 
-                let _ = token_tx.blocking_send(format!("[DONE] Graph steps completed"));
+                let _ = token_tx.send(format!("[DONE] Graph steps completed")).await;
                 Ok(response)
             }
             Err(e) => {

@@ -46,17 +46,39 @@ async def native_echarts_chart(
             # Default to bar
             chart_json = gen.bar_chart(title, categories, values)
             
-        # ── RENDERING ──
-        # Phase 1: Output JSON with unique ID for frontend/adapter rendering.
-        # Phase 2: Render to PNG if a renderer (e.g. playwright) is available.
-        
+        # ── PREMIUM POST-PROCESSING ──
+        import json
+        try:
+            option = json.loads(chart_json)
+            # 1. Global Thai Font & Theme Colors
+            option["color"] = ["#0062ff", "#00d9ff", "#7000ff", "#ff0070", "#fbbf24", "#ef4444"]
+            option["textStyle"] = {"fontFamily": "IBMPlexSansThai, sans-serif"}
+            
+            # 2. Modern Series Styling
+            if "series" in option and isinstance(option["series"], list):
+                for s in option["series"]:
+                    if s.get("type") == "bar":
+                        s["itemStyle"] = {"borderRadius": [8, 8, 0, 0]}
+                    elif s.get("type") == "line":
+                        s["smooth"] = True
+                        s["lineStyle"] = {"width": 3}
+            
+            # 3. Clean Grid & Legends
+            option["grid"] = {"left": "5%", "right": "5%", "bottom": "10%", "top": "15%", "containLabel": True}
+            if "legend" in option:
+                option["legend"]["itemGap"] = 20
+                
+            chart_json = json.dumps(option)
+        except Exception as py_e:
+            logger.warning("native_echarts: post-processing failed, using raw: %s", py_e)
+
         filename = f"echart_{uuid.uuid4().hex[:8]}.json"
         filepath = os.path.join(CHART_DIR, filename)
         
         with open(filepath, "w") as f:
             f.write(chart_json)
             
-        logger.info("native_echarts: generated chart config at %s", filepath)
+        logger.info("native_echarts: generated premium chart config at %s", filepath)
         
         # Return special prefix so Telegram adapter knows how to handle it
         return f"ECHART_JSON:{filepath}"

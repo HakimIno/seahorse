@@ -5,6 +5,7 @@ import os
 import random
 import re
 import uuid
+from datetime import datetime
 
 import matplotlib
 import matplotlib.font_manager as fm
@@ -23,6 +24,7 @@ logger = logging.getLogger(__name__)
 # Directory for temporary charts
 CHART_DIR = "/tmp/seahorse_charts"
 os.makedirs(CHART_DIR, exist_ok=True)
+RENDER_LOG = "/tmp/seahorse_render.log"
 
 # Load custom Thai fonts for professional rendering
 font_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "fonts")
@@ -48,28 +50,73 @@ except Exception as e:
 
 
 async def render_echarts_to_png(json_conf: str) -> str | None:
-    """Render ECharts JSON configuration to a static PNG image using browser_screenshot."""
+    """Render ECharts JSON configuration to a static PNG image with premium Thai fonts."""
     from seahorse_ai.tools.browser import browser_screenshot
+    import base64
 
     filename = f"echart_{uuid.uuid4().hex[:8]}.png"
     filepath = os.path.join(CHART_DIR, filename)
     temp_html = os.path.join(CHART_DIR, f"{filename}.html")
 
-    # Simple HTML template to host ECharts
+    # Load and Base64 encode fonts for reliable browser injection
+    font_css = ""
+    try:
+        f_reg = os.path.join(font_dir, "IBMPlexSansThai-Regular.ttf")
+        f_bold = os.path.join(font_dir, "IBMPlexSansThai-Bold.ttf")
+        if os.path.exists(f_reg) and os.path.exists(f_bold):
+            with open(f_reg, "rb") as f:
+                reg_b64 = base64.b64encode(f.read()).decode("utf-8")
+            with open(f_bold, "rb") as f:
+                bold_b64 = base64.b64encode(f.read()).decode("utf-8")
+            
+            font_css = f"""
+            @font-face {{
+                font-family: 'IBMPlexSansThai';
+                src: url(data:font/ttf;charset=utf-8;base64,{reg_b64}) format('truetype');
+                font-weight: normal;
+                font-style: normal;
+            }}
+            @font-face {{
+                font-family: 'IBMPlexSansThai';
+                src: url(data:font/ttf;charset=utf-8;base64,{bold_b64}) format('truetype');
+                font-weight: bold;
+                font-style: normal;
+            }}
+            """
+    except Exception as e:
+        logger.warning(f"viz: Font embedding failed: {e}")
+
     html_content = f"""
     <!DOCTYPE html>
     <html>
     <head>
+        <meta charset="UTF-8">
         <script src="https://fastly.jsdelivr.net/npm/echarts@5.6.0/dist/echarts.min.js"></script>
         <style>
-            body, html, #main {{ margin: 0; padding: 0; width: 1200px; height: 700px; overflow: hidden; background: white; }}
+            {font_css}
+            body, html, #main {{ 
+                margin: 0; padding: 0; width: 1200px; height: 700px; 
+                overflow: hidden; background: #ffffff; 
+                font-family: 'IBMPlexSansThai', sans-serif;
+            }}
         </style>
     </head>
     <body>
         <div id="main"></div>
         <script>
-            var chart = echarts.init(document.getElementById('main'), null, {{ renderer: 'canvas', devicePixelRatio: 2 }});
+            var chart = echarts.init(document.getElementById('main'), null, {{ 
+                renderer: 'canvas', 
+                devicePixelRatio: 2 
+            }});
             var option = {json_conf};
+            
+            // Force Thai font on all text elements if not specified
+            const fontStyle = {{ fontFamily: 'IBMPlexSansThai, sans-serif' }};
+            if (option.title) option.title.textStyle = {{ ...fontStyle, fontWeight: 'bold', fontSize: 24, ...(option.title.textStyle || {{}}) }};
+            if (option.xAxis) option.xAxis.axisLabel = {{ ...fontStyle, ...(option.xAxis.axisLabel || {{}}) }};
+            if (option.yAxis) option.yAxis.axisLabel = {{ ...fontStyle, ...(option.yAxis.axisLabel || {{}}) }};
+            if (option.legend) option.legend.textStyle = {{ ...fontStyle, ...(option.legend.textStyle || {{}}) }};
+            
             chart.setOption(option);
         </script>
     </body>
@@ -77,23 +124,21 @@ async def render_echarts_to_png(json_conf: str) -> str | None:
     """
 
     try:
-        # Write to temp HTML for browser_screenshot to pick up via file://
-        with open(temp_html, "w") as f:
+        with open(temp_html, "w", encoding="utf-8") as f:
             f.write(html_content)
         
-        # Use professional browser tool with singleton pool
-        await browser_screenshot(
+        # Capture at high DPI for premium look
+        res = await browser_screenshot(
             url=f"file://{os.path.abspath(temp_html)}",
             output_path=filepath
         )
-
+        
         if os.path.exists(temp_html):
             os.remove(temp_html)
             
-        logger.info(f"viz: ECharts PNG rendered at {filepath} (via browser_tool)")
-        return filepath
+        return filepath if os.path.exists(filepath) else None
     except Exception as e:
-        logger.error(f"viz: Failed to render ECharts to PNG: {e}")
+        logger.error(f"viz: ECharts render failed: {e}")
         return None
 
 

@@ -140,7 +140,7 @@ class LLMClient:
         timeout_sec = 180.0 if tier in ("thinker", "strategist", "worker") else 30.0
         kwargs: dict = {
             "model": model,
-            "messages": [msgspec.to_builtins(m) for m in messages],
+            "messages": self._clean_messages(messages),
             "temperature": self._config.temperature,
             "max_tokens": self._config.max_tokens,
             "timeout": timeout_sec,
@@ -179,6 +179,38 @@ class LLMClient:
         except Exception as exc:
             logger.error("LLM non-retryable error: %s", exc)
             raise
+
+    def _clean_messages(self, messages: list[Message]) -> list[dict]:
+        """Sanitize message list for picky providers (Gemini/GLM)."""
+        if not messages:
+            return []
+        
+        cleaned = []
+        for m in messages:
+            built = msgspec.to_builtins(m)
+            
+            # Preserve message if it has content OR tool_calls
+            has_content = bool(built.get("content"))
+            has_tools = bool(built.get("tool_calls"))
+            has_tool_id = bool(built.get("tool_call_id"))
+            
+            if not (has_content or has_tools or has_tool_id):
+                continue
+            
+            # Gemini-specific: Ensure content is never None if tool_calls are present
+            if has_tools and not built.get("content"):
+                built["content"] = ""
+
+            if cleaned and cleaned[-1]["role"] == built["role"] and built["role"] in ("user", "system"):
+                # Merge consecutive roles for user/system only. 
+                # Assistant/Tool roles should NOT be merged if they have tool_calls/ids.
+                if not (has_tools or has_tool_id or cleaned[-1].get("tool_calls")):
+                    cleaned[-1]["content"] += f"\n\n{built['content']}"
+                    continue
+            
+            cleaned.append(built)
+        
+        return cleaned
 
 
 def get_llm(tier: str = "worker") -> LLMClient:

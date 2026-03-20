@@ -38,14 +38,16 @@ then `database_query`.
 - If you already have the answer from `memory_search` → stop. Do not run `web_search` \
 to "verify" it. Trust the stored data.
 
-### 7. Dashboards and Charts
-- If the user asks for a chart, graph, or dashboard → ALWAYS use `database_schema` and `database_query` (for DB) or `polars_query` (for files) to fetch REAL data first.
+# ── 7. Dashboards and Charts ──────────────────────────────────────────────────
+- **PRIMARY TOOL**: For ALL charts, graphs, or dashboards → ALWAYS use `echarts_composer` or `native_echarts_chart`.
+- Use `echarts_composer` for Scatter, Heatmap, or any custom complex visuals by providing a full ECharts option.
+- Use `native_echarts_chart` for quick Bar/Line charts.
+- **LEGACY FALLBACK**: Do NOT use `create_custom_chart` (Matplotlib) unless explicitly requested or if ECharts is technically impossible for a specific edge case.
 - **CRITICAL**: NEVER use hardcoded data in your code. NEVER hallucinate dates or values. 
-- **TIME SERIES**: You MUST handle missing dates (null/gap) in your plotting code by resampling/upsampling the data to 0. Do NOT let the line connect across gaps without showing they are empty.
 - **NO MARKDOWN IMAGES**: NEVER return `![alt](url)` in your text. The system automatically attaches certificates and charts.
-- You MUST use the `create_custom_chart` tool to generate an actual image for ANY chart or dashboard request.
+- **QUALITY RULE**: You MUST include the `ECHART_JSON:/path/to/file.json` string on its own line at the end of your response so the system can render it.
  
-### 8. Premium Tables
+# ── 8. Premium Tables ─────────────────────────────────────────────────────────
 - If the result contains more than 3 rows or columns, or if the user asks for a "beautiful" or "styled" table → ALWAYS use `create_table_image` instead of Markdown.
 - Provide a clear, descriptive title and the full JSON data.
 - NEVER return messy Markdown tables for large datasets in Telegram.

@@ -17,13 +17,17 @@ from seahorse_ai.tools.browser import (
     browser_scrape,
     browser_screenshot,
 )
+from seahorse_ai.tools.data_connectors import extract_sql_to_parquet, load_to_sql
+from seahorse_ai.tools.data_profiler import data_profile
+from seahorse_ai.tools.echarts_composer import echarts_composer
+from seahorse_ai.tools.echarts_viz import native_echarts_chart
 from seahorse_ai.tools.business_math import (
     calculate_margin,
     calculate_promo_impact,
 )
 from seahorse_ai.tools.competitor_radar import competitor_radar
 from seahorse_ai.tools.db import database_query, database_schema
-from seahorse_ai.tools.duckdb_analyst import duckdb_sql, sql_to_polars
+from seahorse_ai.tools.duckdb_analyst import duckdb_query_json, duckdb_sql, sql_to_polars
 from seahorse_ai.tools.filesystem import list_files, read_file, write_file
 from seahorse_ai.tools.graph_memory import (
     graph_search_neighbors,
@@ -57,6 +61,7 @@ from seahorse_ai.tools.memory import (
 )
 from seahorse_ai.tools.polars_analyst import (
     convert_to_parquet,
+    native_polars_aggregate,
     polars_inspect_join,
     polars_profile,
     polars_query,
@@ -106,6 +111,7 @@ __all__ = [
     "polars_inspect_join",
     "convert_to_parquet",
     "duckdb_sql",
+    "duckdb_query_json",
     "sql_to_polars",
     "geth2hresults",
     "getmatchintel",
@@ -120,6 +126,10 @@ __all__ = [
     "searchleague",
     "graph_store_triple",
     "graph_search_neighbors",
+    "data_profile",
+    "extract_sql_to_parquet",
+    "load_to_sql",
+    "echarts_composer",
 ]
 
 
@@ -164,9 +174,12 @@ def make_default_registry() -> SeahorseToolRegistry:
         polars_query,
         polars_profile,
         polars_inspect_join,
+        native_polars_aggregate,
         convert_to_parquet,
         duckdb_sql,
+        duckdb_query_json,
         sql_to_polars,
+        native_echarts_chart,
         geth2hresults,
         getmatchintel,
         getupcomingfixtures,
@@ -180,6 +193,10 @@ def make_default_registry() -> SeahorseToolRegistry:
         searchleague,
         graph_store_triple,
         graph_search_neighbors,
+        data_profile,
+        extract_sql_to_parquet,
+        load_to_sql,
+        echarts_composer,
     ):
         registry.register(fn)
     return registry

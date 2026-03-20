@@ -325,7 +325,7 @@ class TelegramAdapter:
                 else:
                     cleaned_history.append(msg)
 
-            # Inject system nudge if configured
+            # final_prompt represents the text sent to the agent
             final_prompt = text
             if self.system_nudge:
                 final_prompt = f"{self.system_nudge}\n\nUser Question: {text}"
@@ -378,14 +378,14 @@ class TelegramAdapter:
 
                             internal_router = ModelRouter(
                                 worker_model=os.environ.get(
-                                    "SEAHORSE_MODEL_WORKER", "openrouter/google/gemini-3-flash-preview"
+                                    "SEAHORSE_MODEL_WORKER", "openrouter/z-ai/glm-5-turbo"
                                 ),
                                 thinker_model=os.environ.get(
                                     "SEAHORSE_MODEL_THINKER", "openrouter/google/gemini-3-flash-preview"
                                 ),
                                 strategist_model=os.environ.get(
                                     "SEAHORSE_MODEL_STRATEGIST",
-                                    "openrouter/google/gemini-3-flash-preview",
+                                    "openrouter/anthropic/claude-sonnet-4.6",
                                 ),
                                 fast_path_model=os.environ.get(
                                     "SEAHORSE_FAST_PATH_MODEL",
@@ -404,13 +404,13 @@ class TelegramAdapter:
 
                     internal_router = ModelRouter(
                         worker_model=os.environ.get(
-                            "SEAHORSE_MODEL_WORKER", "openrouter/google/gemini-3-flash-preview"
+                            "SEAHORSE_MODEL_WORKER", "openrouter/z-ai/glm-5-turbo"
                         ),
                         thinker_model=os.environ.get(
                             "SEAHORSE_MODEL_THINKER", "openrouter/google/gemini-3-flash-preview"
                         ),
                         strategist_model=os.environ.get(
-                            "SEAHORSE_MODEL_STRATEGIST", "openrouter/google/gemini-3-flash-preview"
+                            "SEAHORSE_MODEL_STRATEGIST", "openrouter/anthropic/claude-sonnet-4.6"
                         ),
                         fast_path_model=os.environ.get(
                             "SEAHORSE_FAST_PATH_MODEL",
@@ -426,36 +426,91 @@ class TelegramAdapter:
             self._history[user_id].append(Message(role="assistant", content=response.content))
 
             content = response.content
+            logger.info("Telegram: Handling message for agent %s. Content length: %d", agent_id, len(content))
             
-            # ── Hallucination Mitigation: Strip Markdown Image Links ──
+            # ── CONTENT PROCESSING ──
+            # Remove any XML-like tags (toolcall, action, etc.) that may leak into final output
+            content = re.sub(r"<(toolcall|action|thought|tool_output).*?>.*?</\1>", "", content, flags=re.DOTALL | re.IGNORECASE)
+            content = re.sub(r"<(toolcall|action|thought|tool_output).*?>", "", content, flags=re.IGNORECASE)
+            
             # The AI sometimes hallucinations fake URLs like ![chart](https://placeholder...)
             content = re.sub(r"!\[.*?\]\(.*?\)", "", content)
             
-            # ── Handle Native ECharts JSON ──
-            if "ECHART_JSON:" in content:
+            # ── Handle Native ECharts JSON (Robust Strip & Render) ──
+            # Supports ECHART_JSON:/path or ECHART_JSON:{"json":...} (case-insensitive)
+            # Global strip including surrounding markdown code blocks if present
+            pattern = r"ECHART_?JSON\s*:\s*(\{.*?\}|[^\s\n]+)"
+            
+            # Step 1: Strip the tag globally (including surrounding code blocks)
+            content = re.sub(r"```(?:json)?\s*" + pattern + r"\s*```", "", content, flags=re.IGNORECASE | re.DOTALL)
+            content = re.sub(pattern, "", content, flags=re.IGNORECASE | re.DOTALL).strip()
+            
+            # Re-search for the first one to render (using a fresh search as content has changed)
+            raw_match = re.search(pattern, update.message.text if update.message else "", re.IGNORECASE | re.DOTALL)
+            if raw_match:
                 try:
-                    # Extract path from ECHART_JSON:/path/to/file.json
-                    json_path = content.split("ECHART_JSON:")[-1].strip()
-                    if os.path.exists(json_path):
-                        with open(json_path) as f:
-                            chart_data = json.loads(f.read())
-                        
+                    raw_payload = raw_match.group(1).strip()
+                    chart_data = None
+                    
+                    # 1. Try to parse as raw JSON first
+                    if raw_payload.startswith("{"):
+                        try:
+                            chart_data = json.loads(raw_payload)
+                        except json.JSONDecodeError:
+                            logger.warning("Telegram: Failed to parse raw ECharts JSON payload")
+                    
+                    # 2. Treat as path if not JSON
+                    if chart_data is None and os.path.exists(raw_payload):
+                        try:
+                            with open(raw_payload) as f:
+                                chart_data = json.loads(f.read())
+                        except Exception as e:
+                            logger.error(f"Telegram: Failed to read ECharts from path {raw_payload}: {e}")
+                    
+                    # 3. FALLBACK: Scan the whole content for a JSON block if path failed/hallucinated
+                    if chart_data is None:
+                        # Find all ```json { ... } ``` blocks (Greedy but within backticks)
+                        json_blocks = re.findall(r"```(?:json)?\s*(\{[\s\S]*?\})\s*```", content)
+                        for block in json_blocks:
+                            if "\"series\"" in block or "'series'" in block: # Clear heuristic
+                                try:
+                                    chart_data = json.loads(block)
+                                    break
+                                except: continue
+
+                    if chart_data is None:
+                        # Find all { ... } blocks (greedy for content, non-greedy for the block itself)
+                        json_blocks = re.findall(r"(\{[\s\S]*?\})", content, re.DOTALL)
+                        for block in json_blocks:
+                            if "series" in block and "type" in block: # Heuristic for ECharts
+                                try:
+                                    chart_data = json.loads(block)
+                                    break
+                                except: continue
+
+                    if chart_data:
                         chart_title = chart_data.get("title", {}).get("text", "Native Chart")
                         # Phase 2: Convert to PNG via bridge
                         from seahorse_ai.tools.viz import render_echarts_to_png
                         
                         png_path = await render_echarts_to_png(json.dumps(chart_data))
                         if png_path:
-                            # Attach to response so the standard image-sending logic picks it up
-                            if not hasattr(response, "image_paths"):
+                            # Attach to response
+                            if getattr(response, "image_paths", None) is None:
                                 response.image_paths = []
                             response.image_paths.append(png_path)
-                            content = f"📊 **Chart Generated**: {chart_title}"
+                            
+                            if not content:
+                                content = f"📊 **{chart_title}**"
+                            # We don't need a summary here as the photo speaks for itself
                         else:
-                            content = f"📊 **[PRO NATIVE CHART]**: {chart_title}\n\n"
-                            content += "*(Rendering failed, showing as fallback text)*"
+                            content += "\n\n❌ **Error**: Rendering ECharts to PNG failed (Check /tmp/seahorse_render.log)"
+                    else:
+                        logger.warning(f"Telegram: ECharts source not found. Payload was: {raw_payload}")
+                        content += f"\n\n⚠️ **Warning**: ECharts source not found ({raw_payload[:20]}...)"
                 except Exception as e:
-                    logger.error("Telegram: Failed to parse native echart json: %s", e)
+                    logger.error("Telegram: ECharts rendering pipeline failed: %s", e, exc_info=True)
+                    content += f"\n\n🚨 **Pipeline Error**: {str(e)}"
 
             choices = _extract_choices(content)
 
@@ -472,6 +527,7 @@ class TelegramAdapter:
                 for path in response.image_paths:
                     if os.path.exists(path):
                         try:
+                            logger.info("Telegram: Sending photo %s to chat %s", path, chat_id)
                             with open(path, "rb") as photo:
                                 await context.bot.send_photo(
                                     chat_id=chat_id,
@@ -479,7 +535,10 @@ class TelegramAdapter:
                                     caption=content if len(content) < 1024 else None,
                                     parse_mode=ParseMode.MARKDOWN,
                                 )
+                            logger.info("Telegram: Photo sent successfully to %s", chat_id)
                         except Exception as e:
+                            logger.error("Telegram: Photo send failed: %s", e)
+                            content += f"\n\n💥 **Telegram Photo Error**: {str(e)[:100]}"
                             if "Can't parse entities" in str(e):
                                 logger.warning(
                                     "Telegram: Photo caption Markdown failed, falling back"

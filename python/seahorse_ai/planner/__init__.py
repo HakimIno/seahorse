@@ -125,7 +125,7 @@ class ReActPlanner:
         llm: LLMBackend,
         tools: ToolRegistry | None = None,
         skills: list[SeahorseSkill] | None = None,
-        max_steps: int = 15,
+        max_steps: int = 8,
         default_tier: str = "worker",
         step_timeout_seconds: int = 120,
         global_timeout_seconds: int = 600,
@@ -287,15 +287,12 @@ class ReActPlanner:
                 prompt_content = f"{prompt_content}\n\n{MEMORY_NUDGE}"
             messages.append(Message(role="user", content=prompt_content))
 
-            # 4. Strategy plan (cached) for complex intents
-            # Only use strategy for complex reasoning tasks to save latency
-            current_tier = await _classify_tier(
-                self._llm,
-                request.prompt,
-                self._default_tier,
-            )
-            if current_tier == "strategist" and intent not in ("GENERAL", "GREET"):
-                plan = await self._strategy.plan(request.prompt)
+            # 4. Strategy plan (cached) — only for medium+ complexity
+            # Complexity 1-2: skip (simple tasks don't need a plan)
+            # Complexity 3:   thinker generates plan (good enough, cheap)
+            # Complexity 4-5: strategist generates plan (expensive, best quality)
+            if si.complexity >= 3 and intent not in ("GENERAL", "GREET"):
+                plan = await self._strategy.plan(request.prompt, complexity=si.complexity)
                 messages.insert(
                     1,
                     Message(
@@ -330,6 +327,7 @@ class ReActPlanner:
                 # 7. Final synthesis
                 content = result.content
                 is_data_intent = intent in ("DATABASE", "PRIVATE_MEMORY", "PUBLIC_REALTIME")
+                current_tier = getattr(self._llm, "_config", {}).model if hasattr(self._llm, "_config") else "unknown"
 
                 # OPTIMIZATION: Skip synthesis if is_direct OR if current agent is already a thinker/strategist
                 skip_synthesis = getattr(result, "is_direct", False)
@@ -386,7 +384,7 @@ class ReActPlanner:
                 llm=self._llm,
                 tools=self._tools,
                 config=HybridConfig(
-                    max_steps_per_subtask=self._cfg.max_steps,
+                    max_steps_per_subtask=8,
                     step_timeout_seconds=self._cfg.step_timeout_seconds,
                     global_timeout_seconds=self._cfg.global_timeout_seconds,
                 ),
@@ -409,10 +407,9 @@ class ReActPlanner:
                         "Provide a natural response to the user based on the tool results above.\n"
                         "RULES:\n"
                         "1. BE CONCISE. Just answer the user's latest question. DO NOT summarize past tasks you have already completed.\n"
-                        "2. Avoid rigid business jargon unless specifically asked.\n"
-                        "3. If you see patterns or risks related to the IMMEDIATE question, mention them briefly.\n"
-                        "4. DISTINGUISH between 'Technical Timeouts' (system taking too long) and 'Service Failures' (DB offline). Do not hallucinate connection issues if it was just a timeout.\n"
-                        "5. REPLY in the same language the user used (Thai/English)."
+                        "2. PRESERVE TECHNICAL TAGS: If you see `ECHART_JSON:/path/to/file.json` in the previous assistant message, you MUST include it at the end of your response so the system can render the chart.\n"
+                        "3. ABSOLUTE ACCURACY: All numbers (Correlation, Mean, etc.) MUST match the tool results EXACTLY. Do not approximate or rewrite them.\n"
+                        "4. REPLY in the same language the user used (Thai/English)."
                     ),
                 ),
             ]

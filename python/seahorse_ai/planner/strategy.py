@@ -36,8 +36,16 @@ class StrategyPlanner:
         # Cache: {hash: (plan_text, created_at)}
         self._cache: dict[str, tuple[str, float]] = {}
 
-    async def plan(self, prompt: str) -> str:
-        """Return a strategy plan for the prompt. Uses cache if available."""
+    async def plan(self, prompt: str, complexity: int = 4) -> str:
+        """Return a strategy plan for the prompt. Uses cache if available.
+
+        Args:
+            prompt: The user's original prompt.
+            complexity: 1-5 scale. Determines which LLM tier to use:
+                        - 4-5: strategist (expensive, highest quality)
+                        - 3:   thinker   (medium cost, good quality)
+                        - 1-2: skipped entirely (no plan generated)
+        """
         key = self._hash(prompt)
 
         # Check cache (with TTL)
@@ -54,10 +62,11 @@ class StrategyPlanner:
             oldest = min(self._cache, key=lambda k: self._cache[k][1])
             del self._cache[oldest]
 
-        # Generate fresh plan
-        plan = await self._generate(prompt)
+        # Generate fresh plan — tier depends on complexity
+        tier = "strategist" if complexity >= 4 else "thinker"
+        plan = await self._generate(prompt, tier=tier)
         self._cache[key] = (plan, time.monotonic())
-        logger.info("strategy.plan: generated and cached (cache_size=%d)", len(self._cache))
+        logger.info("strategy.plan: generated (tier=%s) and cached (cache_size=%d)", tier, len(self._cache))
         return plan
 
     def nudge_message(self) -> Message:
@@ -79,16 +88,16 @@ class StrategyPlanner:
     def _hash(prompt: str) -> str:
         return hashlib.md5(prompt[:200].encode()).hexdigest()
 
-    async def _generate(self, prompt: str) -> str:
+    async def _generate(self, prompt: str, tier: str = "strategist") -> str:
         """Call LLM to generate a fresh strategy plan."""
         messages = [
             Message(role="system", content=STRATEGY_GENERATION_PROMPT),
             Message(role="user", content=prompt),
         ]
         try:
-            result = await self._llm.complete(messages, tier="thinker")  # type: ignore[union-attr]
+            result = await self._llm.complete(messages, tier=tier)  # type: ignore[union-attr]
             text = str(result.get("content", result) if isinstance(result, dict) else result)
-            logger.info("strategy._generate: plan generated (%d chars)", len(text))
+            logger.info("strategy._generate: plan generated (tier=%s, %d chars)", tier, len(text))
             return text
         except Exception as exc:  # noqa: BLE001
             logger.error("strategy._generate: failed: %s", exc)

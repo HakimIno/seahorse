@@ -27,12 +27,8 @@ class ModelRouter:
         self.worker = LLMClient(config=LLMConfig(model=worker_model))
         self.thinker = LLMClient(config=LLMConfig(model=thinker_model))
         self.strategist = LLMClient(config=LLMConfig(model=strategist_model))
-        # Default to worker if fast_path_model not provided
-        self.fast = LLMClient(
-            config=LLMConfig(
-                model=fast_path_model or "openrouter/google/gemini-3.1-flash-lite-preview"
-            )
-        )
+        # Default to worker config if fast_path_model not provided
+        self.fast = LLMClient(config=LLMConfig(model=fast_path_model)) if fast_path_model else self.worker
 
     async def complete(
         self, messages: list[Message], tier: ModelTier = "worker", **kwargs: object

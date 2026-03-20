@@ -91,11 +91,19 @@ class HybridOrchestrator:
             session_id,
         )
 
+        # ── 1b. Auto Skill Selection ─────────────────────────────────────────
+        matched_skill = self._match_skill(request.prompt)
+        skill_snippet = ""
+        if matched_skill:
+            skill_snippet = matched_skill.get_prompt_snippet()
+            logger.info("hybrid.run auto-selected skill: %s", matched_skill.name)
+
         # ── 2. Decompose ─────────────────────────────────────────────────────
         graph = await self._decomposer.decompose(
             goal=request.prompt,
             history=request.history or None,
             complexity=complexity,
+            skill_context=skill_snippet,  # Pass the skill's specific rules
         )
         memory.put("plan_summary", graph.goal)
         logger.info(
@@ -133,7 +141,7 @@ class HybridOrchestrator:
                     results: list[SubtaskResult] = batch_results,
                 ) -> None:
                     results[idx] = await self._execute_subtask(
-                        node, graph, memory, request
+                        node, graph, memory, request, skill_snippet
                     )
 
                 async with anyio.create_task_group() as tg:
@@ -239,6 +247,7 @@ class HybridOrchestrator:
         graph: DecompositionGraph,
         memory: SessionMemory,
         request: AgentRequest,
+        skill_context: str = "",
     ) -> SubtaskResult:
         """Run a single subtask in an isolated context window."""
         tier3 = await memory.search_relevant(node.description, top_k=3)
@@ -256,13 +265,13 @@ class HybridOrchestrator:
 
         messages: list[Message] = [
             Message(role="system", content=sys_prompt),
-            Message(role="system", content=context_block),
+            Message(role="system", content=f"{skill_context}\n\n{context_block}" if skill_context else context_block),
             Message(role="user", content=node.description),
         ]
 
         cb = CircuitBreaker()
         cfg = ExecutorConfig(
-            max_steps=self._cfg.max_steps_per_subtask,
+            max_steps=8,
             step_timeout_seconds=self._cfg.step_timeout_seconds,
         )
         openai_tools = getattr(self._tools, "to_openai_tools", lambda: [])()
@@ -299,6 +308,47 @@ class HybridOrchestrator:
         )
 
     # ── Helpers ───────────────────────────────────────────────────────────────
+
+    # Keyword map for auto-detecting the best skill from the user prompt.
+    _SKILL_KEYWORDS: dict[str, list[str]] = {
+        "DATA_ENGINEERING": [
+            "etl", "extract", "transform", "load", "parquet", "pipeline",
+            "data quality", "clean", "null", "schema", "migrate", "ingest",
+        ],
+        "BI_ANALYST": [
+            "dashboard", "chart", "graph", "visual", "scatter", "heatmap",
+            "radar", "pie", "correlation", "trend", "report", "insight",
+            "plot", "show me a", "draw",
+        ],
+        "FOOTBALL_SCOUT": [
+            "football", "match", "fixture", "odds", "bet", "xg",
+            "h2h", "kelly", "league", "goal",
+        ],
+        "DATABASE_ACCESS": [
+            "sql", "query", "database", "table", "select", "join",
+        ],
+        "DATA_ANALYSIS": [
+            "polars", "aggregate", "group", "filter", "sort", "analyze",
+        ],
+    }
+
+    def _match_skill(self, prompt: str) -> Any:
+        """Match the user prompt to the best skill using keyword scoring."""
+        from seahorse_ai.skills.base import registry as skill_registry
+
+        prompt_lower = prompt.lower()
+        best_name: str | None = None
+        best_score = 0
+
+        for skill_name, keywords in self._SKILL_KEYWORDS.items():
+            score = sum(1 for kw in keywords if kw in prompt_lower)
+            if score > best_score:
+                best_score = score
+                best_name = skill_name
+
+        if best_name and best_score >= 1:
+            return skill_registry.get(best_name)
+        return None
 
     async def _classify_complexity(self, request: AgentRequest) -> int:
         """Quick complexity classification — reuse FastPath if available."""
