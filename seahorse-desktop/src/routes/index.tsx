@@ -4,6 +4,7 @@ import Analyst from '../pages/Analyst';
 import Reports from '../pages/Reports';
 import Memory from '../pages/Memory';
 import Settings from '../pages/Settings';
+import Dashboard from '../components/Dashboard';
 
 export const router = createBrowserRouter([
     {
@@ -28,4 +29,9 @@ export const router = createBrowserRouter([
             },
         ],
     },
+
+    {
+        path: 'dashboard',
+        element: <Dashboard />,
+    }
 ]);
