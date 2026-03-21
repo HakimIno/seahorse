@@ -5,16 +5,18 @@ to dedicated handlers, reducing latency and complexity for specific domains.
 """
 
 from __future__ import annotations
+
 import logging
 import time
 from typing import TYPE_CHECKING
-from seahorse_ai.schemas import Message, AgentResponse
+
 from seahorse_ai.planner.fast_utils import robust_json_load
+from seahorse_ai.planner.handlers.entity import EntityHandler
+from seahorse_ai.planner.handlers.football import FootballHandler
 
 # New Handler Imports
 from seahorse_ai.planner.handlers.polars import PolarsHandler
-from seahorse_ai.planner.handlers.football import FootballHandler
-from seahorse_ai.planner.handlers.entity import EntityHandler
+from seahorse_ai.schemas import AgentResponse, Message
 
 if TYPE_CHECKING:
     from seahorse_ai.router import ModelRouter
@@ -22,8 +24,8 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-import msgspec
 from msgspec import Struct
+
 
 class StructuredIntent(Struct, omit_defaults=True):
     """Result of the intent classification step."""

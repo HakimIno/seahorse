@@ -8,10 +8,7 @@ with the existing Seahorse schema conventions.
 
 from __future__ import annotations
 
-from typing import Any
-
 from msgspec import Struct, field
-
 
 # ── Goal & Success Criteria ───────────────────────────────────────────────────
 

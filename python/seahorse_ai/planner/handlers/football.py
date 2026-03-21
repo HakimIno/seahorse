@@ -1,18 +1,19 @@
 from __future__ import annotations
+
+import asyncio
 import datetime
-import time
 import json
 import logging
 import re
-import asyncio
-from typing import Any, TYPE_CHECKING
-from seahorse_ai.planner.handlers.base import BaseFastHandler
-from seahorse_ai.schemas import Message, AgentResponse
+import time
+from typing import TYPE_CHECKING, Any
+
 from seahorse_ai.planner.fast_utils import robust_json_load
+from seahorse_ai.planner.handlers.base import BaseFastHandler
+from seahorse_ai.schemas import AgentResponse, Message
 
 if TYPE_CHECKING:
-    from seahorse_ai.router import ModelRouter
-    from seahorse_ai.tools.base import ToolRegistry
+    pass
 
 logger = logging.getLogger(__name__)
 

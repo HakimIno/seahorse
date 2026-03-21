@@ -199,9 +199,10 @@ class ReActPlanner:
             self._circuit_breaker = CircuitBreaker()
 
             # ── 1. Structured Intent (1 LLM call → intent+action+entity) ──
-            # OPTIMIZATION: Skip classification for sub-agents (crew_*, sub_*)
+            # OPTIMIZATION: Skip classification for sub-agents (crew_*, sub_*) or short queries
             is_subagent = request.agent_id.startswith(("crew_", "sub_"))
-            if is_subagent:
+            is_simple_query = len(request.prompt.split()) <= 3
+            if is_subagent or is_simple_query:
                 from seahorse_ai.planner.fast_path import StructuredIntent
 
                 si = StructuredIntent(intent="GENERAL", action="CHAT", complexity=3)
@@ -326,25 +327,9 @@ class ReActPlanner:
 
                 # 7. Final synthesis
                 content = result.content
-                is_data_intent = intent in ("DATABASE", "PRIVATE_MEMORY", "PUBLIC_REALTIME")
-                current_tier = getattr(self._llm, "_config", {}).model if hasattr(self._llm, "_config") else "unknown"
 
-                # OPTIMIZATION: Skip synthesis if is_direct OR if current agent is already a thinker/strategist
-                skip_synthesis = getattr(result, "is_direct", False)
-                is_elite_already = current_tier in ("thinker", "strategist")
-
-                if (
-                    not result.terminated
-                    and not skip_synthesis
-                    and not is_subagent
-                    and not is_elite_already
-                    and is_data_intent
-                ):
-                    content = await self._synthesize(
-                        messages,
-                        content,
-                        request.prompt,
-                    )
+                # OPTIMIZATION: Removed redundant _synthesize step to save token costs.
+                # The worker model output should be presented directly.
 
                 # 8. Background memory (rate-limited)
                 await self._memory.record(messages, agent_id=request.agent_id)

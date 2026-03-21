@@ -22,10 +22,9 @@ Injection rule: total injected tokens ≤ 20% of context window.
 from __future__ import annotations
 
 import logging
-import time
 from typing import Any
 
-from seahorse_ai.planner.hybrid_schemas import SubtaskResult, TrialArtifact
+from seahorse_ai.planner.hybrid_schemas import TrialArtifact
 
 logger = logging.getLogger(__name__)
 

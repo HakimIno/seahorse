@@ -1,14 +1,15 @@
 from __future__ import annotations
-import time
+
 import logging
-from typing import Any, TYPE_CHECKING
+import time
+from typing import TYPE_CHECKING, Any
+
+from seahorse_ai.planner.fast_utils import split_entities
 from seahorse_ai.planner.handlers.base import BaseFastHandler
-from seahorse_ai.schemas import Message, AgentResponse
-from seahorse_ai.planner.fast_utils import robust_json_load, split_entities
+from seahorse_ai.schemas import AgentResponse, Message
 
 if TYPE_CHECKING:
-    from seahorse_ai.router import ModelRouter
-    from seahorse_ai.tools.base import ToolRegistry
+    pass
 
 logger = logging.getLogger(__name__)
 
@@ -53,4 +54,4 @@ class EntityHandler(BaseFastHandler):
             logger.error(f"EntityHandler internal: {e}")
             return None
 
-import asyncio # Needed for handle_direct_extraction
+import asyncio  # Needed for handle_direct_extraction

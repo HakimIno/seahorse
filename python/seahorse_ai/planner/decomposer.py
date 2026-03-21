@@ -19,7 +19,6 @@ import anyio
 
 from seahorse_ai.planner.hybrid_schemas import (
     DecompositionGraph,
-    GoalSpec,
     SubtaskNode,
 )
 from seahorse_ai.schemas import Message

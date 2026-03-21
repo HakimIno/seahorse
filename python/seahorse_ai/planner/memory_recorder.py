@@ -59,7 +59,10 @@ class MemoryRecorder:
             return
 
         self._last_run = now
-        history_text = "\n".join(f"{m.role}: {m.content}" for m in non_system)
+        
+        # SLICE RECENT: Prevent O(N^2) token explosion by only sending the last 6 messages
+        recent_messages = non_system[-6:]
+        history_text = "\n".join(f"{m.role}: {m.content}" for m in recent_messages)
 
         try:
             response = await self._llm.complete(

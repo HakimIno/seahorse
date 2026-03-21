@@ -1,5 +1,6 @@
-import anyio
 import logging
+
+import anyio
 
 logger = logging.getLogger(__name__)
 
