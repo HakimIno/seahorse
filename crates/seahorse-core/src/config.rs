@@ -23,6 +23,8 @@ pub struct Config {
     pub fast_path_model: String,
     /// OpenRouter API Key for Fast Path
     pub openrouter_api_key: String,
+    /// Optional path to the SQLite persistence database
+    pub persistence_db: Option<String>,
 }
 
 impl Config {
@@ -40,6 +42,7 @@ impl Config {
             fast_path_model: std::env::var("SEAHORSE_FAST_PATH_MODEL")
                 .unwrap_or_else(|_| "google/gemini-3.1-flash-lite-preview".to_string()),
             openrouter_api_key: std::env::var("OPENROUTER_API_KEY").unwrap_or_default(),
+            persistence_db: std::env::var("SEAHORSE_PERSISTENCE_DB").ok(),
         })
     }
 }

@@ -137,18 +137,19 @@ class SeahorseCrew:
 class SwarmOrchestrator:
     """Manages a collection of agents communicating asynchronously via Rust MessageBus."""
 
-    def __init__(self, llm: LLMBackend) -> None:
+    def __init__(self, llm: LLMBackend, persist_path: str | None = None) -> None:
         self._llm = llm
         self._agents: dict[str, CrewAgent] = {}
         self._shared_registry = SeahorseToolRegistry()
         self._master: ReActPlanner | None = None
+        self.persist_path = persist_path
 
         # Initialize Rust PyMessageBus
         try:
             from seahorse_ffi import PyMessageBus
 
-            self._bus = PyMessageBus(1024)
-            logger.info("SwarmOrchestrator: Rust PyMessageBus initialized.")
+            self._bus = PyMessageBus(1024, db_path=persist_path)
+            logger.info("SwarmOrchestrator: Rust PyMessageBus initialized (persist_path=%s).", persist_path)
         except ImportError:
             logger.warning(
                 "SwarmOrchestrator: PyMessageBus not found. Run `uv run maturin develop`. Falling back to dummy."
@@ -216,6 +217,18 @@ class SwarmOrchestrator:
         topic = f"agent_{agent.name.lower()}"
         receiver = self._bus.subscribe(topic)
         logger.info("Swarm: %s listening on topic '%s' (Async Event Loop)", agent.name, topic)
+
+        if self.persist_path:
+            try:
+                history = self._bus.get_history(topic)
+                if history:
+                    logger.info("Swarm [%s]: Loaded %d historical messages", agent.name, len(history))
+                    # Agents could optionally act on history here, but we just log for now to avoid
+                    # re-executing reactions for tasks already completed before crash.
+            except AttributeError:
+                pass
+            except Exception as e:
+                logger.error("Failed to load history for %s: %s", agent.name, e)
 
         async with anyio.create_task_group() as tg:
             while True:

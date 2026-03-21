@@ -23,6 +23,7 @@ polars      = { workspace = true }
 charming      = { workspace = true }
 governor      = { workspace = true }
 async-trait   = { workspace = true }
+rusqlite      = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true }

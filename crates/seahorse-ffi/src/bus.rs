@@ -22,11 +22,43 @@ pub struct PyMessageBus {
 #[pymethods]
 impl PyMessageBus {
     #[new]
-    #[pyo3(signature = (capacity = 1024))]
-    pub fn new(capacity: usize) -> Self {
+    #[pyo3(signature = (capacity = 1024, db_path = None))]
+    pub fn new(capacity: usize, db_path: Option<String>) -> Self {
+        let inner = if let Ok(_handle) = tokio::runtime::Handle::try_current() {
+            MessageBus::new(capacity, db_path)
+        } else {
+            let _guard = BUS_RUNTIME.enter();
+            MessageBus::new(capacity, db_path)
+        };
         Self {
-            inner: Arc::new(MessageBus::new(capacity)),
+            inner: Arc::new(inner),
         }
+    }
+
+    /// Retrieve persistent history for a topic
+    pub fn get_history<'py>(&self, py: Python<'py>, topic: String) -> PyResult<Vec<Bound<'py, PyDict>>> {
+        let bus = self.inner.clone();
+        let history = py.allow_threads(|| {
+            if let Ok(handle) = tokio::runtime::Handle::try_current() {
+                handle.block_on(async {
+                    bus.get_history(&topic).await.unwrap_or_default()
+                })
+            } else {
+                BUS_RUNTIME.block_on(async {
+                    bus.get_history(&topic).await.unwrap_or_default()
+                })
+            }
+        });
+        
+        let mut py_history = Vec::with_capacity(history.len());
+        for msg in history {
+            let dict = PyDict::new_bound(py);
+            dict.set_item("topic", msg.topic)?;
+            dict.set_item("sender", msg.sender)?;
+            dict.set_item("content", msg.content)?;
+            py_history.push(dict);
+        }
+        Ok(py_history)
     }
 
     /// Publish a message to a topic. Non-blocking.

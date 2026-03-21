@@ -61,7 +61,7 @@ impl SeahorseCore {
             config.openrouter_api_key.clone(),
         ));
 
-        let bus = Arc::new(MessageBus::new(1024)); // 1024 default capacity
+        let bus = Arc::new(MessageBus::new(1024, config.persistence_db.clone())); // 1024 default capacity
 
         let core = Self {
             config,
