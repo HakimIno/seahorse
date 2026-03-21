@@ -10,12 +10,13 @@ import logging
 import time
 from typing import TYPE_CHECKING
 
+from msgspec import Struct
+
 from seahorse_ai.planner.fast_utils import robust_json_load
 from seahorse_ai.planner.handlers.entity import EntityHandler
 from seahorse_ai.planner.handlers.football import FootballHandler
-
-# New Handler Imports
 from seahorse_ai.planner.handlers.polars import PolarsHandler
+from seahorse_ai.planner.handlers.story import StoryHandler
 from seahorse_ai.schemas import AgentResponse, Message
 
 if TYPE_CHECKING:
@@ -23,8 +24,6 @@ if TYPE_CHECKING:
     from seahorse_ai.tools.base import ToolRegistry
 
 logger = logging.getLogger(__name__)
-
-from msgspec import Struct
 
 
 class StructuredIntent(Struct, omit_defaults=True):
@@ -43,7 +42,8 @@ async def classify_structured_intent(
     """Classify the user's intent into a structured format for routing."""
     # Use a fast classification prompt
     sys = (
-        "Classify user intent. Categories: POLARS (data/trends/charts), "
+        "Classify user intent. Categories: STORY (complex, professional analysis + narrative), "
+        "POLARS (simple data/trends/charts), "
         "FOOTBALL (match/odds), INTERNAL (codebase), DIRECT (simple facts), GENERAL (chat).\n"
         "Return JSON: { \"intent\": \"...\", \"action\": \"...\", \"complexity\": 1-5 }"
     )
@@ -73,6 +73,7 @@ class FastPathRouter:
         
         # Initialize handlers
         self._polars = PolarsHandler(llm_backend, tools)
+        self._story = StoryHandler(llm_backend, tools)
         self._football = FootballHandler(llm_backend, tools)
         self._entity = EntityHandler(llm_backend, tools)
 
@@ -83,7 +84,9 @@ class FastPathRouter:
         start_t = time.perf_counter()
         intent = si.intent.upper()
 
-        if intent == "POLARS":
+        if intent == "STORY":
+             return await self._story.handle(prompt, history, start_t)
+        elif intent == "POLARS":
             return await self._polars.handle(prompt, history, start_t)
         elif intent == "FOOTBALL":
             return await self._football.handle(prompt, history, start_t)
