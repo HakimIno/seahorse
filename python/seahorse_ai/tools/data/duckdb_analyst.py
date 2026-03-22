@@ -89,7 +89,7 @@ _pool = _DuckDBPool(size=_POOL_SIZE)
 async def _execute(
     sql: str,
     max_rows: int = _MAX_ROWS,
-    timeout: float = _QUERY_TIMEOUT,
+    query_timeout: float = _QUERY_TIMEOUT,
 ) -> pl.DataFrame:
     """
     Acquire a connection, run SQL with timeout, return Polars DataFrame.
@@ -108,7 +108,7 @@ async def _execute(
                 df = df.head(max_rows)
             return df
 
-    with anyio.fail_after(timeout):
+    with anyio.fail_after(query_timeout):
         return await _run()
 
 

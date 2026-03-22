@@ -10,6 +10,7 @@ Features:
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -57,15 +58,11 @@ class _BrowserPool:
                 or self._playwright is None
             ):
                 if self._browser:
-                    try:
+                    with contextlib.suppress(Exception):
                         await self._browser.close()
-                    except Exception:
-                        pass
                 if self._playwright:
-                    try:
+                    with contextlib.suppress(Exception):
                         await self._playwright.stop()
-                    except Exception:
-                        pass
 
                 logger.info("Starting Chromium browser singleton...")
                 self._playwright = await async_playwright().start()

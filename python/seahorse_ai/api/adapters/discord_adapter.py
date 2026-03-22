@@ -368,11 +368,10 @@ async def main() -> None:
 
     interval = int(os.environ.get("SEAHORSE_ALERTS_INTERVAL", "300"))
 
-    async with client:
-        # Start watcher and client in parallel using AnyIO TaskGroup
-        async with anyio.create_task_group() as tg:
-            tg.start_soon(watcher.start, interval)
-            tg.start_soon(client.start, token)
+    # Start watcher and client in parallel using AnyIO TaskGroup
+    async with client, anyio.create_task_group() as tg:
+        tg.start_soon(watcher.start, interval)
+        tg.start_soon(client.start, token)
 
 
 if __name__ == "__main__":

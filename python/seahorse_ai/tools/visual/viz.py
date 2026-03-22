@@ -128,9 +128,7 @@ async def render_echarts_to_png(json_conf: str) -> str | None:
             f.write(html_content)
 
         # Capture at high DPI for premium look
-        res = await browser_screenshot(
-            url=f"file://{os.path.abspath(temp_html)}", output_path=filepath
-        )
+        await browser_screenshot(url=f"file://{os.path.abspath(temp_html)}", output_path=filepath)
 
         if os.path.exists(temp_html):
             os.remove(temp_html)

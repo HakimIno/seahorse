@@ -69,7 +69,7 @@ async def place_ibkr_order(
     symbol: str,
     action: str,
     quantity: float,
-    secType: str = "CASH",
+    secType: str = "CASH",  # noqa: N803
     exchange: str = "IDEALPRO",
     currency: str = "USD",
 ) -> dict[str, Any]:

@@ -39,7 +39,6 @@ from telegram.ext import (
     filters,
 )
 
-from seahorse_ai.core.router import ModelRouter
 from seahorse_ai.core.schemas import AgentRequest, AgentResponse, Message
 
 # Setup logging
@@ -488,7 +487,7 @@ class TelegramAdapter:
                                 try:
                                     chart_data = json.loads(block)
                                     break
-                                except:
+                                except Exception:
                                     continue
 
                     if chart_data is None:
@@ -499,7 +498,7 @@ class TelegramAdapter:
                                 try:
                                     chart_data = json.loads(block)
                                     break
-                                except:
+                                except Exception:
                                     continue
 
                     if chart_data:
@@ -708,21 +707,6 @@ def main() -> None:
 
     adapter = TelegramAdapter(
         router_url=os.environ.get("SEAHORSE_ROUTER_URL", "http://localhost:8000")
-    )
-
-    router = ModelRouter(
-        worker_model=os.environ.get(
-            "SEAHORSE_MODEL_WORKER", "openrouter/google/gemini-3-flash-preview"
-        ),
-        thinker_model=os.environ.get(
-            "SEAHORSE_MODEL_THINKER", "openrouter/google/gemini-3-flash-preview"
-        ),
-        strategist_model=os.environ.get(
-            "SEAHORSE_MODEL_STRATEGIST", "openrouter/google/gemini-3-flash-preview"
-        ),
-        fast_path_model=os.environ.get(
-            "SEAHORSE_FAST_PATH_MODEL", "openrouter/google/gemini-3.1-flash-lite-preview"
-        ),
     )
 
     app = (

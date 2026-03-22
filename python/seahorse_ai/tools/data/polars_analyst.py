@@ -125,7 +125,7 @@ async def polars_query(
 
         # ── Execution with Timeout ──
         try:
-            with anyio.fail_after(30):
+            with anyio.fail_after(30):  # noqa: ASYNC100
                 # Pre-processing expression for common LLM mistakes
                 # If they try len(df) or df.corr() on a LazyFrame t0/lf, we help them
                 if ("len(" in expression or ".corr(" in expression) and (

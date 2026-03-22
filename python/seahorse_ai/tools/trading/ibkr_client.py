@@ -5,7 +5,6 @@ logger = logging.getLogger(__name__)
 
 # Try to import ib_insync, but don't crash if it's not installed yet
 try:
-    import ib_insync as ib
     from ib_insync import IB
 
     HAS_IB_INSYNC = True
@@ -55,7 +54,7 @@ class IBKRClientManager:
                 logger.error(f"IBKR Connection failed: {e}")
                 raise ConnectionError(
                     f"Could not connect to IBKR TWS/Gateway on port 4002/7497. Is it running? Error: {e}"
-                )
+                ) from e
 
         return self._ib
 

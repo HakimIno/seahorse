@@ -205,12 +205,11 @@ class LLMClient:
                 cleaned
                 and cleaned[-1]["role"] == built["role"]
                 and built["role"] in ("user", "system")
+                and not (has_tools or has_tool_id or cleaned[-1].get("tool_calls"))
             ):
-                # Merge consecutive roles for user/system only.
                 # Assistant/Tool roles should NOT be merged if they have tool_calls/ids.
-                if not (has_tools or has_tool_id or cleaned[-1].get("tool_calls")):
-                    cleaned[-1]["content"] += f"\n\n{built['content']}"
-                    continue
+                cleaned[-1]["content"] += f"\n\n{built['content']}"
+                continue
 
             cleaned.append(built)
 

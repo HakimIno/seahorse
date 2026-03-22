@@ -17,10 +17,15 @@ from __future__ import annotations
 
 import json
 import logging
+from typing import TYPE_CHECKING
 
 import msgspec
 
 from seahorse_ai.core.schemas import Message
+
+if TYPE_CHECKING:
+    from seahorse_ai.core.router import ModelRouter
+    from seahorse_ai.tools.base import SeahorseToolRegistry
 
 logger = logging.getLogger(__name__)
 

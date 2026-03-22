@@ -21,11 +21,7 @@ async def get_futures_live_price(
 
         ib = await ibkr_manager.get_connection()
 
-        if expiry:
-            contract = Future(symbol, expiry, exchange)
-        else:
-            # Continuous (front month)
-            contract = ContFuture(symbol, exchange)
+        contract = Future(symbol, expiry, exchange) if expiry else ContFuture(symbol, exchange)
 
         await ib.qualifyContractsAsync(contract)
 

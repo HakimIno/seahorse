@@ -36,7 +36,7 @@ async def run_scenario(scenario: dict, feedback_mode: str):
     true_search = await pipeline.search(scenario["true_fact"], k=1)
     noise_search = await pipeline.search(scenario["noisy_fact"], k=1)
 
-    true_id = true_search[0]["id"] if true_search else None
+    _ = true_search[0]["id"] if true_search else None
     noise_id = noise_search[0]["id"] if noise_search else None
     if noise_id is None:
         logger.error(

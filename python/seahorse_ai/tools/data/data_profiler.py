@@ -35,7 +35,6 @@ async def data_profile(source_path: str) -> str:
     """Analyze a single file and return a comprehensive quality report."""
     try:
         lf = _scan(source_path)
-        schema = lf.collect_schema()
 
         # ── Memory-safe sampling ──────────────────────────────────────────
         df = lf.fetch(_PROFILE_SAMPLE)

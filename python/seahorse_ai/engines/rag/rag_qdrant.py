@@ -382,7 +382,7 @@ class QdrantRAGPipeline:
         """Delete points matching a specific filter. Returns number of deleted points (if available)."""
         collection = self._collection_name(agent_id)
         try:
-            result = await self._client.delete(
+            await self._client.delete(
                 collection_name=collection,
                 points_selector=FilterSelector(filter=filter_obj),
             )

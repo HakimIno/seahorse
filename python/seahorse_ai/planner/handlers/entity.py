@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from typing import TYPE_CHECKING, Any
@@ -74,6 +75,3 @@ class EntityHandler(BaseFastHandler):
         except Exception as e:
             logger.error(f"EntityHandler internal: {e}")
             return None
-
-
-import asyncio  # Needed for handle_direct_extraction

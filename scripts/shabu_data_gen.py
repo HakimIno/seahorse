@@ -429,7 +429,7 @@ async def generate_data():
     # --- Branches ---
     print("Inserting 25 unique branches...")
     branch_meta = []
-    for i, b in enumerate(BRANCHES_FIXED, start=1):
+    for b in BRANCHES_FIXED:
         open_date = (START_DATE - timedelta(days=random.randint(60, 1200))).date()
         num_tables = b["sqm"] // 6
         b_id = await conn.fetchval(
@@ -522,7 +522,7 @@ async def generate_data():
         )
 
         detail_rows = []
-        for rec, ordered in zip(sale_ids, day_details):
+        for rec, ordered in zip(sale_ids, day_details, strict=True):
             for it in ordered:
                 qty = it["qty"]
                 price = float(it["price"])
