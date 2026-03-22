@@ -43,6 +43,19 @@ class SkillRegistry:
     def list_skills(self) -> list[str]:
         return list(self._skills.keys())
 
+    def get_all_tools(self) -> list[Any]:
+        """Collect and deduplicate all tools from all registered skills."""
+        all_tools = []
+        seen_names = set()
+        for skill in self._skills.values():
+            for tool in skill.tools:
+                # Assuming tools have a __name__ attribute
+                name = getattr(tool, "__name__", str(tool))
+                if name not in seen_names:
+                    all_tools.append(tool)
+                    seen_names.add(name)
+        return all_tools
+
 
 # Global registry instance
 registry = SkillRegistry()

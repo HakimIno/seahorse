@@ -60,6 +60,10 @@ from seahorse_ai.tools.business.strategy_engine import war_room
 from seahorse_ai.tools.visual.table_viz import create_table_image
 from seahorse_ai.tools.visual.viz import create_custom_chart
 from seahorse_ai.tools.system.web_search import web_search
+from seahorse_ai.tools.trading.risk_calculator import calculate_position_size, calculate_risk_of_ruin, evaluate_kelly_criterion
+from seahorse_ai.tools.trading.market_data import get_futures_live_price, get_futures_market_depth, get_stock_live_price, get_forex_live_price
+from seahorse_ai.tools.trading.portfolio import get_ibkr_account_summary, get_ibkr_open_positions, place_ibkr_order
+from seahorse_ai.tools.trading.macro_watch import fetch_cme_fedwatch_data, fetch_cot_report
 
 __all__ = [
     "SeahorseToolRegistry",
@@ -110,6 +114,18 @@ __all__ = [
     "extract_sql_to_parquet",
     "load_to_sql",
     "echarts_composer",
+    "calculate_position_size",
+    "calculate_risk_of_ruin",
+    "evaluate_kelly_criterion",
+    "get_futures_live_price",
+    "get_futures_market_depth",
+    "get_stock_live_price",
+    "get_forex_live_price",
+    "get_ibkr_account_summary",
+    "get_ibkr_open_positions",
+    "place_ibkr_order",
+    "fetch_cme_fedwatch_data",
+    "fetch_cot_report",
 ]
 
 
@@ -168,6 +184,18 @@ def make_default_registry() -> SeahorseToolRegistry:
         extract_sql_to_parquet,
         load_to_sql,
         echarts_composer,
+        calculate_position_size,
+        calculate_risk_of_ruin,
+        evaluate_kelly_criterion,
+        get_futures_live_price,
+        get_futures_market_depth,
+        get_stock_live_price,
+        get_forex_live_price,
+        get_ibkr_account_summary,
+        get_ibkr_open_positions,
+        place_ibkr_order,
+        fetch_cme_fedwatch_data,
+        fetch_cot_report,
     ):
         registry.register(fn)
     return registry

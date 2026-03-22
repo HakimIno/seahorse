@@ -26,36 +26,17 @@ from seahorse_ai.core.schemas import Message
 logger = logging.getLogger(__name__)
 
 DECOMPOSE_SYSTEM_PROMPT = """\
-You are a task decomposer for a multi-agent system.
-
-Given a user goal, break it into subtasks that can be executed by independent agents.
-Output ONLY valid JSON matching this schema (no markdown, no explanation):
-
+Decompose the user goal into independent subtasks (dependency graph).
+Output ONLY JSON matching:
 {
-  "goal": "<restate the user goal>",
-  "success_criteria": ["<criterion 1>", "<criterion 2>"],
-  "nodes": [
-    {
-      "id": "t1",
-      "description": "<what this subtask should accomplish>",
-      "assigned_agent": "worker",
-      "depends_on": []
-    },
-    {
-      "id": "t2",
-      "description": "<depends on t1>",
-      "assigned_agent": "worker",
-      "depends_on": ["t1"]
-    }
-  ]
+  "goal": "string",
+  "success_criteria": ["string"],
+  "nodes": [{"id": "t1", "description": "string", "assigned_agent": "worker", "depends_on": []}]
 }
-
 Rules:
-- Use "depends_on": [] for independent subtasks that can run in parallel.
-- Only add a dependency if a subtask truly needs the output of another.
-- Keep subtasks atomic — each should be achievable in a single ReAct loop (≤10 steps).
-- If the goal is simple (greeting, single question), return exactly 1 node.
-- Success criteria should be concrete and verifiable.
+- Use [] for parallel tasks.
+- Keep subtasks atomic.
+- If simple, return exactly 1 node.
 """
 
 
@@ -77,7 +58,9 @@ class TaskDecomposer:
         For simple goals (complexity <= 2) a single-node graph is returned
         without calling the LLM, saving ~1-3k tokens.
         """
-        if complexity <= 2:
+        # Fast-Path: Skip LLM for simple or common trading checks
+        is_simple_trading = complexity == 3 and any(w in goal.lower() for w in ["ยอดเงิน", "balance", "price", "ราคา", "quote"])
+        if complexity <= 2 or is_simple_trading:
             return self._single_node_graph(goal)
 
         try:

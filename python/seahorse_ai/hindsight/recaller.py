@@ -131,7 +131,7 @@ Answer:"""
             return await self.pipeline.keyword_search(query, agent_id, k)
         return []
 
-    async def _graph_search(self, query: str, agent_id: str | None, k: int, hops: int = 6) -> list[dict[str, Any]]:
+    async def _graph_search(self, query: str, agent_id: str | None, k: int, hops: int = 2) -> list[dict[str, Any]]:
         """Knowledge graph traversal to find records linked to entities in the query (multi-hop)."""
         try:
             entities = await self._extract_entities_from_query(query)
@@ -170,25 +170,34 @@ Answer:"""
             return []
 
     async def _extract_entities_from_query(self, query: str) -> list[str]:
-        """Use a lightweight LLM call to extract canonical entities from the query."""
+        """Extract canonical entities from the query using Regex (Fast) or LLM (Fallback)."""
+        import re
+        
+        # 1. Regex Fast-Path: Common Trading Symbols (Tickers, Pairs)
+        patterns = [
+            r"\b[A-Z]{3,6}\b",           # e.g., AAPL, EURUSD
+            r"\b[A-Z]{2,3}/[A-Z]{2,3}\b", # e.g., BTC/USD
+        ]
+        entities = set()
+        for p in patterns:
+            for match in re.findall(p, query):
+                entities.add(match)
+        
+        if entities:
+            return list(entities)
+
+        # 2. LLM Fallback (Tier: Fast)
         from seahorse_ai.core.llm import get_llm
         from seahorse_ai.core.schemas import Message
 
-        prompt = f"""Extract proper nouns (Names, Projects, Organizations) from this query. 
-Return ONLY a comma-separated list of entities. Example: James Chen, Project Orion.
-Query: {query}
-Entities:"""
-        
+        prompt = f"Extract proper nouns from this query as a comma-separated list: {query}\nEntities:"
         try:
-            client = get_llm(tier="extract")
-            resp = await client.complete([Message(role="user", content=prompt)], tier="extract")
+            client = get_llm(tier="fast")
+            resp = await client.complete([Message(role="user", content=prompt)], tier="fast")
             content = resp.get("content", "").strip()
-            
             if not content or "none" in content.lower():
                 return []
-            
-            entities = [e.strip() for e in content.split(",") if len(e.strip()) > 1]
-            return entities
+            return [e.strip() for e in content.split(",") if len(e.strip()) > 1]
         except Exception as e:
             logger.warning("Recaller: LLM Entity Extraction failed: %s", e)
             return []

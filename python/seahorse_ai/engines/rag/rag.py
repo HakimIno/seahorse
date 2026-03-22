@@ -56,7 +56,7 @@ _EMBED_MODEL = os.environ.get(
 )
 _EMBED_DIM = int(os.environ.get("SEAHORSE_EMBED_DIM", "1024"))
 _MAX_DOCS = 100_000
-_EMBED_TIMEOUT = int(os.environ.get("SEAHORSE_EMBED_TIMEOUT", "30"))  # seconds
+_EMBED_TIMEOUT = int(os.environ.get("SEAHORSE_EMBED_TIMEOUT", "10"))  # seconds
 
 
 def _try_import_ffi_memory() -> type | None:

@@ -71,6 +71,7 @@ class HybridOrchestrator:
 
         self._decomposer = TaskDecomposer(llm)
         self._critic = CriticAgent(llm, use_llm=self._cfg.use_llm_critic)
+        self._complexity_cache: dict[str, int] = {}
 
     async def run(self, request: AgentRequest) -> AgentResponse:
         """Execute the full hybrid loop and return a single AgentResponse."""
@@ -221,7 +222,8 @@ class HybridOrchestrator:
                     f"Goal: {request.prompt}\n"
                     f"Reason: {last_verdict}\n"
                     "Provide a polite, professional explanation in the user's language."
-                ))
+                )),
+                Message(role="user", content="Explain why the task could not be completed.")
             ]
             try:
                 final_res = await self._llm.complete(final_prompt, tier="worker")
@@ -314,6 +316,11 @@ class HybridOrchestrator:
             "etl", "extract", "transform", "load", "parquet", "pipeline",
             "data quality", "clean", "null", "schema", "migrate", "ingest",
         ],
+        "TRADING_GUARDIAN": [
+            "forex", "trade", "lot size", "stop loss", "risk", "ruin", "kelly",
+            "eurusd", "gbpusd", "gold", "xauusd", "trading", "futures",
+            "พอร์ต", "ยอดเงิน", "เทรด", "เงินทุน", "พอร์ตแตก", "บริหารความเสี่ยง",
+        ],
         "BI_ANALYST": [
             "dashboard", "chart", "graph", "visual", "scatter", "heatmap",
             "radar", "pie", "correlation", "trend", "report", "insight",
@@ -346,7 +353,10 @@ class HybridOrchestrator:
         return None
 
     async def _classify_complexity(self, request: AgentRequest) -> int:
-        """Quick complexity classification — reuse FastPath if available."""
+        """Quick complexity classification — reuse FastPath if available. Caches results."""
+        if request.prompt in self._complexity_cache:
+            return self._complexity_cache[request.prompt]
+            
         try:
             from seahorse_ai.planner.fast_path import classify_structured_intent
 
@@ -354,8 +364,11 @@ class HybridOrchestrator:
                 si = await classify_structured_intent(
                     request.prompt, self._llm, request.history or []
                 )
+                self._complexity_cache[request.prompt] = si.complexity
                 return si.complexity
         except Exception:
+            # Fallback to default
+            return 3
             return 3
 
     def _merge_results(self, results: list[SubtaskResult]) -> str:

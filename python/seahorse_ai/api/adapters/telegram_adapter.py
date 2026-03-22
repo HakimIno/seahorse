@@ -310,6 +310,23 @@ class TelegramAdapter:
                 else:
                     cleaned_history.append(msg)
 
+            # ── Internal Router Fallback Configuration ──
+            from seahorse_ai.core.router import ModelRouter
+            internal_router = ModelRouter(
+                worker_model=os.environ.get(
+                    "SEAHORSE_MODEL_WORKER", "openrouter/z-ai/glm-5-turbo"
+                ),
+                thinker_model=os.environ.get(
+                    "SEAHORSE_MODEL_THINKER", "openrouter/google/gemini-3-flash-preview"
+                ),
+                strategist_model=os.environ.get(
+                    "SEAHORSE_MODEL_STRATEGIST", "openrouter/anthropic/claude-sonnet-4.6"
+                ),
+                fast_path_model=os.environ.get(
+                    "SEAHORSE_FAST_PATH_MODEL", "openrouter/google/gemini-3.1-flash-lite-preview"
+                ),
+            )
+
             # final_prompt represents the text sent to the agent
             final_prompt = text
             if self.system_nudge:
@@ -357,52 +374,37 @@ class TelegramAdapter:
                                 content=data["content"], steps=0, agent_id=agent_id, elapsed_ms=0
                             )
                         else:
-                            logger.info("FastPath: [FALLBACK] or Queued. Using local ReActPlanner.")
-                            from seahorse_ai.planner import ReActPlanner
-                            from seahorse_ai.core.router import ModelRouter
+                            logger.info("FastPath: [FALLBACK] or Queued. Using local HybridOrchestrator.")
+                            from seahorse_ai.planner.hybrid_orchestrator import HybridOrchestrator
+                            from seahorse_ai.skills.library import registry  # Ensure skills are registered
+                            from seahorse_ai.tools.base import SeahorseToolRegistry
+                            
+                            tool_registry = SeahorseToolRegistry()
+                            for t in registry.get_all_tools():
+                                tool_registry.register(t)
 
-                            internal_router = ModelRouter(
-                                worker_model=os.environ.get(
-                                    "SEAHORSE_MODEL_WORKER", "openrouter/z-ai/glm-5-turbo"
-                                ),
-                                thinker_model=os.environ.get(
-                                    "SEAHORSE_MODEL_THINKER", "openrouter/google/gemini-3-flash-preview"
-                                ),
-                                strategist_model=os.environ.get(
-                                    "SEAHORSE_MODEL_STRATEGIST",
-                                    "openrouter/anthropic/claude-sonnet-4.6",
-                                ),
-                                fast_path_model=os.environ.get(
-                                    "SEAHORSE_FAST_PATH_MODEL",
-                                    "openrouter/google/gemini-3.1-flash-lite-preview",
-                                ),
+                            local_planner = HybridOrchestrator(
+                                llm=internal_router, 
+                                tools=tool_registry
                             )
-                            local_planner = ReActPlanner(llm=internal_router)
                             response = await local_planner.run(request)
 
                 except Exception as e:
                     logger.error(
-                        "Failed to connect to Rust Router: %s. Falling back to internal planner…", e
+                        "Failed to connect to Rust Router: %s. Falling back to internal HybridOrchestrator…", e
                     )
-                    from seahorse_ai.planner import ReActPlanner
-                    from seahorse_ai.core.router import ModelRouter
+                    from seahorse_ai.planner.hybrid_orchestrator import HybridOrchestrator
+                    from seahorse_ai.skills.library import registry
+                    from seahorse_ai.tools.base import SeahorseToolRegistry
 
-                    internal_router = ModelRouter(
-                        worker_model=os.environ.get(
-                            "SEAHORSE_MODEL_WORKER", "openrouter/z-ai/glm-5-turbo"
-                        ),
-                        thinker_model=os.environ.get(
-                            "SEAHORSE_MODEL_THINKER", "openrouter/google/gemini-3-flash-preview"
-                        ),
-                        strategist_model=os.environ.get(
-                            "SEAHORSE_MODEL_STRATEGIST", "openrouter/anthropic/claude-sonnet-4.6"
-                        ),
-                        fast_path_model=os.environ.get(
-                            "SEAHORSE_FAST_PATH_MODEL",
-                            "openrouter/google/gemini-3.1-flash-lite-preview",
-                        ),
+                    tool_registry = SeahorseToolRegistry()
+                    for t in registry.get_all_tools():
+                        tool_registry.register(t)
+
+                    local_planner = HybridOrchestrator(
+                        llm=internal_router,
+                        tools=tool_registry
                     )
-                    local_planner = ReActPlanner(llm=internal_router)
                     response = await local_planner.run(request)
                 finally:
                     tg.cancel_scope.cancel()

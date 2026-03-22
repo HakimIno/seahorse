@@ -8,7 +8,16 @@ from seahorse_ai.tools.data.db import database_query, database_schema
 from seahorse_ai.tools.visual.echarts_composer import echarts_composer
 from seahorse_ai.tools.visual.echarts_viz import native_echarts_chart
 from seahorse_ai.tools.business.forecaster import forecast_sales
-from seahorse_ai.tools.internal.memory import memory_search
+from seahorse_ai.tools.internal.memory import memory_search, memory_store
+from seahorse_ai.tools.trading.risk_calculator import calculate_position_size, calculate_risk_of_ruin, evaluate_kelly_criterion
+from seahorse_ai.tools.trading.market_data import (
+    get_futures_live_price, 
+    get_futures_market_depth,
+    get_stock_live_price,
+    get_forex_live_price
+)
+from seahorse_ai.tools.trading.portfolio import get_ibkr_account_summary, get_ibkr_open_positions, place_ibkr_order
+from seahorse_ai.tools.trading.macro_watch import fetch_cme_fedwatch_data, fetch_cot_report
 from seahorse_ai.tools.data.polars_analyst import native_polars_aggregate, polars_query
 from seahorse_ai.tools.visual.table_viz import create_table_image
 from seahorse_ai.tools.visual.viz import create_custom_chart
@@ -110,6 +119,40 @@ bi_analyst_skill = SeahorseSkill(
     ],
 )
 
+# 7. Trading Guardian Skill (Futures & Forex)
+trading_guardian_skill = SeahorseSkill(
+    name="TRADING_GUARDIAN",
+    description="Professional Futures & Forex risk management, market depth analysis, and portfolio tracking.",
+    rules=[
+        "Use `get_ibkr_account_summary` to fetch live account balance before calculating position sizing.",
+        "Always mandate the user to calculate position size before trading. Use `calculate_position_size`.",
+        "To gauge immediate market sentiment, use `get_futures_market_depth` for Order Book (Level 2) analysis.",
+        "For macro trends, always check `fetch_cme_fedwatch_data` and `fetch_cot_report` first.",
+        "If the user wants to risk more than 3% per trade, use `calculate_risk_of_ruin` to demonstrate how fast they will blow up.",
+        "Use `memory_store` to journal the user's trades and emotional state if they share them.",
+        "Be strict about risk management. Act as a guardian of their capital.",
+        "NEVER search the PostgreSQL database for 'IBKR' or 'Portfolio' data. Use the provided IBKR tools instead.",
+        "CRITICAL: NEVER execute a trade using `place_ibkr_order` without first presenting the calculated risk and asking for EXPLICIT user confirmation (e.g., 'Do you want me to place this order?').",
+        "UX RULE: ALWAYS fetch the latest market price using `get_forex_live_price` or `get_stock_live_price` before asking the user for Stop Loss or Take Profit, OR immediately when they provide SL/TP without a current price."
+    ],
+    tools=[
+        calculate_position_size,
+        calculate_risk_of_ruin,
+        evaluate_kelly_criterion,
+        get_futures_live_price,
+        get_futures_market_depth,
+        get_stock_live_price,
+        get_forex_live_price,
+        get_ibkr_account_summary,
+        get_ibkr_open_positions,
+        fetch_cme_fedwatch_data,
+        fetch_cot_report,
+        place_ibkr_order,
+        memory_store,
+        memory_search
+    ],
+)
+
 # Registration
 registry.register(web_research_skill)
 registry.register(database_skill)
@@ -117,3 +160,4 @@ registry.register(analysis_skill)
 registry.register(advanced_analysis_skill)
 registry.register(data_engineering_skill)
 registry.register(bi_analyst_skill)
+registry.register(trading_guardian_skill)
