@@ -7,15 +7,6 @@ from seahorse_ai.tools.data.data_profiler import data_profile
 from seahorse_ai.tools.data.db import database_query, database_schema
 from seahorse_ai.tools.visual.echarts_composer import echarts_composer
 from seahorse_ai.tools.visual.echarts_viz import native_echarts_chart
-from seahorse_ai.tools.football.football_stats import (
-    calculatebetvalue,
-    fetchlivematch,
-    fetchliveodds,
-    geth2hresults,
-    getmatchintel,
-    kellycriterion,
-    predictmatchoutcome,
-)
 from seahorse_ai.tools.business.forecaster import forecast_sales
 from seahorse_ai.tools.internal.memory import memory_search
 from seahorse_ai.tools.data.polars_analyst import native_polars_aggregate, polars_query
@@ -74,30 +65,7 @@ advanced_analysis_skill = SeahorseSkill(
     tools=[polars_query, native_echarts_chart, echarts_composer, create_custom_chart, create_table_image, forecast_sales],
 )
 
-# 5. Football Scout Skill (NEW)
-football_scout_skill = SeahorseSkill(
-    name="Football_Scout",
-    description="Deep analysis and prediction of football matches using statistics and real-time intel.",
-    rules=[
-        "Use `fetchlivematch` and `fetchliveodds` for real-time data instead of web search if possible.",
-        "Use `geth2hresults` to understand historical trends between teams.",
-        "Always call `getmatchintel` to check for injuries or tactical changes before predicting.",
-        "Use `calculatebetvalue` and `kellycriterion` for bankroll management and finding an edge.",
-        "When explaining predictions, cite specific factors like xG and injury reports.",
-    ],
-    tools=[
-        geth2hresults, 
-        getmatchintel, 
-        predictmatchoutcome, 
-        fetchlivematch, 
-        fetchliveodds, 
-        calculatebetvalue, 
-        kellycriterion,
-        web_search
-    ],
-)
-
-# 6. Data Engineering Skill (NEW)
+# 5. Data Engineering Skill
 data_engineering_skill = SeahorseSkill(
     name="Data_Engineering",
     description="Autonomous data transformation, ETL pipeline orchestration, and data quality profiling.",
@@ -107,8 +75,6 @@ data_engineering_skill = SeahorseSkill(
         "Ensure data type consistency across different sources (e.g., aligning CSV schemas with SQL tables).",
         "When loading data to a destination, verify schema compatibility using `database_schema` first.",
         "Clearly document all cleaning steps (e.g., null handling, type casting, or deduplication) performed on the data.",
-        "Prioritize 'Lazy' operations in Polars when dealing with datasets that might exceed memory (Big Data).",
-        "CHART TAG: If asked for a visualization, use `echarts_composer` and include the `ECHART_JSON:/path/to/file.json` string on its own line at the end of your response.",
     ],
     tools=[
         polars_query, 
@@ -123,18 +89,16 @@ data_engineering_skill = SeahorseSkill(
     ],
 )
 
-# 7. BI Analyst Skill (NEW)
+# 6. BI Analyst Skill
 bi_analyst_skill = SeahorseSkill(
     name="BI_Analyst",
     description="Professional data storytelling, advanced visualization, and strategic business reporting.",
     rules=[
-        "SPEED: For Scatter/Bar/Line charts, IMMEDIATELY execute `polars_query` then `echarts_composer`. DO NOT narrate your plan or perform redundant research unless the data is unknown.",
-        "When plotting Scatter charts for large datasets (>1000 rows): Use a representative sample of 2,000 to 5,000 rows. If the dataset exceeds this, prioritize density aggregation (e.g., DuckDB round/group by) to show trends without crashing.",
-        "NEVER 'guess' or 'approximate' statistical values (Correlation, Mean, Max). ALL numbers in your summary MUST match the tool outputs exactly.",
-        "If a tool result is [TRUNCATED], accept the current sample as the source of truth for your summary, but mention that it is a sample of the first X rows.",
-        "CHART TAG: You MUST include the `ECHART_JSON:/path/to/file.json` string on its own line at the end of your response so the system can render it.",
-        "Provide a clear, strategic interpretation of the visual findings in the final response.",
-        "Include a 'title' and 'tooltip' in all ECharts configurations for better user experience.",
+        "SPEED: For Scatter/Bar/Line charts, IMMEDIATELY execute `polars_query` then `echarts_composer`.",
+        "When plotting Scatter charts for large datasets (>1000 rows): Use a representative sample.",
+        "NEVER 'guess' or 'approximate' statistical values. ALL numbers MUST match tool outputs.",
+        "CHART TAG: You MUST include the `ECHART_JSON:/path/to/file.json` string on its own line.",
+        "Provide a clear, strategic interpretation of the visual findings.",
     ],
     tools=[
         echarts_composer,
@@ -151,6 +115,5 @@ registry.register(web_research_skill)
 registry.register(database_skill)
 registry.register(analysis_skill)
 registry.register(advanced_analysis_skill)
-registry.register(football_scout_skill)
 registry.register(data_engineering_skill)
 registry.register(bi_analyst_skill)

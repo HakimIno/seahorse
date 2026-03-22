@@ -118,23 +118,8 @@ class TelegramAdapter:
         )
 
     async def stats_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Handle /stats command to show performance report."""
-        if os.environ.get("SEAHORSE_ENABLE_FOOTBALL") != "true":
-            await update.message.reply_text("⚽ Football stats are currently disabled.")
-            return
-            
-        from seahorse_ai.analysis.football_eval import get_performance_stats
-        
-        chat_id = update.effective_chat.id
-        await context.bot.send_chat_action(chat_id=chat_id, action="typing")
-        
-        report = await get_performance_stats()
-        await self._safe_send_message(
-            context,
-            chat_id,
-            report,
-            parse_mode=ParseMode.MARKDOWN,
-        )
+        """Handle /stats command."""
+        await update.message.reply_text("📊 Business stats are coming soon to this dashboard.")
 
     async def reflect_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle /reflect command to consolidate memory."""
@@ -767,36 +752,8 @@ def main() -> None:
 
     app.add_handler(CallbackQueryHandler(adapter.handle_callback))
 
-    # Optional Football Integration
-    if os.environ.get("SEAHORSE_ENABLE_FOOTBALL") == "true":
-        logger.info("Telegram: Football integration enabled. Starting background tasks...")
-        import asyncio
-        from seahorse_ai.analysis.football_eval import init_eval_db, resolve_pending_predictions
-        from seahorse_ai.analysis.watcher import AnomalyWatcher
-
-        watcher = AnomalyWatcher(llm_backend=router)
-        watcher._notify = adapter.send_proactive_alert
-
-        async def post_init(application: any) -> None:
-            interval = int(os.environ.get("SEAHORSE_ALERTS_INTERVAL", "300"))
-            asyncio.create_task(watcher.start(interval_seconds=interval))
-            asyncio.create_task(init_eval_db())
-            
-            # Phase 2: Result Collector Task (runs every 1 hour)
-            async def result_collector_loop():
-                while True:
-                    try:
-                        await resolve_pending_predictions()
-                    except Exception as e:
-                        logger.error(f"Telegram: Result collector loop error: {e}")
-                    await asyncio.sleep(3600)
-            
-            asyncio.create_task(result_collector_loop())
-            logger.info("Telegram: AnomalyWatcher, FootballEval, and ResultCollector tasks started.")
-
-        app.post_init = post_init
-    else:
-        logger.info("Telegram: Football integration disabled.")
+    # Background Tasks
+    logger.info("Telegram: Starting Seahorse AI application...")
 
     logger.info("Telegram bot starting via run_polling...")
 

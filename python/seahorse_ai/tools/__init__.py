@@ -21,10 +21,6 @@ from seahorse_ai.tools.data.data_connectors import extract_sql_to_parquet, load_
 from seahorse_ai.tools.data.data_profiler import data_profile
 from seahorse_ai.tools.visual.echarts_composer import echarts_composer
 from seahorse_ai.tools.visual.echarts_viz import native_echarts_chart
-from seahorse_ai.tools.business.business_math import (
-    calculate_margin,
-    calculate_promo_impact,
-)
 from seahorse_ai.tools.business.competitor_radar import competitor_radar
 from seahorse_ai.tools.data.db import database_query, database_schema
 from seahorse_ai.tools.data.duckdb_analyst import duckdb_query_json, duckdb_sql, sql_to_polars
@@ -33,18 +29,11 @@ from seahorse_ai.tools.internal.graph_memory import (
     graph_search_neighbors,
     graph_store_triple,
 )
-from seahorse_ai.tools.football.football_stats import (
-    calculatebetvalue,
-    comparemarketodds,
-    fetchlivematch,
-    fetchliveodds,
-    geth2hresults,
-    getmatchintel,
-    getupcomingfixtures,
-    kellycriterion,
-    predictmatchoutcome,
-    searchfixture,
-    searchleague,
+from seahorse_ai.tools.business.financial_engine import (
+    calculate_break_even,
+    calculate_margin,
+    calculate_promo_impact,
+    scenario_analysis,
 )
 from seahorse_ai.tools.business.forecaster import forecast_sales
 from seahorse_ai.tools.system.integrations import (
@@ -102,6 +91,8 @@ __all__ = [
     "database_schema",
     "calculate_promo_impact",
     "calculate_margin",
+    "calculate_break_even",
+    "scenario_analysis",
     "create_custom_chart",
     "create_table_image",
     "forecast_sales",
@@ -113,17 +104,6 @@ __all__ = [
     "duckdb_sql",
     "duckdb_query_json",
     "sql_to_polars",
-    "geth2hresults",
-    "getmatchintel",
-    "getupcomingfixtures",
-    "predictmatchoutcome",
-    "calculatebetvalue",
-    "comparemarketodds",
-    "kellycriterion",
-    "fetchlivematch",
-    "fetchliveodds",
-    "searchfixture",
-    "searchleague",
     "graph_store_triple",
     "graph_search_neighbors",
     "data_profile",
@@ -166,8 +146,10 @@ def make_default_registry() -> SeahorseToolRegistry:
         google_calendar_add_event,
         database_query,
         database_schema,
+        calculate_break_even,
         calculate_promo_impact,
         calculate_margin,
+        scenario_analysis,
         create_custom_chart,
         create_table_image,
         forecast_sales,
@@ -180,17 +162,6 @@ def make_default_registry() -> SeahorseToolRegistry:
         duckdb_query_json,
         sql_to_polars,
         native_echarts_chart,
-        geth2hresults,
-        getmatchintel,
-        getupcomingfixtures,
-        predictmatchoutcome,
-        calculatebetvalue,
-        comparemarketodds,
-        kellycriterion,
-        fetchlivematch,
-        fetchliveodds,
-        searchfixture,
-        searchleague,
         graph_store_triple,
         graph_search_neighbors,
         data_profile,

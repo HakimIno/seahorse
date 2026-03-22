@@ -23,14 +23,7 @@ class ResearchTeam(SeahorseTeam):
     name: str = "RESEARCH"
 
 
-class FootballTeam(SeahorseTeam):
-    """Team specialized in football analytics, match prediction, and scouting."""
-
-    name: str = "FOOTBALL"
-
-
 # Registration
 registry.register(DataTeam())
 registry.register(HRTeam())
 registry.register(ResearchTeam())
-registry.register(FootballTeam())

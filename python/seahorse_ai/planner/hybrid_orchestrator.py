@@ -309,7 +309,6 @@ class HybridOrchestrator:
 
     # ── Helpers ───────────────────────────────────────────────────────────────
 
-    # Keyword map for auto-detecting the best skill from the user prompt.
     _SKILL_KEYWORDS: dict[str, list[str]] = {
         "DATA_ENGINEERING": [
             "etl", "extract", "transform", "load", "parquet", "pipeline",
@@ -319,10 +318,6 @@ class HybridOrchestrator:
             "dashboard", "chart", "graph", "visual", "scatter", "heatmap",
             "radar", "pie", "correlation", "trend", "report", "insight",
             "plot", "show me a", "draw",
-        ],
-        "FOOTBALL_SCOUT": [
-            "football", "match", "fixture", "odds", "bet", "xg",
-            "h2h", "kelly", "league", "goal",
         ],
         "DATABASE_ACCESS": [
             "sql", "query", "database", "table", "select", "join",

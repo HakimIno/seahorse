@@ -14,7 +14,6 @@ from msgspec import Struct
 
 from seahorse_ai.planner.fast_utils import robust_json_load
 from seahorse_ai.planner.handlers.entity import EntityHandler
-from seahorse_ai.planner.handlers.football import FootballHandler
 from seahorse_ai.planner.handlers.polars import PolarsHandler
 from seahorse_ai.planner.handlers.story import StoryHandler
 from seahorse_ai.core.schemas import AgentResponse, Message
@@ -44,7 +43,7 @@ async def classify_structured_intent(
     sys = (
         "Classify user intent. Categories: STORY (complex, professional analysis + narrative), "
         "POLARS (simple data/trends/charts), "
-        "FOOTBALL (match/odds), INTERNAL (codebase), DIRECT (simple facts), GENERAL (chat).\n"
+        "INTERNAL (codebase), DIRECT (simple facts), GENERAL (chat).\n"
         "Return JSON: { \"intent\": \"...\", \"action\": \"...\", \"complexity\": 1-5 }"
     )
     msgs = [Message(role="system", content=sys)]
@@ -74,7 +73,6 @@ class FastPathRouter:
         # Initialize handlers
         self._polars = PolarsHandler(llm_backend, tools)
         self._story = StoryHandler(llm_backend, tools)
-        self._football = FootballHandler(llm_backend, tools)
         self._entity = EntityHandler(llm_backend, tools)
 
     async def try_route(
@@ -88,8 +86,6 @@ class FastPathRouter:
              return await self._story.handle(prompt, history, start_t)
         elif intent == "POLARS":
             return await self._polars.handle(prompt, history, start_t)
-        elif intent == "FOOTBALL":
-            return await self._football.handle(prompt, history, start_t)
         elif intent == "INTERNAL":
             return await self._entity.handle(prompt, history, start_t, intent="internal")
         elif intent == "DIRECT":
