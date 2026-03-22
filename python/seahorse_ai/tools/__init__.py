@@ -8,32 +8,32 @@ tool                   : @tool decorator
 make_default_registry  : returns a registry with all built-in tools registered
 """
 
-from seahorse_ai.tools.auto_architect import auto_architect
-from seahorse_ai.tools.auto_seahorse import execute_auto_seahorse
+from seahorse_ai.tools.internal.auto_architect import auto_architect
+from seahorse_ai.tools.internal.auto_seahorse import execute_auto_seahorse
 from seahorse_ai.tools.base import SeahorseToolRegistry, ToolSpec, tool
-from seahorse_ai.tools.browser import (
+from seahorse_ai.tools.system.browser import (
     browser_close,
     browser_scan,
     browser_scrape,
     browser_screenshot,
 )
-from seahorse_ai.tools.data_connectors import extract_sql_to_parquet, load_to_sql
-from seahorse_ai.tools.data_profiler import data_profile
-from seahorse_ai.tools.echarts_composer import echarts_composer
-from seahorse_ai.tools.echarts_viz import native_echarts_chart
-from seahorse_ai.tools.business_math import (
+from seahorse_ai.tools.data.data_connectors import extract_sql_to_parquet, load_to_sql
+from seahorse_ai.tools.data.data_profiler import data_profile
+from seahorse_ai.tools.visual.echarts_composer import echarts_composer
+from seahorse_ai.tools.visual.echarts_viz import native_echarts_chart
+from seahorse_ai.tools.business.business_math import (
     calculate_margin,
     calculate_promo_impact,
 )
-from seahorse_ai.tools.competitor_radar import competitor_radar
-from seahorse_ai.tools.db import database_query, database_schema
-from seahorse_ai.tools.duckdb_analyst import duckdb_query_json, duckdb_sql, sql_to_polars
-from seahorse_ai.tools.filesystem import list_files, read_file, write_file
-from seahorse_ai.tools.graph_memory import (
+from seahorse_ai.tools.business.competitor_radar import competitor_radar
+from seahorse_ai.tools.data.db import database_query, database_schema
+from seahorse_ai.tools.data.duckdb_analyst import duckdb_query_json, duckdb_sql, sql_to_polars
+from seahorse_ai.tools.system.filesystem import list_files, read_file, write_file
+from seahorse_ai.tools.internal.graph_memory import (
     graph_search_neighbors,
     graph_store_triple,
 )
-from seahorse_ai.tools.football_stats import (
+from seahorse_ai.tools.football.football_stats import (
     calculatebetvalue,
     comparemarketodds,
     fetchlivematch,
@@ -46,31 +46,31 @@ from seahorse_ai.tools.football_stats import (
     searchfixture,
     searchleague,
 )
-from seahorse_ai.tools.forecaster import forecast_sales
-from seahorse_ai.tools.integrations import (
+from seahorse_ai.tools.business.forecaster import forecast_sales
+from seahorse_ai.tools.system.integrations import (
     google_calendar_add_event,
     slack_send_message,
 )
-from seahorse_ai.tools.mcp_client import load_mcp_tools
-from seahorse_ai.tools.memory import (
+from seahorse_ai.tools.system.mcp_client import load_mcp_tools
+from seahorse_ai.tools.internal.memory import (
     memory_clear,
     memory_delete,
     memory_feedback,
     memory_search,
     memory_store,
 )
-from seahorse_ai.tools.polars_analyst import (
+from seahorse_ai.tools.data.polars_analyst import (
     convert_to_parquet,
     native_polars_aggregate,
     polars_inspect_join,
     polars_profile,
     polars_query,
 )
-from seahorse_ai.tools.python_interpreter import python_interpreter
-from seahorse_ai.tools.strategy_engine import war_room
-from seahorse_ai.tools.table_viz import create_table_image
-from seahorse_ai.tools.viz import create_custom_chart
-from seahorse_ai.tools.web_search import web_search
+from seahorse_ai.tools.system.python_interpreter import python_interpreter
+from seahorse_ai.tools.business.strategy_engine import war_room
+from seahorse_ai.tools.visual.table_viz import create_table_image
+from seahorse_ai.tools.visual.viz import create_custom_chart
+from seahorse_ai.tools.system.web_search import web_search
 
 __all__ = [
     "SeahorseToolRegistry",

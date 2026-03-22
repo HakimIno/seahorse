@@ -1,0 +1,28 @@
+financial_analysis_task:
+  description: >-
+    Analyze the available financial and operational data related to {objective}.
+    You MUST identify any anomalies, trends, and use the 'financial_engine' tools to calculate
+    key metrics like break-even points, margins, and growth rates. Do NOT simply state what the data
+    says; you MUST form data-driven hypotheses (e.g. seasonality, specific cost spikes) for WHY metrics changed.
+  expected_output: >-
+    A detailed Root-Cause Analysis report with quantified findings and at least 2 plausible hypotheses for major changes.
+  agent: cfo_analyst
+
+strategy_formulation_task:
+  description: >-
+    Using the root-cause analysis provided, formulate highly specific, actionable strategies for {objective}.
+    STRICTLY AVOID vague terms like "optimize costs" or "negotiate with suppliers". Specify EXACT mechanisms
+    (e.g., volume commitments, term extensions, targeted value-add bundles).
+    Every strategy MUST include a quantifiable benchmark or target KPI.
+  expected_output: >-
+    A list of 2-3 specific strategic initiatives, each with a clear Target KPI and actionable mechanism.
+  agent: cfo_strategist
+
+risk_assessment_task:
+  description: >-
+    Review the proposed strategies from the strategy_formulation_task. ACT AS A DEVIL'S ADVOCATE.
+    Identify the most critical assumptions and vulnerabilities for each strategy.
+    Provide a concrete contingency/fallback plan for the top 2 strategies if the primary plan fails to materialize.
+  expected_output: >-
+    A Risk Management & Fallback Scenarios report detailing the risks and concrete mitigation plans.
+  agent: cfo_critic

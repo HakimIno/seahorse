@@ -5,7 +5,7 @@ import time
 
 import anyio
 
-from seahorse_ai.schemas import Message
+from seahorse_ai.core.schemas import Message
 
 logger = logging.getLogger(__name__)
 
@@ -111,7 +111,7 @@ class MemoryRecorder:
 
         import asyncpg
 
-        from seahorse_ai.tools.memory import get_pipeline
+        from seahorse_ai.tools.internal.memory import get_pipeline
 
         pg_uri = os.environ.get("SEAHORSE_PG_URI")
         if not pg_uri:

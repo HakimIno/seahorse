@@ -24,7 +24,7 @@ from typing import TYPE_CHECKING, Any
 import anyio
 
 if TYPE_CHECKING:
-    from seahorse_ai.schemas import Message
+    from seahorse_ai.core.schemas import Message
 
 logger = logging.getLogger(__name__)
 
@@ -83,7 +83,7 @@ class ReActExecutor:
         agent_id: str | None = None,
     ) -> ExecutorResult:
         """Run the ReAct loop and return an ExecutorResult."""
-        from seahorse_ai.schemas import Message as Msg
+        from seahorse_ai.core.schemas import Message as Msg
 
         wall_start = time.monotonic()
         self._total_obs_chars = 0

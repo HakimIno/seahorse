@@ -8,7 +8,7 @@ from seahorse_ai.planner.fast_utils import robust_json_load
 from seahorse_ai.planner.handlers.base import BaseFastHandler
 from seahorse_ai.planner.handlers.polars import PolarsHandler
 from seahorse_ai.prompts.story import STORY_BOARDING_PROMPT, STORY_SYNTHESIS_PROMPT
-from seahorse_ai.schemas import AgentResponse, Message
+from seahorse_ai.core.schemas import AgentResponse, Message
 
 logger = logging.getLogger(__name__)
 

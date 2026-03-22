@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any
 
 from seahorse_ai.planner.fast_utils import robust_json_load
 from seahorse_ai.planner.handlers.base import BaseFastHandler
-from seahorse_ai.schemas import AgentResponse, Message
+from seahorse_ai.core.schemas import AgentResponse, Message
 
 if TYPE_CHECKING:
     pass

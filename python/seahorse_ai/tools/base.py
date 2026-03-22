@@ -104,8 +104,16 @@ class SeahorseToolRegistry:
             return f"Error: unknown tool '{name}'. Available: {list(self._tools)}"
         fn, spec = self._tools[name]
         
+        # Dependency Injection for nested context
+        sig = inspect.signature(fn)
+        if "_agent_id" in sig.parameters:
+            args["_agent_id"] = agent_id
+        if "_llm" in sig.parameters:
+            from seahorse_ai.core.llm import get_llm
+            args["_llm"] = get_llm("worker")
+
         if spec.risk_level == "high":
-            from seahorse_ai.hitl import approval_manager
+            from seahorse_ai.core.hitl import approval_manager
             logger.warning("Tool '%s' is marked as high-risk. Requesting approval...", name)
             
             # Use provided agent_id, or try to extract from args
@@ -155,7 +163,7 @@ def _json_schema_from_fn(fn: Callable[..., Any]) -> dict[str, Any]:
     _type_map = {str: "string", int: "integer", float: "number", bool: "boolean"}
 
     for name, param in sig.parameters.items():
-        if name == "self":
+        if name == "self" or name.startswith("_"):
             continue
         ann = param.annotation
         json_type = _type_map.get(ann, "string")

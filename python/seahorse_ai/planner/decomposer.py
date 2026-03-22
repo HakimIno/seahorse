@@ -21,7 +21,7 @@ from seahorse_ai.planner.hybrid_schemas import (
     DecompositionGraph,
     SubtaskNode,
 )
-from seahorse_ai.schemas import Message
+from seahorse_ai.core.schemas import Message
 
 logger = logging.getLogger(__name__)
 

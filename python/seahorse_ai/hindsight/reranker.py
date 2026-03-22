@@ -8,8 +8,8 @@ Implements:
 import logging
 from typing import Any
 
-from seahorse_ai.llm import get_llm
-from seahorse_ai.schemas import AgentRole, Message
+from seahorse_ai.core.llm import get_llm
+from seahorse_ai.core.schemas import AgentRole, Message
 
 logger = logging.getLogger(__name__)
 

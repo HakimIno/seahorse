@@ -39,7 +39,7 @@ from seahorse_ai.planner.hybrid_schemas import (
 )
 from seahorse_ai.planner.session_memory import SessionMemory
 from seahorse_ai.prompts import build_system_prompt
-from seahorse_ai.schemas import AgentRequest, AgentResponse, Message
+from seahorse_ai.core.schemas import AgentRequest, AgentResponse, Message
 
 logger = logging.getLogger(__name__)
 

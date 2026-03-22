@@ -2,7 +2,7 @@ import logging
 import json
 from datetime import datetime
 from typing import Any
-from seahorse_ai.graph_db import GraphManager
+from seahorse_ai.engines.graph_db import GraphManager
 
 logger = logging.getLogger(__name__)
 

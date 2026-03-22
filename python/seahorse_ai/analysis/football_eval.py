@@ -426,7 +426,7 @@ async def resolve_pending_predictions() -> None:
     """Fetch results for pending matches and update their outcomes."""
     import json
 
-    from seahorse_ai.tools.football_stats import fetchlivematch
+    from seahorse_ai.tools.football.football_stats import fetchlivematch
 
     pool = await _get_pool()
     if not pool:

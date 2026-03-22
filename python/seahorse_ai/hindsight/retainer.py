@@ -13,9 +13,9 @@ import random
 from datetime import datetime, timedelta, UTC
 from typing import Any
 
-from seahorse_ai.llm import get_llm
-from seahorse_ai.schemas import Message
-from seahorse_ai.graph_db import GraphManager
+from seahorse_ai.core.llm import get_llm
+from seahorse_ai.core.schemas import Message
+from seahorse_ai.engines.graph_db import GraphManager
 from .models import HindsightRecord, MemoryCategory, Entity, Relation
 
 logger = logging.getLogger(__name__)

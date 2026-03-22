@@ -32,7 +32,7 @@ from typing import Any, Protocol, runtime_checkable
 
 import anyio
 
-from seahorse_ai.observability import get_tracer, setup_telemetry
+from seahorse_ai.core.observability import get_tracer, setup_telemetry
 from seahorse_ai.planner.circuit_breaker import CircuitBreaker
 from seahorse_ai.planner.executor import ExecutorConfig, ReActExecutor
 from seahorse_ai.planner.fast_path import (
@@ -46,7 +46,7 @@ from seahorse_ai.prompts import (
     REALTIME_NUDGE,
     build_system_prompt,
 )
-from seahorse_ai.schemas import AgentRequest, AgentResponse, Message
+from seahorse_ai.core.schemas import AgentRequest, AgentResponse, Message
 from seahorse_ai.skills.base import SeahorseSkill
 
 logger = logging.getLogger(__name__)

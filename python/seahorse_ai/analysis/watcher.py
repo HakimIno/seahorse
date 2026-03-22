@@ -9,9 +9,9 @@ import os
 
 import asyncpg
 
-from seahorse_ai.schemas import Message
-from seahorse_ai.tools.forecaster import forecast_sales
-from seahorse_ai.tools.viz import create_custom_chart
+from seahorse_ai.core.schemas import Message
+from seahorse_ai.tools.business.forecaster import forecast_sales
+from seahorse_ai.tools.visual.viz import create_custom_chart
 
 logger = logging.getLogger(__name__)
 

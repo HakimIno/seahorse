@@ -17,10 +17,10 @@ from seahorse_ai.planner.handlers.entity import EntityHandler
 from seahorse_ai.planner.handlers.football import FootballHandler
 from seahorse_ai.planner.handlers.polars import PolarsHandler
 from seahorse_ai.planner.handlers.story import StoryHandler
-from seahorse_ai.schemas import AgentResponse, Message
+from seahorse_ai.core.schemas import AgentResponse, Message
 
 if TYPE_CHECKING:
-    from seahorse_ai.router import ModelRouter
+    from seahorse_ai.core.router import ModelRouter
     from seahorse_ai.tools.base import ToolRegistry
 
 logger = logging.getLogger(__name__)

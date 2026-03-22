@@ -5,7 +5,7 @@ import logging
 import os
 
 import httpx
-from seahorse_ai.tools.football_stats import (
+from seahorse_ai.tools.football.football_stats import (
     fetchliveodds,
     getmatchintel,
     getupcomingfixtures,

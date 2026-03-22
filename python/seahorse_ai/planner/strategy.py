@@ -16,7 +16,7 @@ import logging
 import time
 
 from seahorse_ai.prompts import STRATEGY_GENERATION_PROMPT, STRATEGY_NUDGE
-from seahorse_ai.schemas import Message
+from seahorse_ai.core.schemas import Message
 
 logger = logging.getLogger(__name__)
 

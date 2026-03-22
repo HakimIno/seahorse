@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import logging
 
-from seahorse_ai.schemas import AgentResponse, Message
+from seahorse_ai.core.schemas import AgentResponse, Message
 
 logger = logging.getLogger(__name__)
 

@@ -15,8 +15,8 @@ import math
 from datetime import UTC, datetime
 from typing import Any
 
-from seahorse_ai.graph_db import GraphManager
-from seahorse_ai.schemas import AgentRole
+from seahorse_ai.engines.graph_db import GraphManager
+from seahorse_ai.core.schemas import AgentRole
 from seahorse_ai.hindsight.reranker import HindsightReranker
 
 logger = logging.getLogger(__name__)
@@ -73,8 +73,8 @@ class HindsightRecaller:
 
     async def think(self, query: str, context: list[dict[str, Any]]) -> str:
         """Priority 3: Synthesis Layer. Uses a 'thinker' model to answer the query based on retrieved context."""
-        from seahorse_ai.llm import get_llm
-        from seahorse_ai.schemas import Message
+        from seahorse_ai.core.llm import get_llm
+        from seahorse_ai.core.schemas import Message
         
         if not context:
             return "No relevant memories found to answer this query."
@@ -171,8 +171,8 @@ Answer:"""
 
     async def _extract_entities_from_query(self, query: str) -> list[str]:
         """Use a lightweight LLM call to extract canonical entities from the query."""
-        from seahorse_ai.llm import get_llm
-        from seahorse_ai.schemas import Message
+        from seahorse_ai.core.llm import get_llm
+        from seahorse_ai.core.schemas import Message
 
         prompt = f"""Extract proper nouns (Names, Projects, Organizations) from this query. 
 Return ONLY a comma-separated list of entities. Example: James Chen, Project Orion.

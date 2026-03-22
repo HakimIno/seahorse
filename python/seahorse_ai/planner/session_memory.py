@@ -12,7 +12,7 @@ Tier 2 — Structured KV (per-session, persist across iterations)
     ``get_delta()`` for injecting only *what changed* since the last read.
 
 Tier 3 — HNSW Vector (cross-session, long-term)
-    Delegates to the existing ``seahorse_ai.tools.memory`` RAG pipeline or
+    Delegates to the existing ``seahorse_ai.tools.internal.memory`` RAG pipeline or
     the Rust-backed ``AgentMemory`` via FFI.  Only used for ``search()``
     before a replan to retrieve relevant past lessons.
 

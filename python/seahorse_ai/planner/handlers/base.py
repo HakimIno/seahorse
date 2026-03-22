@@ -2,10 +2,10 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from seahorse_ai.schemas import AgentResponse, Message
+from seahorse_ai.core.schemas import AgentResponse, Message
 
 if TYPE_CHECKING:
-    from seahorse_ai.router import ModelRouter
+    from seahorse_ai.core.router import ModelRouter
     from seahorse_ai.tools.base import ToolRegistry
 
 class BaseFastHandler:

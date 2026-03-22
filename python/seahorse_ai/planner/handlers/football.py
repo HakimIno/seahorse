@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Any
 
 from seahorse_ai.planner.fast_utils import robust_json_load
 from seahorse_ai.planner.handlers.base import BaseFastHandler
-from seahorse_ai.schemas import AgentResponse, Message
+from seahorse_ai.core.schemas import AgentResponse, Message
 
 if TYPE_CHECKING:
     pass
@@ -68,7 +68,7 @@ class FootballHandler(BaseFastHandler):
 
             targets = self._select_targets(fixtures, leagues_req, countries_req, is_ranking)
             
-            from seahorse_ai.tools.football_stats import getsportkey
+            from seahorse_ai.tools.football.football_stats import getsportkey
             league_for_odds = leagues_req[0] if leagues_req else (targets[0].get("league", "") if targets else "")
             sport_key = getsportkey(league_for_odds) if league_for_odds else None
 

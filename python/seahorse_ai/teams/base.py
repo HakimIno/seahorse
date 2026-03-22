@@ -10,7 +10,7 @@ import yaml
 
 from seahorse_ai.planner import LLMBackend, ReActPlanner
 from seahorse_ai.skills.base import registry as skill_registry
-from seahorse_ai.swarm import CrewAgent, SeahorseTask
+from seahorse_ai.engines.swarm import CrewAgent, SeahorseTask
 from seahorse_ai.tools import make_default_registry
 from seahorse_ai.tools.base import SeahorseToolRegistry
 

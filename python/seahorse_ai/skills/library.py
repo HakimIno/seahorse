@@ -1,13 +1,13 @@
 """Library of core SeahorseSkills."""
 
 from seahorse_ai.skills.base import SeahorseSkill, registry
-from seahorse_ai.tools.browser import browser_scan
-from seahorse_ai.tools.data_connectors import extract_sql_to_parquet, load_to_sql
-from seahorse_ai.tools.data_profiler import data_profile
-from seahorse_ai.tools.db import database_query, database_schema
-from seahorse_ai.tools.echarts_composer import echarts_composer
-from seahorse_ai.tools.echarts_viz import native_echarts_chart
-from seahorse_ai.tools.football_stats import (
+from seahorse_ai.tools.system.browser import browser_scan
+from seahorse_ai.tools.data.data_connectors import extract_sql_to_parquet, load_to_sql
+from seahorse_ai.tools.data.data_profiler import data_profile
+from seahorse_ai.tools.data.db import database_query, database_schema
+from seahorse_ai.tools.visual.echarts_composer import echarts_composer
+from seahorse_ai.tools.visual.echarts_viz import native_echarts_chart
+from seahorse_ai.tools.football.football_stats import (
     calculatebetvalue,
     fetchlivematch,
     fetchliveodds,
@@ -16,12 +16,12 @@ from seahorse_ai.tools.football_stats import (
     kellycriterion,
     predictmatchoutcome,
 )
-from seahorse_ai.tools.forecaster import forecast_sales
-from seahorse_ai.tools.memory import memory_search
-from seahorse_ai.tools.polars_analyst import native_polars_aggregate, polars_query
-from seahorse_ai.tools.table_viz import create_table_image
-from seahorse_ai.tools.viz import create_custom_chart
-from seahorse_ai.tools.web_search import web_search
+from seahorse_ai.tools.business.forecaster import forecast_sales
+from seahorse_ai.tools.internal.memory import memory_search
+from seahorse_ai.tools.data.polars_analyst import native_polars_aggregate, polars_query
+from seahorse_ai.tools.visual.table_viz import create_table_image
+from seahorse_ai.tools.visual.viz import create_custom_chart
+from seahorse_ai.tools.system.web_search import web_search
 
 # 1. Web Research Skill
 web_research_skill = SeahorseSkill(
