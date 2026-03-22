@@ -14,6 +14,7 @@ logger = logging.getLogger(__name__)
 
 _manager = None
 
+
 def get_manager() -> GraphManager:
     global _manager
     if _manager is None:
@@ -30,7 +31,7 @@ async def graph_store_triple(subject: str, predicate: str, object_entity: str) -
     """Upsert two nodes and create a directed relationship between them."""
     manager = get_manager()
     await manager.add_relationship(subject, object_entity, predicate)
-    
+
     logger.info("graph_store: (%s)--[%s]-->(%s)", subject, predicate, object_entity)
     return f"Successfully stored graph relationship: ({subject}) {predicate} ({object_entity})"
 

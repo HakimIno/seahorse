@@ -42,6 +42,7 @@ Rules for Insights:
 JSON Output:
 """
 
+
 class MemoryReflector:
     def __init__(self, agent_id: str | None = None) -> None:
         self.agent_id = agent_id
@@ -52,34 +53,38 @@ class MemoryReflector:
         # 1. Fetch recent or random memories to reflect upon
         # In a real Hindsight system, we might query Neo4j for clusters.
         # For this implementation, we search for broad terms or take recent ones.
-        memories = await pipeline.search("", k=k, filter_metadata={"agent_id": self.agent_id} if self.agent_id else None)
-        
+        memories = await pipeline.search(
+            "", k=k, filter_metadata={"agent_id": self.agent_id} if self.agent_id else None
+        )
+
         if len(memories) < 3:
             return {"status": "skipped", "reason": "Not enough memories to reflect"}
 
-        facts_text = "\n".join([f"ID: {m.get('id', m.get('doc_id'))} | Fact: {m['text']}" for m in memories])
-        
+        facts_text = "\n".join(
+            [f"ID: {m.get('id', m.get('doc_id'))} | Fact: {m['text']}" for m in memories]
+        )
+
         prompt = _REFLECT_PROMPT.format(facts_text=facts_text)
-        
+
         try:
             result = await self.llm.complete([Message(role="user", content=prompt)], tier="worker")
             raw = str(result.get("content", result) if isinstance(result, dict) else result).strip()
-            
+
             # Simple extractor for JSON from markdown blocks
             if "```json" in raw:
                 raw = raw.split("```json")[1].split("```")[0].strip()
             elif "```" in raw:
                 raw = raw.split("```")[1].split("```")[0].strip()
-            
+
             data = json.loads(raw)
-            
+
             insights = data.get("insights", [])
             to_delete = data.get("to_delete_ids", [])
-            
+
             # Apply deletions
             for pid in to_delete:
                 # We need a delete_by_id in the pipeline
-                if hasattr(pipeline, 'delete_by_id'):
+                if hasattr(pipeline, "delete_by_id"):
                     await pipeline.delete_by_id(pid)
                 else:
                     # Fallback or log
@@ -89,20 +94,20 @@ class MemoryReflector:
             stored_count = 0
             for insight in insights:
                 await pipeline.store(
-                    insight["text"], 
+                    insight["text"],
                     metadata={
-                        "agent_id": self.agent_id, 
-                        "fact_type": "INSIGHT", 
+                        "agent_id": self.agent_id,
+                        "fact_type": "INSIGHT",
                         "importance": insight.get("importance", 4),
-                        "source": "reflection"
-                    }
+                        "source": "reflection",
+                    },
                 )
                 stored_count += 1
-                
+
             return {
                 "status": "success",
                 "insights_created": stored_count,
-                "memories_deleted": len(to_delete)
+                "memories_deleted": len(to_delete),
             }
 
         except Exception as e:

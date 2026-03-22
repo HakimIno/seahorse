@@ -16,6 +16,7 @@ logger = logging.getLogger(__name__)
 CHART_DIR = "/tmp/seahorse_charts"
 os.makedirs(CHART_DIR, exist_ok=True)
 
+
 @tool(
     "Generate a PREMIUM, high-fidelity image of a data table from JSON. "
     "Use this for datasets with more than 3 rows or columns to ensure beautiful aesthetics in Telegram. "
@@ -34,8 +35,8 @@ async def create_table_image(
         # 1. Parse Data
         data = json.loads(data_json)
         if not isinstance(data, list) or not data:
-             return "Error: data_json must be a non-empty list of dictionaries."
-        
+            return "Error: data_json must be a non-empty list of dictionaries."
+
         headers = list(data[0].keys())
 
         # 2. Build Premium HTML/CSS Template
@@ -124,10 +125,7 @@ async def create_table_image(
             f.write(html_content)
 
         # 3. Render via Playwright
-        await browser_screenshot(
-            url=f"file://{os.path.abspath(temp_html)}",
-            output_path=filepath
-        )
+        await browser_screenshot(url=f"file://{os.path.abspath(temp_html)}", output_path=filepath)
 
         if os.path.exists(temp_html):
             os.remove(temp_html)

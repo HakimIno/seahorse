@@ -71,9 +71,7 @@ async def scenario_analysis(
     variance_pct: float,
 ) -> dict[str, Any]:
     """Calculates best, base, and worst case scenarios with clamped growth and structured return."""
-    logger.info(
-        "scenario_analysis: base_rev=%f, growth=%f", base_revenue, expected_growth_rate
-    )
+    logger.info("scenario_analysis: base_rev=%f, growth=%f", base_revenue, expected_growth_rate)
 
     try:
         # Base Case
@@ -92,13 +90,13 @@ async def scenario_analysis(
 
         formatted = (
             f"### Scenario Analysis Outlook (THB)\n\n"
-            f"**Best Case Scenario (+{variance_pct*100:g}% variance):**\n"
+            f"**Best Case Scenario (+{variance_pct * 100:g}% variance):**\n"
             f"- Projected Revenue: {best_proj_rev:,.2f}\n"
             f"- Projected Profit: {best_proj_profit:,.2f}\n\n"
             f"**Base Case Scenario:**\n"
             f"- Projected Revenue: {base_proj_rev:,.2f}\n"
             f"- Projected Profit: {base_proj_profit:,.2f}\n\n"
-            f"**Worst Case Scenario ({worst_growth*100:g}% growth):**\n"
+            f"**Worst Case Scenario ({worst_growth * 100:g}% growth):**\n"
             f"- Projected Revenue: {worst_proj_rev:,.2f}\n"
             f"- Projected Profit: {worst_proj_profit:,.2f}\n\n"
             f"*Ensure fallback strategies address the worst-case scenario profit gap.*"

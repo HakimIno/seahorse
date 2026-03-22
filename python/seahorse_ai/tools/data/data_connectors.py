@@ -4,9 +4,10 @@ import logging
 import os
 import re
 
-import polars as pl
 import aiosqlite
 import asyncpg
+import polars as pl
+
 from seahorse_ai.tools.base import tool
 
 logger = logging.getLogger(__name__)
@@ -40,6 +41,7 @@ def _validate_table_name(name: str) -> str | None:
 async def extract_sql_to_parquet(table_name: str, output_path: str) -> str:
     """ETL: Extract from SQL -> Parquet."""
     from seahorse_ai.tools.data.polars_analyst import _resolve_path
+
     output_path = _resolve_path(output_path)
 
     # ── Security: Validate table name ─────────────────────────────────────
@@ -95,6 +97,7 @@ async def extract_sql_to_parquet(table_name: str, output_path: str) -> str:
 async def load_to_sql(source_path: str, table_name: str, if_exists: str = "append") -> str:
     """ETL: Load from File -> SQL."""
     from seahorse_ai.tools.data.polars_analyst import _resolve_path
+
     source_path = _resolve_path(source_path)
 
     # ── Security: Validate table name ─────────────────────────────────────
@@ -133,7 +136,7 @@ async def load_to_sql(source_path: str, table_name: str, if_exists: str = "appen
                     await conn.execute(f"DROP TABLE IF EXISTS {table_name}")  # noqa: S608
 
                 column_names = ", ".join(cols)
-                placeholder = ", ".join([f"${i+1}" for i in range(len(cols))])
+                placeholder = ", ".join([f"${i + 1}" for i in range(len(cols))])
                 query = f"INSERT INTO {table_name} ({column_names}) VALUES ({placeholder})"  # noqa: S608
 
                 await conn.executemany(query, [tuple(r.values()) for r in records])

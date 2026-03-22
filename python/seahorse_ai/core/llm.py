@@ -22,17 +22,17 @@ from seahorse_ai.core.schemas import LLMConfig, Message
 logger = logging.getLogger(__name__)
 
 # Register common models to suppress LiteLLM mapping warnings and provide metadata
-litellm.register_model({
-    "openrouter/baai/bge-m3": {
-        "max_tokens": 8192,
-        "input_cost_per_token": 0.00000001,
-        "output_cost_per_token": 0.00000001,
-        "lite_llm_model_name": "baai/bge-m3",
-        "model_info": {
-            "db_model": False
+litellm.register_model(
+    {
+        "openrouter/baai/bge-m3": {
+            "max_tokens": 8192,
+            "input_cost_per_token": 0.00000001,
+            "output_cost_per_token": 0.00000001,
+            "lite_llm_model_name": "baai/bge-m3",
+            "model_info": {"db_model": False},
         }
     }
-})
+)
 
 # Transient errors that are safe to retry
 _RETRYABLE = (
@@ -184,32 +184,36 @@ class LLMClient:
         """Sanitize message list for picky providers (Gemini/GLM)."""
         if not messages:
             return []
-        
+
         cleaned = []
         for m in messages:
             built = msgspec.to_builtins(m)
-            
+
             # Preserve message if it has content OR tool_calls
             has_content = bool(built.get("content"))
             has_tools = bool(built.get("tool_calls"))
             has_tool_id = bool(built.get("tool_call_id"))
-            
+
             if not (has_content or has_tools or has_tool_id):
                 continue
-            
+
             # Gemini-specific: Ensure content is never None if tool_calls are present
             if has_tools and not built.get("content"):
                 built["content"] = ""
 
-            if cleaned and cleaned[-1]["role"] == built["role"] and built["role"] in ("user", "system"):
-                # Merge consecutive roles for user/system only. 
+            if (
+                cleaned
+                and cleaned[-1]["role"] == built["role"]
+                and built["role"] in ("user", "system")
+            ):
+                # Merge consecutive roles for user/system only.
                 # Assistant/Tool roles should NOT be merged if they have tool_calls/ids.
                 if not (has_tools or has_tool_id or cleaned[-1].get("tool_calls")):
                     cleaned[-1]["content"] += f"\n\n{built['content']}"
                     continue
-            
+
             cleaned.append(built)
-        
+
         return cleaned
 
 
@@ -220,14 +224,13 @@ def get_llm(tier: str = "worker") -> LLMClient:
     - SEAHORSE_WORKER_MODEL
     - SEAHORSE_THINKER_MODEL
     """
-    import os
 
     from seahorse_ai.core.schemas import LLMConfig
 
     # Use environment variables if available, otherwise defaults
     config = LLMConfig()
     model = config.model
-    
+
     if tier == "thinker":
         model = config.thinker_model
     elif tier == "fast":

@@ -19,6 +19,7 @@ import json
 import logging
 
 import msgspec
+
 from seahorse_ai.core.schemas import Message
 
 logger = logging.getLogger(__name__)
@@ -87,13 +88,20 @@ class SeahorseGraphManager:
     def get_router(cls) -> ModelRouter:
         if cls._router is None:
             import os
+
             from seahorse_ai.core.router import ModelRouter
 
             cls._router = ModelRouter(
                 worker_model=os.getenv("SEAHORSE_MODEL_WORKER", "openrouter/z-ai/glm-5-turbo"),
-                thinker_model=os.getenv("SEAHORSE_MODEL_THINKER", "openrouter/google/gemini-3-flash-preview"),
-                strategist_model=os.getenv("SEAHORSE_MODEL_STRATEGIST", "openrouter/anthropic/claude-sonnet-4.6"),
-                fast_path_model=os.getenv("SEAHORSE_MODEL_FAST", "openrouter/google/gemini-3.1-flash-lite-preview"),
+                thinker_model=os.getenv(
+                    "SEAHORSE_MODEL_THINKER", "openrouter/google/gemini-3-flash-preview"
+                ),
+                strategist_model=os.getenv(
+                    "SEAHORSE_MODEL_STRATEGIST", "openrouter/anthropic/claude-sonnet-4.6"
+                ),
+                fast_path_model=os.getenv(
+                    "SEAHORSE_MODEL_FAST", "openrouter/google/gemini-3.1-flash-lite-preview"
+                ),
             )
         return cls._router
 
@@ -114,6 +122,7 @@ def reason_node(state_json: str) -> str:
     """
     import asyncio
     import os
+
     state = json.loads(state_json)
     msgs_data = state.get("messages", [])
     messages = _deserialize_messages(msgs_data)
@@ -123,19 +132,24 @@ def reason_node(state_json: str) -> str:
     has_system = any(m.role == "system" for m in messages)
     if not has_system:
         from seahorse_ai.prompts.core import build_system_prompt
+
         # Default to DATABASE intent for autonomous tasks to trigger deeper reasoning
-        sys_prompt = build_system_prompt(intent="DATABASE") 
-        
+        sys_prompt = build_system_prompt(intent="DATABASE")
+
         # Dynamic Context: List files in workspace
         workspace_dir = "workspace"
         files_hint = ""
         if os.path.exists(workspace_dir):
-            files = [f for f in os.listdir(workspace_dir) if f.endswith(('.parquet', '.csv', '.json', '.ndjson'))]
+            files = [
+                f
+                for f in os.listdir(workspace_dir)
+                if f.endswith((".parquet", ".csv", ".json", ".ndjson"))
+            ]
             if files:
                 files_hint = "\n\n## Available Workfiles (in `workspace/`):"
                 for f in files:
                     files_hint += f"\n- `{f}`"
-        
+
         sys_prompt += files_hint
         sys_prompt += "\n\n## Strict Rules:\n- The `python_interpreter` CANNOT import `polars` or `pandas`. Use `polars_query` for ALL data analysis."
         sys_prompt += "\n- DATA VOLUME: If a dataset is very large, ALWAYS use `df.sample(n=5000)` for Scatter plots and visualizations. Do NOT refuse to generate charts. Just sample the data."
@@ -155,18 +169,18 @@ def reason_node(state_json: str) -> str:
 
     try:
         response_dict = asyncio.run(_call_llm())
-        
+
         # Filter response_dict to only include fields allowed by the Message schema.
         # LiteLLM sometimes leaks extra fields like 'provider_specific_fields'.
         allowed_fields = {"role", "content", "tool_calls", "name", "tool_call_id"}
         filtered_response = {k: v for k, v in response_dict.items() if k in allowed_fields}
-        
+
         if "role" not in filtered_response:
             filtered_response["role"] = "assistant"
-        
+
         # Check for tool_calls
         has_tools = bool(filtered_response.get("tool_calls"))
-        
+
         if has_tools:
             state["next_step"] = "action"
         else:
@@ -182,20 +196,22 @@ def reason_node(state_json: str) -> str:
             messages.append(Message(role="system", content=synth_prompt))
             synth_resp = asyncio.run(router.complete(messages, tier="strategist"))
             if isinstance(synth_resp, dict):
-                filtered_response["content"] = synth_resp.get("content", filtered_response.get("content", ""))
+                filtered_response["content"] = synth_resp.get(
+                    "content", filtered_response.get("content", "")
+                )
             else:
                 filtered_response["content"] = str(synth_resp)
-            
+
             state["next_step"] = "end"
-        
+
         # Append to message history
         new_msg = Message(**filtered_response)
         messages.append(new_msg)
         state["messages"] = _serialize_messages(messages)
-        
+
         logger.info("nodes.reason_node: tier=%s state=%s", tier, state["next_step"])
         return json.dumps(state)
-        
+
     except Exception as e:
         logger.error("nodes.reason_node failed: %s", e)
         # Fallback to simple error message in state
@@ -208,6 +224,7 @@ def reason_node(state_json: str) -> str:
 def action_node(state_json: str) -> str:
     """Production Action node: Executes real tools via ToolRegistry."""
     import asyncio
+
     state = json.loads(state_json)
     msgs_data = state.get("messages", [])
     messages = _deserialize_messages(msgs_data)
@@ -236,10 +253,14 @@ def action_node(state_json: str) -> str:
                 logger.info("nodes.action_node: calling tool=%s args=%s", name, args)
                 result = await registry.call(name, args, agent_id=agent_id)
                 logger.info("nodes.action_node: tool=%s result_len=%d", name, len(result))
-                obs_msgs.append(Message(role="tool", content=result, tool_call_id=call_id, name=name))
+                obs_msgs.append(
+                    Message(role="tool", content=result, tool_call_id=call_id, name=name)
+                )
             except Exception as e:
                 logger.error("nodes.action_node: tool=%s failed: %s", name, e)
-                obs_msgs.append(Message(role="tool", content=f"Error: {e}", tool_call_id=call_id, name=name))
+                obs_msgs.append(
+                    Message(role="tool", content=f"Error: {e}", tool_call_id=call_id, name=name)
+                )
         return obs_msgs
 
     try:

@@ -21,10 +21,11 @@ standalone batch job for offline document ingestion.
 from __future__ import annotations
 
 import argparse
-import anyio
 import logging
 import sys
 from pathlib import Path
+
+import anyio
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s  %(message)s")
 logger = logging.getLogger(__name__)
@@ -73,4 +74,5 @@ if __name__ == "__main__":
         sys.exit(1)
 
     import anyio
+
     sys.exit(anyio.run(main, args.source))

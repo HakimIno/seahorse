@@ -1,10 +1,11 @@
-import logging
 import json
+import logging
 from datetime import datetime
-from typing import Any
+
 from seahorse_ai.engines.graph_db import GraphManager
 
 logger = logging.getLogger(__name__)
+
 
 class HindsightVisualizer:
     def __init__(self):
@@ -15,28 +16,28 @@ class HindsightVisualizer:
         rels = await self.graph.get_all_relationships()
         if not rels:
             return "graph TD\n  EmptyGraph[Knowledge Graph is Empty]"
-        
+
         lines = ["graph TD"]
         # Use descriptive styles
         lines.append("  classDef person fill:#f9f,stroke:#333,stroke-width:4px;")
         lines.append("  classDef entity fill:#bbf,stroke:#333,stroke-width:2px;")
-        
+
         seen_edges = set()
-        
+
         for r in rels:
-            src = r['source'].replace(" ", "_").replace("-", "_")
-            tgt = r['target'].replace(" ", "_").replace("-", "_")
-            rel = r['relationship']
-            
+            src = r["source"].replace(" ", "_").replace("-", "_")
+            tgt = r["target"].replace(" ", "_").replace("-", "_")
+            rel = r["relationship"]
+
             edge = f"  {src}({r['source']}) -->|{rel}| {tgt}({r['target']})"
             if edge not in seen_edges:
                 lines.append(edge)
                 seen_edges.add(edge)
-                
+
             # Apply styles
-            if r['source_type'] == 'PERSON':
+            if r["source_type"] == "PERSON":
                 lines.append(f"  class {src} person")
-            if r['target_type'] == 'PERSON':
+            if r["target_type"] == "PERSON":
                 lines.append(f"  class {tgt} person")
 
         return "\n".join(lines)
@@ -46,31 +47,23 @@ class HindsightVisualizer:
         rels = await self.graph.get_all_relationships()
         nodes = {}
         links = []
-        
+
         for r in rels:
-            s = r['source']
-            o = r['target']
+            s = r["source"]
+            o = r["target"]
             if s not in nodes:
-                nodes[s] = {"id": s, "group": 1, "type": r['source_type']}
+                nodes[s] = {"id": s, "group": 1, "type": r["source_type"]}
             if o not in nodes:
-                nodes[o] = {"id": o, "group": 2, "type": r['target_type']}
-            
-            links.append({
-                "source": s,
-                "target": o,
-                "value": 1,
-                "label": r['relationship']
-            })
-            
-        return json.dumps({
-            "nodes": list(nodes.values()),
-            "links": links
-        }, indent=2)
+                nodes[o] = {"id": o, "group": 2, "type": r["target_type"]}
+
+            links.append({"source": s, "target": o, "value": 1, "label": r["relationship"]})
+
+        return json.dumps({"nodes": list(nodes.values()), "links": links}, indent=2)
 
     async def generate_academic_ui(self, title: str = "Hindsight Knowledge Graph") -> str:
         """Generate a standalone HTML file with professional academic styling."""
         d3_json = await self.generate_d3_json()
-        
+
         html_template = f"""<!DOCTYPE html>
 <html lang="en">
 <head>

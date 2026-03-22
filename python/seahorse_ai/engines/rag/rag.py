@@ -48,6 +48,7 @@ def get_pipeline() -> RAGPipeline:
             _pipeline = RAGPipeline()
     return _pipeline
 
+
 # Embedding model + dimensionality — configurable via env vars
 # Default uses OpenRouter so the same OPENROUTER_API_KEY works for both chat + embeddings
 _EMBED_MODEL = os.environ.get(
@@ -119,7 +120,7 @@ class RAGPipeline:
                 self._next_id += 1
 
             embedding = await self._embed(text)
-            
+
             meta = metadata.copy() if metadata else {}
             if agent_id:
                 meta["agent_id"] = agent_id
@@ -163,34 +164,39 @@ class RAGPipeline:
             # 1. Primary Vector Search
             vector_results: list[dict] = []
             top_candidate_k = k * 4
-            
+
             if self._use_rust and self._memory is not None:
                 import seahorse_ffi
+
                 raw = seahorse_ffi.search_memory(self._memory, embedding.tobytes(), top_candidate_k)
                 for doc_id, dist, meta_json, text in raw:
                     try:
                         meta = json.loads(meta_json) if meta_json else {}
                     except Exception:
                         meta = {}
-                    vector_results.append({
-                        "text": text,
-                        "metadata": meta,
-                        "distance": dist,
-                        "id": doc_id,
-                        "doc_id": doc_id,
-                    })
+                    vector_results.append(
+                        {
+                            "text": text,
+                            "metadata": meta,
+                            "distance": dist,
+                            "id": doc_id,
+                            "doc_id": doc_id,
+                        }
+                    )
             else:
                 # Python fallback (vector calculation)
                 for vid, vec in self._vectors.items():
                     norm = float(np.linalg.norm(embedding) * np.linalg.norm(vec) + 1e-9)
                     cos = float(np.dot(embedding, vec)) / norm
-                    vector_results.append({
-                        "text": self._texts[vid]["text"],
-                        "metadata": self._texts[vid]["metadata"],
-                        "distance": 1.0 - cos,
-                        "id": vid,
-                        "doc_id": vid,
-                    })
+                    vector_results.append(
+                        {
+                            "text": self._texts[vid]["text"],
+                            "metadata": self._texts[vid]["metadata"],
+                            "distance": 1.0 - cos,
+                            "id": vid,
+                            "doc_id": vid,
+                        }
+                    )
                 vector_results.sort(key=lambda x: x["distance"])
                 vector_results = vector_results[:top_candidate_k]
 
@@ -198,13 +204,15 @@ class RAGPipeline:
             results = vector_results
             if filter_metadata:
                 results = [
-                    r for r in results 
+                    r
+                    for r in results
                     if all(r["metadata"].get(key) == v for key, v in filter_metadata.items())
                 ]
 
             # 4. Adaptive RAG: Re-ranking with Hindsight
             if rerank and len(results) > 1:
                 from seahorse_ai.hindsight.reranker import HindsightReranker
+
                 reranker = HindsightReranker()
                 results = await reranker.rerank(query, results, top_n=k)
 
@@ -248,6 +256,7 @@ class RAGPipeline:
         except Exception as e:
             logger.warning("rag.rerank failed: %s. Falling back to vector search order.", e)
             return results
+
     async def retrieve(self, doc_id: int) -> dict | None:
         """Retrieve a specific memory record by its ID."""
         if not self._use_rust:
@@ -255,7 +264,7 @@ class RAGPipeline:
                 return {
                     "id": doc_id,
                     "text": self._texts[doc_id]["text"],
-                    "metadata": self._texts[doc_id]["metadata"]
+                    "metadata": self._texts[doc_id]["metadata"],
                 }
         else:
             # Rust HNSW is currently append-only for metadata in this FFI version.
@@ -265,16 +274,16 @@ class RAGPipeline:
     async def update_metadata(self, doc_id: int, metadata: dict) -> bool:
         """Update metadata for an existing record in-place."""
         import json
-        
+
         # 1. Retrieve current doc to get full existing metadata
         doc = await self.retrieve(doc_id)
         if not doc:
             return False
-            
+
         current_meta = doc.get("metadata", {})
         # Merge new metadata into existing
         current_meta.update(metadata)
-        
+
         if not self._use_rust:
             if doc_id in self._texts:
                 self._texts[doc_id]["metadata"] = current_meta

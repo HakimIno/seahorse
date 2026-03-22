@@ -15,6 +15,7 @@ Usage:
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import os
 import uuid
@@ -27,14 +28,13 @@ from qdrant_client.models import (
     FieldCondition,
     Filter,
     FilterSelector,
+    MatchText,
     MatchValue,
     PointStruct,
-    VectorParams,
     TextIndexParams,
     TokenizerType,
-    MatchText,
+    VectorParams,
 )
-import contextlib
 
 logger = logging.getLogger(__name__)
 
@@ -89,8 +89,8 @@ class QdrantRAGPipeline:
             return
         except Exception as e:
             if "already exists" in str(e).lower() or "409" in str(e):
-                 self._initialized_collections.add(collection)
-                 return
+                self._initialized_collections.add(collection)
+                return
             pass  # Try creating it if get_collection failed for other reasons
 
         try:
@@ -105,8 +105,8 @@ class QdrantRAGPipeline:
             logger.info("QdrantRAGPipeline: created collection=%s", collection)
         except Exception as e:
             if "already exists" in str(e).lower() or "409" in str(e):
-                 self._initialized_collections.add(collection)
-                 return
+                self._initialized_collections.add(collection)
+                return
             logger.error("Failed to ensure collection %s: %s", collection, e)
             raise
 
@@ -115,18 +115,19 @@ class QdrantRAGPipeline:
         # 1. Check local cache first
         if not hasattr(self, "_embed_cache"):
             self._embed_cache: dict[str, np.ndarray] = {}
-        
+
         if text in self._embed_cache:
             return self._embed_cache[text]
 
         import litellm
+
         resp = await litellm.aembedding(
             model=self._embed_model,
             input=[text],
         )
         vec = resp.data[0]["embedding"]
         embedding = np.array(vec, dtype=np.float32)
-        
+
         # 2. Save to cache
         self._embed_cache[text] = embedding
         return embedding
@@ -153,10 +154,10 @@ class QdrantRAGPipeline:
         numeric_id = abs(hash(point_uuid)) % (2**63)
 
         payload: dict[str, Any] = {
-            "text": text, 
-            "id": point_uuid, # Keep the original UUID in payload for consistent retrieval
+            "text": text,
+            "id": point_uuid,  # Keep the original UUID in payload for consistent retrieval
             "importance": importance,
-            **(metadata or {})
+            **(metadata or {}),
         }
         if agent_id:
             payload["agent_id"] = agent_id
@@ -179,23 +180,23 @@ class QdrantRAGPipeline:
         )
         return numeric_id
 
-    async def keyword_search(self, query: str, agent_id: str | None, k: int) -> list[dict[str, Any]]:
+    async def keyword_search(
+        self, query: str, agent_id: str | None, k: int
+    ) -> list[dict[str, Any]]:
         """Perform only full-text keyword search."""
         collection = self._collection_name(agent_id)
-        from qdrant_client.models import Filter, FieldCondition, MatchText
-        
+        from qdrant_client.models import FieldCondition, Filter, MatchText
+
         results = await self._client.scroll(
             collection_name=collection,
-            scroll_filter=Filter(
-                must=[FieldCondition(key="text", match=MatchText(text=query))]
-            ),
+            scroll_filter=Filter(must=[FieldCondition(key="text", match=MatchText(text=query))]),
             limit=k,
-            with_payload=True
+            with_payload=True,
         )
-        
+
         points, _ = results
         return [
-            {"id": p.id, "text": p.payload["text"], "metadata": p.payload, "distance": 0.5} 
+            {"id": p.id, "text": p.payload["text"], "metadata": p.payload, "distance": 0.5}
             for p in points
         ]
 
@@ -249,9 +250,7 @@ class QdrantRAGPipeline:
                 ),
             )
 
-        keyword_filter = Filter(
-            must=[FieldCondition(key="text", match=MatchText(text=query))]
-        )
+        keyword_filter = Filter(must=[FieldCondition(key="text", match=MatchText(text=query))])
         if qdrant_filter:
             keyword_filter.must.extend(qdrant_filter.must)
 
@@ -280,27 +279,27 @@ class QdrantRAGPipeline:
 
         # Merge and sort
         sorted_ids = sorted(scores.keys(), key=lambda x: scores[x], reverse=True)
-        
+
         formatted: list[dict] = []
         for pid in sorted_ids[:k]:
             hit = point_map[pid]
             payload = dict(hit.payload or {})
             text = payload.pop("text", "")
-            
+
             # Use UUID from payload if available, else numeric point ID
             record_uuid = payload.get("id")
             effective_id = str(record_uuid) if record_uuid else str(hit.id)
-            
-            similarity = getattr(hit, 'score', 0.5)
+
+            similarity = getattr(hit, "score", 0.5)
             try:
                 similarity = float(similarity)
             except (TypeError, ValueError):
                 similarity = 0.5
-            
-            # Standardize: Qdrant Cosine is similarity (1.0 = match). 
+
+            # Standardize: Qdrant Cosine is similarity (1.0 = match).
             # We return distance (0.0 = match) for Hindsight.
             distance = max(0.0, min(1.0, 1.0 - similarity))
-            
+
             formatted.append(
                 {
                     "id": effective_id,
@@ -388,7 +387,7 @@ class QdrantRAGPipeline:
                 points_selector=FilterSelector(filter=filter_obj),
             )
             logger.info("qdrant.delete_by_filter: executed on collection=%s", collection)
-            return 1 # Qdrant delete returns UpdateResult, actual count not easily available in async without scroll
+            return 1  # Qdrant delete returns UpdateResult, actual count not easily available in async without scroll
         except Exception as e:
             logger.error("qdrant.delete_by_filter failed: %s", e)
             return 0
@@ -408,9 +407,7 @@ class QdrantRAGPipeline:
         try:
             # Try numeric ID first, then search by payload id if it's a UUID string
             resp = await self._client.retrieve(
-                collection_name=collection,
-                ids=[point_id],
-                with_payload=True
+                collection_name=collection, ids=[point_id], with_payload=True
             )
             if resp:
                 p = resp[0]
@@ -422,7 +419,9 @@ class QdrantRAGPipeline:
             logger.debug("qdrant.retrieve failed for id=%s: %s", point_id, e)
             return None
 
-    async def update_metadata(self, point_id: Any, metadata: dict, agent_id: str | None = None) -> bool:
+    async def update_metadata(
+        self, point_id: Any, metadata: dict, agent_id: str | None = None
+    ) -> bool:
         """Update/merge metadata for a specific point in Qdrant."""
         collection = self._collection_name(agent_id)
         try:

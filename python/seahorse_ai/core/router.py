@@ -6,8 +6,8 @@ import logging
 from typing import Literal
 
 from seahorse_ai.core.llm import LLMClient
-from seahorse_ai.prompts.intent import _is_greeting
 from seahorse_ai.core.schemas import LLMConfig, Message
+from seahorse_ai.prompts.intent import _is_greeting
 
 logger = logging.getLogger(__name__)
 
@@ -28,7 +28,9 @@ class ModelRouter:
         self.thinker = LLMClient(config=LLMConfig(model=thinker_model))
         self.strategist = LLMClient(config=LLMConfig(model=strategist_model))
         # Default to worker config if fast_path_model not provided
-        self.fast = LLMClient(config=LLMConfig(model=fast_path_model)) if fast_path_model else self.worker
+        self.fast = (
+            LLMClient(config=LLMConfig(model=fast_path_model)) if fast_path_model else self.worker
+        )
 
     async def complete(
         self, messages: list[Message], tier: ModelTier = "worker", **kwargs: object

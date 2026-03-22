@@ -16,8 +16,8 @@ from seahorse_ai.tools.base import tool
 logger = logging.getLogger(__name__)
 
 # ── Connection Pool ───────────────────────────────────────────────────────────
-_POOL_SIZE = 4          # concurrent DuckDB connections
-_QUERY_TIMEOUT = 30.0   # seconds
+_POOL_SIZE = 4  # concurrent DuckDB connections
+_QUERY_TIMEOUT = 30.0  # seconds
 _MAX_ROWS = int(os.environ.get("SEAHORSE_MAX_DB_ROWS", "50000"))
 
 
@@ -28,9 +28,7 @@ class _DuckDBPool:
 
     def __init__(self, size: int = _POOL_SIZE) -> None:
         self._size = size
-        self._conns: list[duckdb.DuckDBPyConnection] = [
-            self._make_conn() for _ in range(size)
-        ]
+        self._conns: list[duckdb.DuckDBPyConnection] = [self._make_conn() for _ in range(size)]
         # send_stream, receive_stream
         self._send, self._recv = anyio.create_memory_object_stream(size)
         for conn in self._conns:
@@ -44,7 +42,7 @@ class _DuckDBPool:
         conn.execute("SET enable_progress_bar = false")
         conn.execute("SET enable_object_cache = true")
         conn.execute("SET file_search_path = 'workspace'")
-        
+
         # --- Postgres Integration ---
         pg_uri = os.getenv("SEAHORSE_PG_URI")
         if pg_uri:
@@ -56,7 +54,7 @@ class _DuckDBPool:
                 logger.info("DuckDB: Successfully attached PostgreSQL database.")
             except Exception as e:
                 logger.warning(f"DuckDB: Failed to attach PostgreSQL: {e}")
-        
+
         return conn
 
     @asynccontextmanager
@@ -87,6 +85,7 @@ _pool = _DuckDBPool(size=_POOL_SIZE)
 
 # ── Core executor ─────────────────────────────────────────────────────────────
 
+
 async def _execute(
     sql: str,
     max_rows: int = _MAX_ROWS,
@@ -115,6 +114,7 @@ async def _execute(
 
 # ── Formatter ─────────────────────────────────────────────────────────────────
 
+
 def _format(
     df: pl.DataFrame,
     sql: str,
@@ -122,17 +122,20 @@ def _format(
     truncated: bool = False,
 ) -> str:
     trunc_note = f"  [TRUNCATED] to {_MAX_ROWS:,} rows" if truncated else ""
-    return "\n".join([
-        f"Query   : {sql[:120]}{'...' if len(sql) > 120 else ''}",
-        f"Result  : {df.shape[0]:,} rows × {df.shape[1]} cols{trunc_note}",
-        f"Schema  : {dict(df.schema)}",
-        f"Elapsed : {elapsed_ms:.1f} ms",
-        "─" * 60,
-        str(df),
-    ])
+    return "\n".join(
+        [
+            f"Query   : {sql[:120]}{'...' if len(sql) > 120 else ''}",
+            f"Result  : {df.shape[0]:,} rows × {df.shape[1]} cols{trunc_note}",
+            f"Schema  : {dict(df.schema)}",
+            f"Elapsed : {elapsed_ms:.1f} ms",
+            "─" * 60,
+            str(df),
+        ]
+    )
 
 
 # ── Tools ─────────────────────────────────────────────────────────────────────
+
 
 @tool(
     "Run a SQL query via DuckDB and return the results as a raw JSON string (list of objects). "
@@ -148,6 +151,7 @@ async def duckdb_query_json(
         df = await _execute(sql_query, max_rows=limit)
         # Use Polars native JSON export (orient='records')
         import json
+
         records = df.to_dicts()
         return json.dumps(records, ensure_ascii=False)
     except Exception as e:
@@ -232,17 +236,19 @@ async def sql_to_polars(
             df.write_parquet(output_parquet_path, compression="zstd")
             output_note = f"\nSaved → {output_parquet_path} (use with polars_query)"
 
-        return "\n".join([
-            f"SQL → Polars transfer complete in {elapsed:.1f} ms",
-            f"Shape  : {df.shape[0]:,} rows × {df.shape[1]} cols",
-            f"Schema : {dict(df.schema)}",
-            f"Preview:\n{df.head(5)}",
-            output_note,
-            "",
-            "── Next step hint ───────────────────────────────",
-            f"polars_query(source_paths=['{output_parquet_path or '<in-memory>'}'], "
-            f"expression='lf.filter(...).group_by(...).agg(...)')",
-        ])
+        return "\n".join(
+            [
+                f"SQL → Polars transfer complete in {elapsed:.1f} ms",
+                f"Shape  : {df.shape[0]:,} rows × {df.shape[1]} cols",
+                f"Schema : {dict(df.schema)}",
+                f"Preview:\n{df.head(5)}",
+                output_note,
+                "",
+                "── Next step hint ───────────────────────────────",
+                f"polars_query(source_paths=['{output_parquet_path or '<in-memory>'}'], "
+                f"expression='lf.filter(...).group_by(...).agg(...)')",
+            ]
+        )
 
     except TimeoutError:
         return f"Timeout: query exceeded {_QUERY_TIMEOUT}s."

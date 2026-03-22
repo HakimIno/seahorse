@@ -15,8 +15,8 @@ import hashlib
 import logging
 import time
 
-from seahorse_ai.prompts import STRATEGY_GENERATION_PROMPT, STRATEGY_NUDGE
 from seahorse_ai.core.schemas import Message
+from seahorse_ai.prompts import STRATEGY_GENERATION_PROMPT, STRATEGY_NUDGE
 
 logger = logging.getLogger(__name__)
 
@@ -66,7 +66,9 @@ class StrategyPlanner:
         tier = "strategist" if complexity >= 4 else "thinker"
         plan = await self._generate(prompt, tier=tier)
         self._cache[key] = (plan, time.monotonic())
-        logger.info("strategy.plan: generated (tier=%s) and cached (cache_size=%d)", tier, len(self._cache))
+        logger.info(
+            "strategy.plan: generated (tier=%s) and cached (cache_size=%d)", tier, len(self._cache)
+        )
         return plan
 
     def nudge_message(self) -> Message:

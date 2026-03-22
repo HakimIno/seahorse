@@ -133,6 +133,7 @@ class ReActExecutor:
 
             # Normalize to Message
             import msgspec
+
             if isinstance(response_data, str):
                 response_msg = Msg(role="assistant", content=response_data)
             else:
@@ -187,7 +188,10 @@ class ReActExecutor:
                         observation = str(result)
                         # NEW: Truncate massive observations to save tokens limit
                         if len(observation) > 4000:
-                            observation = observation[:4000] + "\n\n...[TRUNCATED: Output too long. Please act on the current data or use narrower search.]"
+                            observation = (
+                                observation[:4000]
+                                + "\n\n...[TRUNCATED: Output too long. Please act on the current data or use narrower search.]"
+                            )
 
                     self._total_obs_chars += len(observation)
 

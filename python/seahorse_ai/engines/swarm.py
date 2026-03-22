@@ -15,8 +15,8 @@ from typing import Any
 
 import anyio
 
-from seahorse_ai.planner import LLMBackend, ReActPlanner, ToolRegistry
 from seahorse_ai.core.schemas import AgentRequest
+from seahorse_ai.planner import LLMBackend, ReActPlanner, ToolRegistry
 from seahorse_ai.skills.base import SeahorseSkill
 from seahorse_ai.tools.base import SeahorseToolRegistry, tool
 
@@ -149,7 +149,9 @@ class SwarmOrchestrator:
             from seahorse_ffi import PyMessageBus
 
             self._bus = PyMessageBus(1024, db_path=persist_path)
-            logger.info("SwarmOrchestrator: Rust PyMessageBus initialized (persist_path=%s).", persist_path)
+            logger.info(
+                "SwarmOrchestrator: Rust PyMessageBus initialized (persist_path=%s).", persist_path
+            )
         except ImportError:
             logger.warning(
                 "SwarmOrchestrator: PyMessageBus not found. Run `uv run maturin develop`. Falling back to dummy."
@@ -222,7 +224,9 @@ class SwarmOrchestrator:
             try:
                 history = self._bus.get_history(topic)
                 if history:
-                    logger.info("Swarm [%s]: Loaded %d historical messages", agent.name, len(history))
+                    logger.info(
+                        "Swarm [%s]: Loaded %d historical messages", agent.name, len(history)
+                    )
                     # Agents could optionally act on history here, but we just log for now to avoid
                     # re-executing reactions for tasks already completed before crash.
             except AttributeError:
@@ -239,16 +243,21 @@ class SwarmOrchestrator:
 
                     if msg is not None:
                         logger.info(
-                            "Swarm [%s] INBOX: from %s -> %s", agent.name, msg["sender"], msg["content"]
+                            "Swarm [%s] INBOX: from %s -> %s",
+                            agent.name,
+                            msg["sender"],
+                            msg["content"],
                         )
 
                         # Context injection for real-time reactivity
                         inbound_prompt = f"INBOUND MESSAGE from {msg['sender']}:\n{msg['content']}\nPlease acknowledge or act on this."
-                        request = AgentRequest(prompt=inbound_prompt, agent_id=f"crew_{agent.name}_rx")
+                        request = AgentRequest(
+                            prompt=inbound_prompt, agent_id=f"crew_{agent.name}_rx"
+                        )
 
                         # Start reagent task in group
                         tg.start_soon(agent.planner.run, request)
-                    
+
                     # High-frequency polling with yield to event loop
                     await anyio.sleep(0.01)
 
@@ -259,7 +268,7 @@ class SwarmOrchestrator:
                         continue
                     if "Channel closed" in str(e):
                         break
-                    
+
                     logger.error("Swarm [%s] listener trapped: %s", agent.name, e)
                     await anyio.sleep(1.0)
 

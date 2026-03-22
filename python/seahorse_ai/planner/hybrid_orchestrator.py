@@ -25,6 +25,7 @@ from typing import Any
 
 import anyio
 
+from seahorse_ai.core.schemas import AgentRequest, AgentResponse, Message
 from seahorse_ai.planner.circuit_breaker import CircuitBreaker
 from seahorse_ai.planner.critic import CriticAgent
 from seahorse_ai.planner.decomposer import TaskDecomposer
@@ -39,7 +40,6 @@ from seahorse_ai.planner.hybrid_schemas import (
 )
 from seahorse_ai.planner.session_memory import SessionMemory
 from seahorse_ai.prompts import build_system_prompt
-from seahorse_ai.core.schemas import AgentRequest, AgentResponse, Message
 
 logger = logging.getLogger(__name__)
 
@@ -212,22 +212,29 @@ class HybridOrchestrator:
         if not best_content or (len(memory.trials) >= self._cfg.max_trials):
             logger.info("hybrid.run: synthesizing final failure/budget response")
             # Pull the late verdict and artifacts to explain 'why'
-            last_verdict = verdict.reason if 'verdict' in locals() else "Budget exhausted"
-            
+            last_verdict = verdict.reason if "verdict" in locals() else "Budget exhausted"
+
             # Simple synthesis prompt for the main planner
             final_prompt = [
-                Message(role="system", content=(
-                    "You are Seahorse Strategic Analyst. "
-                    "The agent failed to fully complete the goal. "
-                    f"Goal: {request.prompt}\n"
-                    f"Reason: {last_verdict}\n"
-                    "Provide a polite, professional explanation in the user's language."
-                )),
-                Message(role="user", content="Explain why the task could not be completed.")
+                Message(
+                    role="system",
+                    content=(
+                        "You are Seahorse Strategic Analyst. "
+                        "The agent failed to fully complete the goal. "
+                        f"Goal: {request.prompt}\n"
+                        f"Reason: {last_verdict}\n"
+                        "Provide a polite, professional explanation in the user's language."
+                    ),
+                ),
+                Message(role="user", content="Explain why the task could not be completed."),
             ]
             try:
                 final_res = await self._llm.complete(final_prompt, tier="worker")
-                best_content = str(final_res.get("content", final_res) if isinstance(final_res, dict) else final_res)
+                best_content = str(
+                    final_res.get("content", final_res)
+                    if isinstance(final_res, dict)
+                    else final_res
+                )
             except Exception as e:
                 logger.error("hybrid final synthesis failed: %s", e)
                 best_content = best_content or "ขออภัยครับ ระบบไม่สามารถดำเนินการตามคำขอได้สำเร็จในขณะนี้"
@@ -267,7 +274,10 @@ class HybridOrchestrator:
 
         messages: list[Message] = [
             Message(role="system", content=sys_prompt),
-            Message(role="system", content=f"{skill_context}\n\n{context_block}" if skill_context else context_block),
+            Message(
+                role="system",
+                content=f"{skill_context}\n\n{context_block}" if skill_context else context_block,
+            ),
             Message(role="user", content=node.description),
         ]
 
@@ -313,24 +323,72 @@ class HybridOrchestrator:
 
     _SKILL_KEYWORDS: dict[str, list[str]] = {
         "DATA_ENGINEERING": [
-            "etl", "extract", "transform", "load", "parquet", "pipeline",
-            "data quality", "clean", "null", "schema", "migrate", "ingest",
+            "etl",
+            "extract",
+            "transform",
+            "load",
+            "parquet",
+            "pipeline",
+            "data quality",
+            "clean",
+            "null",
+            "schema",
+            "migrate",
+            "ingest",
         ],
         "TRADING_GUARDIAN": [
-            "forex", "trade", "lot size", "stop loss", "risk", "ruin", "kelly",
-            "eurusd", "gbpusd", "gold", "xauusd", "trading", "futures",
-            "พอร์ต", "ยอดเงิน", "เทรด", "เงินทุน", "พอร์ตแตก", "บริหารความเสี่ยง",
+            "forex",
+            "trade",
+            "lot size",
+            "stop loss",
+            "risk",
+            "ruin",
+            "kelly",
+            "eurusd",
+            "gbpusd",
+            "gold",
+            "xauusd",
+            "trading",
+            "futures",
+            "พอร์ต",
+            "ยอดเงิน",
+            "เทรด",
+            "เงินทุน",
+            "พอร์ตแตก",
+            "บริหารความเสี่ยง",
         ],
         "BI_ANALYST": [
-            "dashboard", "chart", "graph", "visual", "scatter", "heatmap",
-            "radar", "pie", "correlation", "trend", "report", "insight",
-            "plot", "show me a", "draw",
+            "dashboard",
+            "chart",
+            "graph",
+            "visual",
+            "scatter",
+            "heatmap",
+            "radar",
+            "pie",
+            "correlation",
+            "trend",
+            "report",
+            "insight",
+            "plot",
+            "show me a",
+            "draw",
         ],
         "DATABASE_ACCESS": [
-            "sql", "query", "database", "table", "select", "join",
+            "sql",
+            "query",
+            "database",
+            "table",
+            "select",
+            "join",
         ],
         "DATA_ANALYSIS": [
-            "polars", "aggregate", "group", "filter", "sort", "analyze",
+            "polars",
+            "aggregate",
+            "group",
+            "filter",
+            "sort",
+            "analyze",
         ],
     }
 
@@ -356,7 +414,7 @@ class HybridOrchestrator:
         """Quick complexity classification — reuse FastPath if available. Caches results."""
         if request.prompt in self._complexity_cache:
             return self._complexity_cache[request.prompt]
-            
+
         try:
             from seahorse_ai.planner.fast_path import classify_structured_intent
 

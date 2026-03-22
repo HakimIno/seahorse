@@ -5,6 +5,7 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
+
 def robust_json_load(text: str) -> Any:
     """Extract and parse JSON from text, handling markdown fences or preamble."""
     text = text.strip()
@@ -18,7 +19,7 @@ def robust_json_load(text: str) -> Any:
     # Find the outermost structure
     start = -1
     end = -1
-    
+
     if start_obj != -1 and (start_list == -1 or start_obj < start_list):
         start, end = start_obj, end_obj
     elif start_list != -1:
@@ -30,6 +31,7 @@ def robust_json_load(text: str) -> Any:
         except json.JSONDecodeError:
             pass
     return {}
+
 
 def split_entities(entity: str) -> list[str]:
     """Split comma/และ/and-separated items into individual facts."""

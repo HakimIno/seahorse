@@ -27,11 +27,12 @@ def forecast_sales(history: list[dict[str, Any]], days_to_forecast: int = 7) -> 
     """
     if not history:
         return {"error": "History data is empty."}
-        
+
     # Handle cases where history might be a JSON-encoded string
     if isinstance(history, str):
         try:
             import json
+
             history = json.loads(history)
         except Exception:
             return {"error": "Failed to parse history JSON string."}
@@ -51,15 +52,15 @@ def forecast_sales(history: list[dict[str, Any]], days_to_forecast: int = 7) -> 
                 if isinstance(h, (list, tuple)) and len(h) >= 2:
                     y_vals.append(float(h[1]))
                 continue
-            
+
             # Try various keys
             val = h.get("revenue") or h.get("value") or h.get("amount") or h.get("total")
             if val is not None:
                 y_vals.append(float(val))
-        
+
         if len(y_vals) < 3:
             return {"error": "Could not extract sufficient revenue data points from history."}
-            
+
         y = np.array(y_vals)
         x = np.arange(len(y))
 

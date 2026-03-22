@@ -5,7 +5,6 @@ import os
 import random
 import re
 import uuid
-from datetime import datetime
 
 import matplotlib
 import matplotlib.font_manager as fm
@@ -51,8 +50,9 @@ except Exception as e:
 
 async def render_echarts_to_png(json_conf: str) -> str | None:
     """Render ECharts JSON configuration to a static PNG image with premium Thai fonts."""
-    from seahorse_ai.tools.system.browser import browser_screenshot
     import base64
+
+    from seahorse_ai.tools.system.browser import browser_screenshot
 
     filename = f"echart_{uuid.uuid4().hex[:8]}.png"
     filepath = os.path.join(CHART_DIR, filename)
@@ -68,7 +68,7 @@ async def render_echarts_to_png(json_conf: str) -> str | None:
                 reg_b64 = base64.b64encode(f.read()).decode("utf-8")
             with open(f_bold, "rb") as f:
                 bold_b64 = base64.b64encode(f.read()).decode("utf-8")
-            
+
             font_css = f"""
             @font-face {{
                 font-family: 'IBMPlexSansThai';
@@ -126,16 +126,15 @@ async def render_echarts_to_png(json_conf: str) -> str | None:
     try:
         with open(temp_html, "w", encoding="utf-8") as f:
             f.write(html_content)
-        
+
         # Capture at high DPI for premium look
         res = await browser_screenshot(
-            url=f"file://{os.path.abspath(temp_html)}",
-            output_path=filepath
+            url=f"file://{os.path.abspath(temp_html)}", output_path=filepath
         )
-        
+
         if os.path.exists(temp_html):
             os.remove(temp_html)
-            
+
         return filepath if os.path.exists(filepath) else None
     except Exception as e:
         logger.error(f"viz: ECharts render failed: {e}")
@@ -230,23 +229,32 @@ def create_custom_chart(
         # ── PHASE 3: REAL WASMTIME SANDBOX SECURITY ──
         # 1. Wasm Guard: Scan for forbidden patterns using the Rust engine
         forbidden_patterns = [
-            "import os", "import subprocess", "import sys", "getattr", "setattr",
-            "__builtins__", "eval(", "exec(", "open(", "socket", "requests"
+            "import os",
+            "import subprocess",
+            "import sys",
+            "getattr",
+            "setattr",
+            "__builtins__",
+            "eval(",
+            "exec(",
+            "open(",
+            "socket",
+            "requests",
         ]
-        
+
         use_sandbox = os.environ.get("SEAHORSE_USE_WASM", "true").lower() == "true"
         is_safe = True
 
         if use_sandbox:
             try:
                 import seahorse_ffi
-                
+
                 # Load the Wasm security guard
                 guard_path = os.path.join(os.path.dirname(__file__), "guard.wat")
                 if os.path.exists(guard_path):
                     with open(guard_path, "rb") as f:
                         wat_bytes = f.read()
-                    
+
                     wasm_manager = seahorse_ffi.PyWasmManager()
                     logger.info("viz: gating plotting logic through Wasm security guard...")
                     # The Wasm guard returns 1 if safe
@@ -254,35 +262,51 @@ def create_custom_chart(
                     if guard_result != "Success":
                         logger.warning("viz: Wasm security guard rejected the code!")
                         is_safe = False
-                
+
                 # Python-level double check for forbidden patterns
                 if any(p in code_clean for p in forbidden_patterns):
                     logger.warning("viz: Static analysis found forbidden patterns in code.")
                     is_safe = False
 
             except (ImportError, Exception) as e:
-                logger.warning(f"viz: Wasm security layer failed ({e}). Falling back to restricted Python.")
-        
+                logger.warning(
+                    f"viz: Wasm security layer failed ({e}). Falling back to restricted Python."
+                )
+
         # 2. Restricted Execution
         if not is_safe:
             # FALLBACK: If code is dangerous, block execution to protect the system.
             logger.warning("viz: Security violation detected. Operation blocked.")
-            raise PermissionError("Code execution blocked by Wasm Security Sandbox to protect host system.")
+            raise PermissionError(
+                "Code execution blocked by Wasm Security Sandbox to protect host system."
+            )
 
         # 3. Execution in a hardened environment
         # Clear __builtins__ and only allow safe math/plotting functions
         safe_builtins = {
-            "abs": abs, "len": len, "range": range, "round": round, "sum": sum,
-            "min": min, "max": max, "enumerate": enumerate, "zip": zip,
-            "list": list, "dict": dict, "str": str, "int": int, "float": float,
-            "bool": bool, "print": logger.info, # Redirect print to log
+            "abs": abs,
+            "len": len,
+            "range": range,
+            "round": round,
+            "sum": sum,
+            "min": min,
+            "max": max,
+            "enumerate": enumerate,
+            "zip": zip,
+            "list": list,
+            "dict": dict,
+            "str": str,
+            "int": int,
+            "float": float,
+            "bool": bool,
+            "print": logger.info,  # Redirect print to log
         }
 
         # Anti-getattr/setattr check in code (redundant but safe)
         if "." in code_clean and ("getattr" in code_clean or "setattr" in code_clean):
-             logger.warning("viz: Code contains property access exploits.")
-             is_safe = False
-        
+            logger.warning("viz: Code contains property access exploits.")
+            is_safe = False
+
         hardened_env = {
             "__builtins__": safe_builtins,
             "pd": pd,
@@ -301,7 +325,7 @@ def create_custom_chart(
             "get_palette": get_palette,
             "random": random,
         }
-        
+
         exec(code_clean, hardened_env)
 
         # 5. Render and Save
@@ -318,8 +342,10 @@ def create_custom_chart(
         # Check if we should try native ECharts rendering on security block
         # This is a fallback to a safe engine
         try:
-            import seahorse_ffi
             import anyio
+
+            import seahorse_ffi
+
             gen = seahorse_ffi.PyChartGenerator()
             # Try to guess intent for fallback
             cats = ["Analysis"]
@@ -327,7 +353,7 @@ def create_custom_chart(
             if not df.empty and len(df.columns) >= 2:
                 cats = [str(x) for x in df.iloc[:10, 0].tolist()]
                 vals = [float(x) for x in df.iloc[:10, 1].tolist()]
-            
+
             json_conf = gen.bar_chart("Security Fallback Summary", cats, vals)
             # Render ECharts JSON to PNG via our new bridge
             png_path = anyio.run(render_echarts_to_png, json_conf)
@@ -336,7 +362,7 @@ def create_custom_chart(
                 return png_path
         except Exception as fe:
             logger.error(f"viz: Fallback rendering failed: {fe}")
-        
+
         return f"Chart Generation Error: {e}"
 
     except Exception as e:

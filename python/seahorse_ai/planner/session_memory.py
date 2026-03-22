@@ -134,9 +134,7 @@ class SessionMemory:
         parts: list[str] = []
         parts.append(f"## Goal\n{goal}")
         if success_criteria:
-            parts.append(
-                "## Success Criteria\n" + "\n".join(f"- {c}" for c in success_criteria)
-            )
+            parts.append("## Success Criteria\n" + "\n".join(f"- {c}" for c in success_criteria))
         parts.append(f"## Current Subtask\n{subtask_description}")
 
         delta = self.get_delta()
@@ -144,9 +142,7 @@ class SessionMemory:
             parts.append(f"## Previous Trial Results (delta)\n{delta}")
 
         if tier3_results:
-            parts.append(
-                "## Relevant Past Context\n" + "\n".join(f"- {r}" for r in tier3_results)
-            )
+            parts.append("## Relevant Past Context\n" + "\n".join(f"- {r}" for r in tier3_results))
 
         block = "\n\n".join(parts)
 

@@ -11,13 +11,12 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from typing import AsyncIterator
 
 import anyio
 from playwright.async_api import (
     Browser,
-    BrowserContext,
     Page,
     Playwright,
     async_playwright,
@@ -27,13 +26,14 @@ from seahorse_ai.tools.base import tool
 
 logger = logging.getLogger(__name__)
 
-_PAGE_TIMEOUT   = 30_000   # ms
-_NAV_TIMEOUT    = 20_000   # ms
-_MAX_CONTEXTS   = 4        # concurrent pages
-_VIEWPORT       = {"width": 1280, "height": 900}
+_PAGE_TIMEOUT = 30_000  # ms
+_NAV_TIMEOUT = 20_000  # ms
+_MAX_CONTEXTS = 4  # concurrent pages
+_VIEWPORT = {"width": 1280, "height": 900}
 
 
 # ── Browser singleton ─────────────────────────────────────────────────────────
+
 
 class _BrowserPool:
     """
@@ -52,7 +52,7 @@ class _BrowserPool:
         async with self._lock:
             # Check if browser is still valid and connected
             if (
-                self._browser is None 
+                self._browser is None
                 or not self._browser.is_connected()
                 or self._playwright is None
             ):
@@ -66,7 +66,7 @@ class _BrowserPool:
                         await self._playwright.stop()
                     except Exception:
                         pass
-                
+
                 logger.info("Starting Chromium browser singleton...")
                 self._playwright = await async_playwright().start()
                 self._browser = await self._playwright.chromium.launch(
@@ -86,7 +86,7 @@ class _BrowserPool:
     async def page(self) -> AsyncIterator[Page]:
         """Acquire isolated context + page, release เมื่อ done."""
         async with self._sem:
-            for attempt in range(2): # Simple retry for flaky sessions
+            for attempt in range(2):  # Simple retry for flaky sessions
                 try:
                     browser = await self._ensure_started()
                     context = await browser.new_context(
@@ -103,19 +103,23 @@ class _BrowserPool:
                     # Block unnecessary resources — เร็วขึ้น ~40%
                     await context.route(
                         "**/*",
-                        lambda route: route.abort()
-                        if route.request.resource_type in {"image", "font", "media", "stylesheet"}
-                        else route.continue_(),
+                        lambda route: (
+                            route.abort()
+                            if route.request.resource_type
+                            in {"image", "font", "media", "stylesheet"}
+                            else route.continue_()
+                        ),
                     )
                     page = await context.new_page()
                     page.set_default_timeout(_PAGE_TIMEOUT)
                     page.set_default_navigation_timeout(_NAV_TIMEOUT)
-                    break 
+                    break
                 except Exception as e:
-                    if attempt == 1: raise e
+                    if attempt == 1:
+                        raise e
                     logger.warning(f"Browser attempt {attempt} failed, retrying: {e}")
                     # Force a restart on next attempt
-                    self._browser = None 
+                    self._browser = None
                     await asyncio.sleep(1)
 
             try:
@@ -135,6 +139,7 @@ _pool = _BrowserPool()
 
 # ── Tools ──────────────────────────────────────────────────────────────────────
 
+
 @tool(
     "Scrape content from a webpage. Supports JavaScript-rendered pages. "
     "Returns page title, main text content, and optionally HTML.\n\n"
@@ -143,7 +148,7 @@ _pool = _BrowserPool()
 )
 async def browser_scrape(
     url: str,
-    wait_for: str = "",           # CSS selector to wait for before extract
+    wait_for: str = "",  # CSS selector to wait for before extract
     extract_html: bool = False,
     screenshot_path: str = "",
 ) -> str:
@@ -225,9 +230,7 @@ async def browser_screenshot(
         return f"Screenshot error: {e}"
 
 
-@tool(
-    "Backward compatibility alias for browser_scrape. Use browser_scrape instead."
-)
+@tool("Backward compatibility alias for browser_scrape. Use browser_scrape instead.")
 async def browser_scan(url: str) -> str:
     """Backward compatibility alias for browser_scrape."""
     return await browser_scrape(url)

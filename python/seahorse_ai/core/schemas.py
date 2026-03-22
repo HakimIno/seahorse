@@ -11,6 +11,7 @@ from msgspec import Struct, field
 
 class AgentRole(Enum):
     """Roles for different agents in the swarm."""
+
     COMMANDER = "commander"
     SCOUT = "scout"
     WORKER = "worker"

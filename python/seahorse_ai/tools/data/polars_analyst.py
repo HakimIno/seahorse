@@ -5,8 +5,8 @@ import os
 import traceback
 from typing import Any
 
-import polars as pl
 import anyio
+import polars as pl
 
 from seahorse_ai.tools.base import tool
 
@@ -14,6 +14,7 @@ logger = logging.getLogger(__name__)
 
 try:
     import seahorse_ffi
+
     _NATIVE_AVAILABLE = True
 except ImportError:
     _NATIVE_AVAILABLE = False
@@ -39,6 +40,7 @@ _POLARS_SAFE_GLOBALS: dict[str, Any] = {
 
 # ── Path Resolution ──────────────────────────────────────────────────────────
 
+
 def _resolve_path(path: str) -> str:
     """Auto-resolve workspace/ if file not found in root."""
     if os.path.exists(path):
@@ -51,6 +53,7 @@ def _resolve_path(path: str) -> str:
 
 
 # ── Loaders ──────────────────────────────────────────────────────────────────
+
 
 def _scan(path: str) -> pl.LazyFrame:
     """Auto-detect format and return LazyFrame."""
@@ -74,7 +77,7 @@ def _load_tables(source_paths: list[str] | str) -> dict[str, pl.LazyFrame]:
     # Robustness: Handle case where LLM sends a single string instead of a list
     if isinstance(source_paths, str):
         source_paths = [source_paths]
-    
+
     tables: dict[str, pl.LazyFrame] = {}
     for i, path in enumerate(source_paths):
         lf = _scan(path)
@@ -85,6 +88,7 @@ def _load_tables(source_paths: list[str] | str) -> dict[str, pl.LazyFrame]:
 
 
 # ── Tools ─────────────────────────────────────────────────────────────────────
+
 
 @tool(
     "Execute an advanced Polars query across data sources. Supports full Polars expression API.\n"
@@ -124,9 +128,11 @@ async def polars_query(
             with anyio.fail_after(30):
                 # Pre-processing expression for common LLM mistakes
                 # If they try len(df) or df.corr() on a LazyFrame t0/lf, we help them
-                if ("len(" in expression or ".corr(" in expression) and (".collect()" not in expression):
+                if ("len(" in expression or ".corr(" in expression) and (
+                    ".collect()" not in expression
+                ):
                     # For safety, we only do this if it looks like a simple direct call
-                    pass 
+                    pass
 
                 result = eval(  # noqa: S307
                     compile(expression, "<polars_query>", "eval"),
@@ -160,19 +166,19 @@ async def polars_query(
                         return _format_result(result.head(max_rows), source_paths, expression)
                 except Exception as retry_e:
                     logger.error("polars_query auto-collect retry failed: %s", retry_e)
-            
+
             return f"[POLARS_ERROR] {e}. (Tip: If using .corr() or len(), remember to call .collect() first or use pl.corr())"
 
         except TimeoutError:
             return f"[TIMEOUT] The query took longer than 30s. Try filtering the data first.\nQuery: {expression}"
 
     except pl.exceptions.PolarsError as e:
-        col_info = {name: list(lf.collect_schema().names()) for name, lf in tables.items() if hasattr(lf, "collect_schema")}
-        return (
-            f"[POLARS_ERROR] {e}\n"
-            f"Expression: {expression}\n"
-            f"Available columns: {col_info}"
-        )
+        col_info = {
+            name: list(lf.collect_schema().names())
+            for name, lf in tables.items()
+            if hasattr(lf, "collect_schema")
+        }
+        return f"[POLARS_ERROR] {e}\nExpression: {expression}\nAvailable columns: {col_info}"
     except SyntaxError as e:
         return f"[SYNTAX_ERROR] {e}\nExpression: {expression}"
     except Exception as e:
@@ -180,9 +186,7 @@ async def polars_query(
         return f"[UNEXPECTED] {e}"
 
 
-@tool(
-    "Profile one or multiple datasets: null rates, cardinality, numeric stats, skewness."
-)
+@tool("Profile one or multiple datasets: null rates, cardinality, numeric stats, skewness.")
 async def polars_profile(source_paths: list[str]) -> str:
     try:
         if not source_paths:
@@ -217,9 +221,7 @@ async def polars_profile(source_paths: list[str]) -> str:
         return f"[PROFILE_ERROR] {e}"
 
 
-@tool(
-    "Inspect joinability between two tables: find common column names and estimate key overlap."
-)
+@tool("Inspect joinability between two tables: find common column names and estimate key overlap.")
 async def polars_inspect_join(path_left: str, path_right: str) -> str:
     try:
         lf_l = _scan(path_left)
@@ -274,17 +276,12 @@ async def convert_to_parquet(source_path: str, output_path: str) -> str:
             return f"[FAIL] Unsupported source: {source_path}"
 
         df.write_parquet(output_path, compression="zstd")
-        return (
-            f"[SUCCESS] Converted -> {output_path}\n"
-            f"Rows: {df.shape[0]:,}  Cols: {df.shape[1]}"
-        )
+        return f"[SUCCESS] Converted -> {output_path}\nRows: {df.shape[0]:,}  Cols: {df.shape[1]}"
     except Exception as e:
         return f"[FAIL] Conversion failed: {e}"
 
 
-@tool(
-    "Perform high-performance data aggregation using the NATIVE Rust Polars engine."
-)
+@tool("Perform high-performance data aggregation using the NATIVE Rust Polars engine.")
 async def native_polars_aggregate(
     data_json: str,
     group_by: str,
@@ -302,23 +299,25 @@ async def native_polars_aggregate(
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
+
 def _format_result(df: pl.DataFrame, sources: list[str], expression: str) -> str:
-    import polars as pl
     names = [p.replace("\\", "/").split("/")[-1] for p in sources]
-    return "\n".join([
-        f"Sources: {', '.join(names)}",
-        f"Result: {df.shape[0]} rows x {df.shape[1]} cols",
-        "-" * 40,
-        str(df),
-    ])
+    return "\n".join(
+        [
+            f"Sources: {', '.join(names)}",
+            f"Result: {df.shape[0]} rows x {df.shape[1]} cols",
+            "-" * 40,
+            str(df),
+        ]
+    )
 
 
 def _multi_preview(tables: dict[str, pl.LazyFrame], max_rows: int) -> str:
-    import polars as pl
     seen: set[int] = set()
     lines = ["Schema preview:"]
     for name, lf in tables.items():
-        if id(lf) in seen: continue
+        if id(lf) in seen:
+            continue
         seen.add(id(lf))
         schema = lf.collect_schema()
         lines.append(f"\n  [{name}]  columns: {list(schema.names())}")
@@ -326,6 +325,8 @@ def _multi_preview(tables: dict[str, pl.LazyFrame], max_rows: int) -> str:
 
 
 def _fmt(v: Any) -> str:
-    if v is None: return "N/A"
-    if isinstance(v, float): return f"{v:,.2f}"
+    if v is None:
+        return "N/A"
+    if isinstance(v, float):
+        return f"{v:,.2f}"
     return str(v)

@@ -1,10 +1,13 @@
 """seahorse_ai.tools.business.erp_connector — Data ingestion tool for extracting financial data."""
 
 from __future__ import annotations
+
 import logging
+
 from seahorse_ai.tools.base import tool
 
 logger = logging.getLogger(__name__)
+
 
 @tool(
     "Fetch financial statements or POS transaction data from the database. "
@@ -13,10 +16,10 @@ logger = logging.getLogger(__name__)
 async def fetch_financial_data(source: str, start_date: str, end_date: str) -> str:
     """Connect to a mocked or real financial database, retrieve data, and return a structured summary."""
     logger.info("fetch_financial_data: source=%s, start=%s, end=%s", source, start_date, end_date)
-    
+
     # In a real scenario, this would connect to an ERP API and return real data.
     # Here we provide a mock robust structure for the Agent to process.
-    
+
     return (
         f"### Data Extraction Successful\n"
         f"**Source:** {source} | **Period:** {start_date} to {end_date}\n\n"

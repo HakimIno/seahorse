@@ -110,8 +110,8 @@ MEMORY_KEYWORDS: tuple[str, ...] = (
 
 # ── Tier 2: LLM Semantic Intent Classification (DEPRECATED) ───────────────────
 #
-# NOTE: Semantic intent classification has been moved to the Structured Intent 
-# pipeline in `seahorse_ai.planner.fast_path`. This module now only handles 
+# NOTE: Semantic intent classification has been moved to the Structured Intent
+# pipeline in `seahorse_ai.planner.fast_path`. This module now only handles
 # low-latency keyword pattern matching.
 # ─────────────────────────────────────────────────────────────────────────────
 

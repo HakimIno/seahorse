@@ -1,27 +1,35 @@
 """Library of core SeahorseSkills."""
 
 from seahorse_ai.skills.base import SeahorseSkill, registry
-from seahorse_ai.tools.system.browser import browser_scan
+from seahorse_ai.tools.business.forecaster import forecast_sales
 from seahorse_ai.tools.data.data_connectors import extract_sql_to_parquet, load_to_sql
 from seahorse_ai.tools.data.data_profiler import data_profile
 from seahorse_ai.tools.data.db import database_query, database_schema
-from seahorse_ai.tools.visual.echarts_composer import echarts_composer
-from seahorse_ai.tools.visual.echarts_viz import native_echarts_chart
-from seahorse_ai.tools.business.forecaster import forecast_sales
+from seahorse_ai.tools.data.polars_analyst import native_polars_aggregate, polars_query
 from seahorse_ai.tools.internal.memory import memory_search, memory_store
-from seahorse_ai.tools.trading.risk_calculator import calculate_position_size, calculate_risk_of_ruin, evaluate_kelly_criterion
+from seahorse_ai.tools.system.browser import browser_scan
+from seahorse_ai.tools.system.web_search import web_search
+from seahorse_ai.tools.trading.macro_watch import fetch_cme_fedwatch_data, fetch_cot_report
 from seahorse_ai.tools.trading.market_data import (
-    get_futures_live_price, 
+    get_forex_live_price,
+    get_futures_live_price,
     get_futures_market_depth,
     get_stock_live_price,
-    get_forex_live_price
 )
-from seahorse_ai.tools.trading.portfolio import get_ibkr_account_summary, get_ibkr_open_positions, place_ibkr_order
-from seahorse_ai.tools.trading.macro_watch import fetch_cme_fedwatch_data, fetch_cot_report
-from seahorse_ai.tools.data.polars_analyst import native_polars_aggregate, polars_query
+from seahorse_ai.tools.trading.portfolio import (
+    get_ibkr_account_summary,
+    get_ibkr_open_positions,
+    place_ibkr_order,
+)
+from seahorse_ai.tools.trading.risk_calculator import (
+    calculate_position_size,
+    calculate_risk_of_ruin,
+    evaluate_kelly_criterion,
+)
+from seahorse_ai.tools.visual.echarts_composer import echarts_composer
+from seahorse_ai.tools.visual.echarts_viz import native_echarts_chart
 from seahorse_ai.tools.visual.table_viz import create_table_image
 from seahorse_ai.tools.visual.viz import create_custom_chart
-from seahorse_ai.tools.system.web_search import web_search
 
 # 1. Web Research Skill
 web_research_skill = SeahorseSkill(
@@ -71,7 +79,14 @@ advanced_analysis_skill = SeahorseSkill(
         "Ensure charts use a modern color palette to look premium.",
         "Use `create_table_image` to present tabular data beautifully instead of simple Markdown.",
     ],
-    tools=[polars_query, native_echarts_chart, echarts_composer, create_custom_chart, create_table_image, forecast_sales],
+    tools=[
+        polars_query,
+        native_echarts_chart,
+        echarts_composer,
+        create_custom_chart,
+        create_table_image,
+        forecast_sales,
+    ],
 )
 
 # 5. Data Engineering Skill
@@ -86,15 +101,15 @@ data_engineering_skill = SeahorseSkill(
         "Clearly document all cleaning steps (e.g., null handling, type casting, or deduplication) performed on the data.",
     ],
     tools=[
-        polars_query, 
-        native_polars_aggregate, 
+        polars_query,
+        native_polars_aggregate,
         data_profile,
         extract_sql_to_parquet,
         load_to_sql,
-        database_query, 
-        database_schema, 
+        database_query,
+        database_schema,
         web_search,
-        echarts_composer
+        echarts_composer,
     ],
 )
 
@@ -115,7 +130,7 @@ bi_analyst_skill = SeahorseSkill(
         native_polars_aggregate,
         data_profile,
         database_query,
-        web_search
+        web_search,
     ],
 )
 
@@ -133,7 +148,7 @@ trading_guardian_skill = SeahorseSkill(
         "Be strict about risk management. Act as a guardian of their capital.",
         "NEVER search the PostgreSQL database for 'IBKR' or 'Portfolio' data. Use the provided IBKR tools instead.",
         "CRITICAL: NEVER execute a trade using `place_ibkr_order` without first presenting the calculated risk and asking for EXPLICIT user confirmation (e.g., 'Do you want me to place this order?').",
-        "UX RULE: ALWAYS fetch the latest market price using `get_forex_live_price` or `get_stock_live_price` before asking the user for Stop Loss or Take Profit, OR immediately when they provide SL/TP without a current price."
+        "UX RULE: ALWAYS fetch the latest market price using `get_forex_live_price` or `get_stock_live_price` before asking the user for Stop Loss or Take Profit, OR immediately when they provide SL/TP without a current price.",
     ],
     tools=[
         calculate_position_size,
@@ -149,7 +164,7 @@ trading_guardian_skill = SeahorseSkill(
         fetch_cot_report,
         place_ibkr_order,
         memory_store,
-        memory_search
+        memory_search,
     ],
 )
 

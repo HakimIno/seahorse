@@ -12,20 +12,20 @@ Usage:
 
 from __future__ import annotations
 
-import anyio
 import logging
 import os
 import re
 import sys
 from collections import defaultdict, deque
 
+import anyio
 import discord
 import discord.ui
 
 from seahorse_ai.analysis.watcher import AnomalyWatcher
-from seahorse_ai.planner import ReActPlanner
 from seahorse_ai.core.router import ModelRouter
 from seahorse_ai.core.schemas import AgentRequest, Message
+from seahorse_ai.planner import ReActPlanner
 
 # Setup logging
 logging.basicConfig(
@@ -326,9 +326,9 @@ class SeahorseDiscordClient(discord.Client):
                             for i, chunk in enumerate(chunks):
                                 # Attach files only to the first chunk to avoid sending duplicates
                                 if i == 0 and files:
-                                     await message.channel.send(chunk, files=files)
+                                    await message.channel.send(chunk, files=files)
                                 else:
-                                     await message.channel.send(chunk)
+                                    await message.channel.send(chunk)
                         else:
                             await message.channel.send(content, files=files if files else None)
 

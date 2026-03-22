@@ -1,12 +1,12 @@
 """seahorse_ai.analysis.feeder — Real-time sales simulator for Seahorse."""
 
-import anyio
 import contextlib
 import logging
 import os
 import random
 from datetime import datetime
 
+import anyio
 import asyncpg
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] FEEDS: %(message)s")

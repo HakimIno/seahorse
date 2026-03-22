@@ -20,11 +20,11 @@ from typing import Any
 
 import anyio
 
+from seahorse_ai.core.schemas import Message
 from seahorse_ai.planner.hybrid_schemas import (
     CriticVerdict,
     SubtaskResult,
 )
-from seahorse_ai.core.schemas import Message
 
 logger = logging.getLogger(__name__)
 
@@ -119,8 +119,7 @@ class CriticAgent:
             )
 
         all_have_content = all(
-            r.content and len(r.content.strip()) > 10 and not r.terminated
-            for r in results
+            r.content and len(r.content.strip()) > 10 and not r.terminated for r in results
         )
         if all_have_content and len(results) == 1 and len(criteria) <= 1:
             return CriticVerdict(
@@ -139,11 +138,13 @@ class CriticAgent:
     ) -> CriticVerdict:
         outputs = []
         for r in results:
-            outputs.append({
-                "subtask_id": r.subtask_id,
-                "content": r.content[:2000],
-                "terminated": r.terminated,
-            })
+            outputs.append(
+                {
+                    "subtask_id": r.subtask_id,
+                    "content": r.content[:2000],
+                    "terminated": r.terminated,
+                }
+            )
 
         user_msg = (
             f"GOAL: {goal}\n\n"
@@ -158,9 +159,7 @@ class CriticAgent:
 
         raw_result = await self._llm.complete(messages, tier="worker")
         raw = str(
-            raw_result.get("content", raw_result)
-            if isinstance(raw_result, dict)
-            else raw_result
+            raw_result.get("content", raw_result) if isinstance(raw_result, dict) else raw_result
         )
 
         return self._parse_verdict(raw, criteria)

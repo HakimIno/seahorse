@@ -75,12 +75,14 @@ async def data_profile(source_path: str) -> str:
             # Additional Stats based on type
             stats_line = ""
             if series.dtype.is_numeric():
-                res = df.select([
-                    pl.col(col).mean().alias("mean"),
-                    pl.col(col).min().alias("min"),
-                    pl.col(col).max().alias("max"),
-                    pl.col(col).std().alias("std"),
-                ]).to_dicts()[0]
+                res = df.select(
+                    [
+                        pl.col(col).mean().alias("mean"),
+                        pl.col(col).min().alias("min"),
+                        pl.col(col).max().alias("max"),
+                        pl.col(col).std().alias("std"),
+                    ]
+                ).to_dicts()[0]
                 stats_line = f"   └ Mean: {_fmt(res['mean'])} | Min: {_fmt(res['min'])} | Max: {_fmt(res['max'])} | Std: {_fmt(res['std'])}"
 
             elif series.dtype in (pl.Utf8, pl.String):

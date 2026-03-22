@@ -1,17 +1,17 @@
 from .seahorse_ffi import (
     PyAgentMemory,
     PyChartGenerator,
+    PyMessageBus,
     PyPlannerRunner,
     PyPolarsAnalyst,
     PyWasmManager,
-    PyMessageBus,
+    deduplicate_by_text,
     fetch_football_data,
     is_system_healthy,
     make_py_runner,
+    normalize_text,
     record_global_failure,
     search_memory,
-    normalize_text,
-    deduplicate_by_text,
 )
 
 __all__ = [

@@ -1,18 +1,18 @@
 """seahorse_ai.engines.graph_db — Neo4j Knowledge Graph Driver.
 
-Provides a singleton driver for interacting with Neo4j to store and 
+Provides a singleton driver for interacting with Neo4j to store and
 retrieve Entities and Relationships for the Hindsight memory system.
 """
 
 import logging
 import os
-from typing import Optional
 
 from neo4j import AsyncDriver, AsyncGraphDatabase
 
 logger = logging.getLogger(__name__)
 
 _driver: AsyncDriver | None = None
+
 
 def get_graph_driver() -> AsyncDriver:
     """Get or initialize the Neo4j Async Driver singleton."""
@@ -21,15 +21,16 @@ def get_graph_driver() -> AsyncDriver:
         uri = os.environ.get("NEO4J_URI", "bolt://localhost:7687")
         user = os.environ.get("NEO4J_USER", "neo4j")
         password = os.environ.get("NEO4J_PASSWORD", "password")
-        
+
         try:
             _driver = AsyncGraphDatabase.driver(uri, auth=(user, password))
             logger.info("Neo4j Driver initialized: %s", uri)
         except Exception as e:
             logger.error("Failed to initialize Neo4j Driver: %s", e)
             raise
-            
+
     return _driver
+
 
 async def close_graph_driver() -> None:
     """Close the driver connection."""
@@ -38,43 +39,46 @@ async def close_graph_driver() -> None:
         await _driver.close()
         _driver = None
 
+
 class GraphManager:
     """High-level wrapper for Neo4j operations."""
-    
+
     def __init__(self) -> None:
         self.driver = get_graph_driver()
 
-    async def upsert_entity(self, name: str, entity_type: str = "Entity", properties: dict | None = None) -> None:
+    async def upsert_entity(
+        self, name: str, entity_type: str = "Entity", properties: dict | None = None
+    ) -> None:
         """Create or update an Entity node."""
         if not name or str(name).lower() == "null" or str(name).strip() == "":
             logger.warning(f"GraphManager: Skipping upsert_entity with invalid name: {name}")
             return
-            
+
         properties = properties or {}
-        query = (
-            f"MERGE (e:{entity_type} {{name: $name}}) "
-            "SET e += $properties "
-            "RETURN e"
-        )
+        query = f"MERGE (e:{entity_type} {{name: $name}}) SET e += $properties RETURN e"
         async with self.driver.session() as session:
             await session.run(query, name=name, properties=properties)
 
     async def add_relationship(
-        self, 
-        subj_name: str, 
-        obj_name: str, 
-        predicate: str, 
-        subj_type: str = "Entity", 
+        self,
+        subj_name: str,
+        obj_name: str,
+        predicate: str,
+        subj_type: str = "Entity",
         obj_type: str = "Entity",
-        properties: dict | None = None
+        properties: dict | None = None,
     ) -> None:
         """Create a relationship between two entities."""
         if not subj_name or not obj_name:
-            logger.warning(f"GraphManager: Skipping add_relationship with invalid names: subj={subj_name}, obj={obj_name}")
+            logger.warning(
+                f"GraphManager: Skipping add_relationship with invalid names: subj={subj_name}, obj={obj_name}"
+            )
             return
-            
+
         if str(subj_name).lower() == "null" or str(obj_name).lower() == "null":
-            logger.warning(f"GraphManager: Skipping add_relationship with 'null' name: subj={subj_name}, obj={obj_name}")
+            logger.warning(
+                f"GraphManager: Skipping add_relationship with 'null' name: subj={subj_name}, obj={obj_name}"
+            )
             return
 
         properties = properties or {}
@@ -83,7 +87,7 @@ class GraphManager:
         # but standard Hindsight usually uses the predicate as the relationship type.
         # Sanitizing predicate for use as relationship type:
         rel_type = predicate.upper().replace(" ", "_").replace("-", "_")
-        
+
         query = (
             f"MERGE (s:{subj_type} {{name: $subj_name}}) "
             f"MERGE (o:{obj_type} {{name: $obj_name}}) "
@@ -91,19 +95,18 @@ class GraphManager:
             "SET r += $properties"
         )
         async with self.driver.session() as session:
-            await session.run(
-                query, 
-                subj_name=subj_name, 
-                obj_name=obj_name, 
-                properties=properties
-            )
+            await session.run(query, subj_name=subj_name, obj_name=obj_name, properties=properties)
 
-    async def link_record_to_entity(self, record_id: str, entity_name: str, entity_type: str = "Entity") -> None:
+    async def link_record_to_entity(
+        self, record_id: str, entity_name: str, entity_type: str = "Entity"
+    ) -> None:
         """Link a HindsightRecord (represented by its ID) to an Entity it mentions."""
         if not entity_name or str(entity_name).lower() == "null":
-            logger.warning(f"GraphManager: Skipping link_record_to_entity with invalid entity_name: {entity_name}")
+            logger.warning(
+                f"GraphManager: Skipping link_record_to_entity with invalid entity_name: {entity_name}"
+            )
             return
-            
+
         query = (
             "MERGE (r:HindsightRecord {id: $record_id}) "
             f"MERGE (e:{entity_type} {{name: $entity_name}}) "
@@ -124,10 +127,7 @@ class GraphManager:
 
     async def get_records_by_entity(self, entity_name: str) -> list[str]:
         """Find HindsightRecord IDs linked to an entity."""
-        query = (
-            "MATCH (r:HindsightRecord)-[:MENTIONS]->(e {name: $name}) "
-            "RETURN r.id as id"
-        )
+        query = "MATCH (r:HindsightRecord)-[:MENTIONS]->(e {name: $name}) RETURN r.id as id"
         async with self.driver.session() as session:
             result = await session.run(query, name=entity_name)
             return [record["id"] async for record in result]

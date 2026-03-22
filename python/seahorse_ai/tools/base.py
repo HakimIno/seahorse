@@ -30,7 +30,7 @@ def tool(description: str, risk_level: str = "low") -> Callable[[F], F]:
         @tool("Search the web for real-time information")
         async def web_search(query: str) -> str:
             ...
-            
+
         @tool("Execute financial trade", risk_level="high")
         async def execute_trade(amount: int) -> str:
             ...
@@ -103,22 +103,24 @@ class SeahorseToolRegistry:
         if name not in self._tools:
             return f"Error: unknown tool '{name}'. Available: {list(self._tools)}"
         fn, spec = self._tools[name]
-        
+
         # Dependency Injection for nested context
         sig = inspect.signature(fn)
         if "_agent_id" in sig.parameters:
             args["_agent_id"] = agent_id
         if "_llm" in sig.parameters:
             from seahorse_ai.core.llm import get_llm
+
             args["_llm"] = get_llm("worker")
 
         if spec.risk_level == "high":
             from seahorse_ai.core.hitl import approval_manager
+
             logger.warning("Tool '%s' is marked as high-risk. Requesting approval...", name)
-            
+
             # Use provided agent_id, or try to extract from args
             effective_agent_id = agent_id or args.get("agent_id")
-            
+
             approved = await approval_manager.request_approval(name, args, effective_agent_id)
             if not approved:
                 logger.info("Human rejected execution of '%s'", name)

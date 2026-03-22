@@ -14,6 +14,7 @@ logger = logging.getLogger(__name__)
 CHART_DIR = "/tmp/seahorse_charts"
 os.makedirs(CHART_DIR, exist_ok=True)
 
+
 @tool(
     "Compose a PREMIUM, professional ECharts visualization using a full ECharts 'option' dictionary. "
     "Designed for high-end business intelligence reports.\n\n"
@@ -46,7 +47,13 @@ async def echarts_composer(option: dict[str, Any]) -> str:
         # Ensure we have a default responsive size if not specified
         # (The rendering template sets 1200x700, but we can hint layout here)
         if "grid" not in option:
-            option["grid"] = {"left": "5%", "right": "5%", "bottom": "10%", "top": "15%", "containLabel": True}
+            option["grid"] = {
+                "left": "5%",
+                "right": "5%",
+                "bottom": "10%",
+                "top": "15%",
+                "containLabel": True,
+            }
 
         filename = f"composer_{uuid.uuid4().hex[:8]}.json"
         filepath = os.path.join(CHART_DIR, filename)
@@ -55,7 +62,7 @@ async def echarts_composer(option: dict[str, Any]) -> str:
             f.write(json.dumps(option, indent=2))
 
         logger.info("echarts_composer: generated custom chart config at %s", filepath)
-        
+
         # Return special prefix so Telegram adapter knows how to handle it
         return f"ECHART_JSON:{filepath}"
 

@@ -17,11 +17,11 @@ from typing import Any
 
 import anyio
 
+from seahorse_ai.core.schemas import Message
 from seahorse_ai.planner.hybrid_schemas import (
     DecompositionGraph,
     SubtaskNode,
 )
-from seahorse_ai.core.schemas import Message
 
 logger = logging.getLogger(__name__)
 
@@ -59,13 +59,17 @@ class TaskDecomposer:
         without calling the LLM, saving ~1-3k tokens.
         """
         # Fast-Path: Skip LLM for simple or common trading checks
-        is_simple_trading = complexity == 3 and any(w in goal.lower() for w in ["ยอดเงิน", "balance", "price", "ราคา", "quote"])
+        is_simple_trading = complexity == 3 and any(
+            w in goal.lower() for w in ["ยอดเงิน", "balance", "price", "ราคา", "quote"]
+        )
         if complexity <= 2 or is_simple_trading:
             return self._single_node_graph(goal)
 
         try:
             with anyio.fail_after(60):
-                return await self._llm_decompose(goal, history, skill_context, complexity=complexity)
+                return await self._llm_decompose(
+                    goal, history, skill_context, complexity=complexity
+                )
         except TimeoutError:
             logger.warning("decomposer: LLM timed out — falling back to single node")
             return self._single_node_graph(goal)
@@ -97,9 +101,7 @@ class TaskDecomposer:
         context = ""
         if history:
             recent = history[-4:]
-            context = "\n".join(
-                f"{m.role}: {(m.content or '')[:200]}" for m in recent
-            )
+            context = "\n".join(f"{m.role}: {(m.content or '')[:200]}" for m in recent)
 
         user_msg = goal
         if context:
@@ -138,7 +140,7 @@ class TaskDecomposer:
         for n in data.get("nodes", []):
             nodes.append(
                 SubtaskNode(
-                    id=n.get("id", f"t{len(nodes)+1}"),
+                    id=n.get("id", f"t{len(nodes) + 1}"),
                     description=n.get("description", ""),
                     assigned_agent=n.get("assigned_agent", "worker"),
                     depends_on=n.get("depends_on", []),

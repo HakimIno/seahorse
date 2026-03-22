@@ -104,6 +104,7 @@ async def database_query(query: str) -> str:
     q_lower = query.strip().lower()
 
     import re
+
     forbidden = ["insert", "update", "delete", "drop", "truncate", "alter", "create", "replace"]
     # Use regex with word boundaries to avoid matching keywords inside column names (e.g., 'created_at')
     pattern = r"\b(" + "|".join(forbidden) + r")\b"

@@ -52,9 +52,9 @@ async def execute_auto_seahorse(
             # Extract first line of docstring
             desc = doc.strip().split("\n")[0]
             team_info.append(f"- {t_name}: {desc}")
-            
+
         team_info_str = "\n        ".join(team_info)
-        
+
         team_prompt = f"""
         Identify the best specialized team for this objective: "{objective}"
         

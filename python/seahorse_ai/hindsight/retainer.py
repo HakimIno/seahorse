@@ -10,13 +10,14 @@ import asyncio
 import json
 import logging
 import random
-from datetime import datetime, timedelta, UTC
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from seahorse_ai.core.llm import get_llm
 from seahorse_ai.core.schemas import Message
 from seahorse_ai.engines.graph_db import GraphManager
-from .models import HindsightRecord, MemoryCategory, Entity, Relation
+
+from .models import Entity, HindsightRecord, MemoryCategory, Relation
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +51,7 @@ You are a Hindsight Memory Extractor. Extract structured facts from the <input_t
 </output_format>
 """
 
+
 class HindsightRetainer:
     def __init__(self, pipeline: Any, concurrency: int = 5) -> None:
         """Initialize with a storage pipeline and concurrency control."""
@@ -63,18 +65,23 @@ class HindsightRetainer:
         # Replace single quotes with double quotes (rough heuristic)
         # This is dangerous for text containing apostrophes, so we only do it if normal parse fails
         import re
+
         # Fix single quotes around keys
         raw = re.sub(r"([{,])\s*'([^']+)':", r'\1"\2":', raw)
         # Fix single quotes around values
         raw = re.sub(r":\s*'([^']*)'([,}])", r': "\1"\2', raw)
         return raw
 
-    async def retain(self, text: str, agent_id: str | None = None, importance: int | None = None) -> list[HindsightRecord]:
+    async def retain(
+        self, text: str, agent_id: str | None = None, importance: int | None = None
+    ) -> list[HindsightRecord]:
         """Process text and store extracted records with cost and concurrency optimization."""
         async with self.semaphore:
             return await self._retain_internal(text, agent_id, importance)
 
-    async def retain_batch(self, texts: list[str], agent_id: str | None = None, importance: int | None = None) -> list[HindsightRecord]:
+    async def retain_batch(
+        self, texts: list[str], agent_id: str | None = None, importance: int | None = None
+    ) -> list[HindsightRecord]:
         """Process multiple texts in parallel using the internal semaphore."""
         logger.info("Hindsight: Processing batch of %d records...", len(texts))
         tasks = [self.retain(text, agent_id, importance) for text in texts]
@@ -83,9 +90,11 @@ class HindsightRetainer:
         all_records = [rec for sublist in results for rec in sublist]
         return all_records
 
-    async def _retain_internal(self, text: str, agent_id: str | None = None, importance: int | None = None) -> list[HindsightRecord]:
+    async def _retain_internal(
+        self, text: str, agent_id: str | None = None, importance: int | None = None
+    ) -> list[HindsightRecord]:
         """The core retention logic, now called via retain() with semaphore control."""
-        
+
         # 1. Fast Path Optimization: For very short/trivial text, avoid LLM call
         if len(text.strip()) < 25:
             logger.info("Hindsight: Fast Path Retain (text too short for deep extraction)")
@@ -94,37 +103,37 @@ class HindsightRetainer:
                 category=MemoryCategory.EXPERIENCE,
                 importance=importance or 1,
                 agent_id=agent_id,
-                metadata={"extraction_mode": "fast_path"}
+                metadata={"extraction_mode": "fast_path"},
             )
             await self.pipeline.store(
                 record.text,
                 metadata=record.to_qdrant_payload(),
                 agent_id=agent_id,
-                importance=record.importance
+                importance=record.importance,
             )
             return [record]
 
         # 2. Deep Path: Extraction
         prompt = _RETAIN_PROMPT.format(text=text)
-        
+
         try:
             logger.info("Hindsight: Deep Path Retain (LLM Extraction) len=%d", len(text))
             result = await self.llm.complete([Message(role="user", content=prompt)], tier="worker")
             raw = str(result.get("content", result) if isinstance(result, dict) else result).strip()
-            
+
             logger.debug("Hindsight: Raw LLM Output: %s", raw)
-            
+
             # Fail-Safe Parsing: Extract JSON block
             json_str = raw
             if "```json" in raw:
                 json_str = raw.split("```json")[1].split("```")[0].strip()
             elif "```" in raw:
                 json_str = raw.split("```")[1].split("```")[0].strip()
-            
+
             # Find the first [ or {
             start_list = json_str.find("[")
             start_dict = json_str.find("{")
-            
+
             if start_list != -1 and (start_dict == -1 or start_list < start_dict):
                 # It's a list
                 end = json_str.rfind("]") + 1
@@ -150,53 +159,62 @@ class HindsightRetainer:
                         data = data[key]
                         break
                 if isinstance(data, dict):
-                    data = [data] # Single record case
+                    data = [data]  # Single record case
 
             records: list[HindsightRecord] = []
-            
+
             for item in data:
                 if not isinstance(item, dict) or "text" not in item:
                     continue
-                    
+
                 record = HindsightRecord(
                     text=item["text"],
                     category=MemoryCategory(item.get("category", "EXPERIENCE")),
                     importance=importance or item.get("importance", 3),
                     agent_id=agent_id,
-                    metadata={"extraction_mode": "deep_path"}
+                    metadata={"extraction_mode": "deep_path"},
                 )
-                
+
                 # Hydrate entities
                 for e in item.get("entities", []):
                     if isinstance(e, dict) and e.get("name") and str(e["name"]).lower() != "null":
-                        record.entities.append(Entity(name=e["name"], type=e.get("type", "GENERIC")))
-                
+                        record.entities.append(
+                            Entity(name=e["name"], type=e.get("type", "GENERIC"))
+                        )
+
                 # Hydrate relations
                 for r in item.get("relations", []):
-                    if isinstance(r, dict) and r.get("subject") and r.get("object") and \
-                       str(r["subject"]).lower() != "null" and str(r["object"]).lower() != "null":
-                            record.relations.append(Relation(
-                                subject=r["subject"], 
-                                predicate=r.get("predicate", "related_to"), 
-                                object=r["object"]
-                            ))
-                
+                    if (
+                        isinstance(r, dict)
+                        and r.get("subject")
+                        and r.get("object")
+                        and str(r["subject"]).lower() != "null"
+                        and str(r["object"]).lower() != "null"
+                    ):
+                        record.relations.append(
+                            Relation(
+                                subject=r["subject"],
+                                predicate=r.get("predicate", "related_to"),
+                                object=r["object"],
+                            )
+                        )
+
                 # Hydrate temporal
                 t_hint = item.get("temporal", {})
                 if isinstance(t_hint, dict):
                     record.temporal.relative_description = t_hint.get("relative_description")
-                
+
                 records.append(record)
-                
+
                 # 3. Persistence with Semantic Deduplication
                 existing = await self.pipeline.search(
-                    record.text,
-                    k=1,
-                    filter_metadata={"agent_id": agent_id} if agent_id else None
+                    record.text, k=1, filter_metadata={"agent_id": agent_id} if agent_id else None
                 )
-                
+
                 if existing and existing[0].get("distance", 1.0) < 0.05:
-                    logger.info("Hindsight: Skipping redundant record (dist=%.4f)", existing[0]["distance"])
+                    logger.info(
+                        "Hindsight: Skipping redundant record (dist=%.4f)", existing[0]["distance"]
+                    )
                     continue
 
                 # 3a. Vector Store
@@ -204,7 +222,7 @@ class HindsightRetainer:
                     record.text,
                     metadata=record.to_qdrant_payload(),
                     agent_id=agent_id,
-                    importance=record.importance
+                    importance=record.importance,
                 )
 
                 # 3b. Graph Store (Neo4j)
@@ -212,12 +230,12 @@ class HindsightRetainer:
                     for entity in record.entities:
                         await self.graph.upsert_entity(entity.name, entity.type)
                         await self.graph.link_record_to_entity(record.id, entity.name)
-                    
+
                     for rel in record.relations:
                         await self.graph.add_relationship(rel.subject, rel.object, rel.predicate)
                 except Exception as ge:
                     logger.warning("Hindsight: Graph persistence failed: %s", ge)
-                
+
             # 4. Maintenance: Occasional Memory Pruning (Garbage Collection)
             # 5% chance to trigger a prune on the current agent's collection
             if random.random() < 0.05:
@@ -233,18 +251,18 @@ class HindsightRetainer:
 
     async def prune_memories(self, agent_id: str | None = None, days_old: int = 30) -> int:
         """Remove low-importance old memories from the active vector search index."""
-        from qdrant_client.models import Filter, FieldCondition, Range, DatetimeRange
+        from qdrant_client.models import DatetimeRange, FieldCondition, Filter, Range
 
         # Importance <= 2 and older than days_old
         cutoff = datetime.now(UTC) - timedelta(days=days_old)
-        
+
         prune_filter = Filter(
             must=[
                 FieldCondition(key="importance", range=Range(lte=2.0)),
-                FieldCondition(key="temporal.timestamp", range=DatetimeRange(lt=cutoff))
+                FieldCondition(key="temporal.timestamp", range=DatetimeRange(lt=cutoff)),
             ]
         )
-        
+
         try:
             if hasattr(self.pipeline, "delete_by_filter"):
                 logger.info("Hindsight: Running memory pruning for agent=%s", agent_id)

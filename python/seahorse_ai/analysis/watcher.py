@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-import anyio
 import json
 import logging
 import os
 
+import anyio
 import asyncpg
 
 from seahorse_ai.core.schemas import Message

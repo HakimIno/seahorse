@@ -87,11 +87,10 @@ class TelegramAdapter:
         self._history: dict[int, deque[Message]] = defaultdict(lambda: deque(maxlen=_MAX_HISTORY))
         self._callback_data_map = {}
         self._user_files: dict[int, list[str]] = defaultdict(list)
-        
+
         # Configuration for specialized bots
         self.welcome_message = os.environ.get(
-            "SEAHORSE_TELEGRAM_WELCOME", 
-            "สวัสดีครับ! ผม Seahorse AI พร้อมช่วยคุณวิเคราะห์ข้อมูลธุรกิจแล้วครับ"
+            "SEAHORSE_TELEGRAM_WELCOME", "สวัสดีครับ! ผม Seahorse AI พร้อมช่วยคุณวิเคราะห์ข้อมูลธุรกิจแล้วครับ"
         )
         self.system_nudge = os.environ.get("SEAHORSE_TELEGRAM_NUDGE", "")
 
@@ -124,13 +123,13 @@ class TelegramAdapter:
     async def reflect_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle /reflect command to consolidate memory."""
         from seahorse_ai.tools.internal.memory import memory_reflect
-        
+
         chat_id = update.effective_chat.id
         user_id = update.effective_user.id if update.effective_user else chat_id
         agent_id = f"telegram_{user_id}"
-        
+
         await context.bot.send_chat_action(chat_id=chat_id, action="typing")
-        
+
         result = await memory_reflect(agent_id=agent_id)
         await self._safe_send_message(
             context,
@@ -142,19 +141,22 @@ class TelegramAdapter:
     async def remember_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle /remember command to explicitly store a fact."""
         from seahorse_ai.tools.internal.memory import memory_store
-        
+
         chat_id = update.effective_chat.id
         user_id = update.effective_user.id if update.effective_user else chat_id
         agent_id = f"telegram_{user_id}"
-        
+
         # Extract text after /remember
         text = " ".join(context.args) if context.args else ""
         if not text:
-            await update.message.reply_text("💡 โปรดใส่ข้อความที่ต้องการให้จำ เช่น: `/remember พรุ่งนี้มีประชุมตอน 10 โมง`", parse_mode=ParseMode.MARKDOWN)
+            await update.message.reply_text(
+                "💡 โปรดใส่ข้อความที่ต้องการให้จำ เช่น: `/remember พรุ่งนี้มีประชุมตอน 10 โมง`",
+                parse_mode=ParseMode.MARKDOWN,
+            )
             return
 
         await context.bot.send_chat_action(chat_id=chat_id, action="typing")
-        
+
         result = await memory_store(text, agent_id=agent_id)
         await self._safe_send_message(
             context,
@@ -166,20 +168,23 @@ class TelegramAdapter:
     async def search_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle /search command to query memory."""
         from seahorse_ai.tools.internal.memory import memory_search
-        
+
         chat_id = update.effective_chat.id
         user_id = update.effective_user.id if update.effective_user else chat_id
         agent_id = f"telegram_{user_id}"
-        
+
         query = " ".join(context.args) if context.args else ""
         if not query:
-            await update.message.reply_text("🔍 โปรดใส่ข้อความที่ต้องการค้นหา เช่น: `/search ประชุมครั้งที่แล้วคุยเรื่องอะไร`", parse_mode=ParseMode.MARKDOWN)
+            await update.message.reply_text(
+                "🔍 โปรดใส่ข้อความที่ต้องการค้นหา เช่น: `/search ประชุมครั้งที่แล้วคุยเรื่องอะไร`",
+                parse_mode=ParseMode.MARKDOWN,
+            )
             return
 
         await context.bot.send_chat_action(chat_id=chat_id, action="typing")
-        
+
         results = await memory_search(query, agent_id=agent_id)
-        
+
         if isinstance(results, str):
             response = results
         else:
@@ -188,7 +193,7 @@ class TelegramAdapter:
                 content = res.get("content", res.get("text", "No content"))
                 score = res.get("score", 0.0)
                 category = res.get("category", "WORLD")
-                response += f"{i+1}. [{category}] (Score: {score:.3f})\n{content}\n\n"
+                response += f"{i + 1}. [{category}] (Score: {score:.3f})\n{content}\n\n"
 
         await self._safe_send_message(
             context,
@@ -210,7 +215,7 @@ class TelegramAdapter:
             chat_id=chat_id,
             text="🔘 **Button Diagnostic**\nClick the button below to test if the bot receives callbacks.",
             reply_markup=reply_markup,
-            parse_mode=ParseMode.MARKDOWN
+            parse_mode=ParseMode.MARKDOWN,
         )
 
     async def _safe_send_message(
@@ -222,7 +227,7 @@ class TelegramAdapter:
         # Split text into chunks of ~4000 characters
         max_chunk = 4000
         chunks = [text[i : i + max_chunk] for i in range(0, len(text), max_chunk)]
-        
+
         for chunk in chunks:
             try:
                 await context.bot.send_message(chat_id=chat_id, text=chunk, **kwargs)
@@ -256,16 +261,16 @@ class TelegramAdapter:
                 doc = msg.document
                 file_name = doc.file_name or f"upload_{uuid.uuid4().hex[:8]}"
                 save_path = os.path.join(UPLOAD_DIR, file_name)
-                
+
                 # Get file from Telegram
                 tg_file = await context.bot.get_file(doc.file_id)
                 await tg_file.download_to_drive(custom_path=save_path)
-                
+
                 logger.info(f"Telegram: File saved to {save_path}")
                 # Store in session for persistence
                 if save_path not in self._user_files[user_id]:
                     self._user_files[user_id].append(save_path)
-                
+
                 file_info = f"\n\n[SYSTEM: User uploaded a file to {save_path}. You can use tools to read it.]"
             except Exception as e:
                 logger.error(f"Telegram: File download failed: {e}")
@@ -285,7 +290,7 @@ class TelegramAdapter:
         if self._user_files.get(user_id):
             active_files = ", ".join(self._user_files[user_id])
             context_nudge = f"\n\n[SYSTEM: Active files in this session: {active_files}. USE THESE instead of sample data!]"
-            if not file_info: # Don't double-add if we just uploaded a new one
+            if not file_info:  # Don't double-add if we just uploaded a new one
                 text += context_nudge
 
         await self._process_text_input(update, context, text, chat_id, user_id, agent_id)
@@ -312,10 +317,9 @@ class TelegramAdapter:
 
             # ── Internal Router Fallback Configuration ──
             from seahorse_ai.core.router import ModelRouter
+
             internal_router = ModelRouter(
-                worker_model=os.environ.get(
-                    "SEAHORSE_MODEL_WORKER", "openrouter/z-ai/glm-5-turbo"
-                ),
+                worker_model=os.environ.get("SEAHORSE_MODEL_WORKER", "openrouter/z-ai/glm-5-turbo"),
                 thinker_model=os.environ.get(
                     "SEAHORSE_MODEL_THINKER", "openrouter/google/gemini-3-flash-preview"
                 ),
@@ -374,24 +378,28 @@ class TelegramAdapter:
                                 content=data["content"], steps=0, agent_id=agent_id, elapsed_ms=0
                             )
                         else:
-                            logger.info("FastPath: [FALLBACK] or Queued. Using local HybridOrchestrator.")
+                            logger.info(
+                                "FastPath: [FALLBACK] or Queued. Using local HybridOrchestrator."
+                            )
                             from seahorse_ai.planner.hybrid_orchestrator import HybridOrchestrator
-                            from seahorse_ai.skills.library import registry  # Ensure skills are registered
+                            from seahorse_ai.skills.library import (
+                                registry,  # Ensure skills are registered
+                            )
                             from seahorse_ai.tools.base import SeahorseToolRegistry
-                            
+
                             tool_registry = SeahorseToolRegistry()
                             for t in registry.get_all_tools():
                                 tool_registry.register(t)
 
                             local_planner = HybridOrchestrator(
-                                llm=internal_router, 
-                                tools=tool_registry
+                                llm=internal_router, tools=tool_registry
                             )
                             response = await local_planner.run(request)
 
                 except Exception as e:
                     logger.error(
-                        "Failed to connect to Rust Router: %s. Falling back to internal HybridOrchestrator…", e
+                        "Failed to connect to Rust Router: %s. Falling back to internal HybridOrchestrator…",
+                        e,
                     )
                     from seahorse_ai.planner.hybrid_orchestrator import HybridOrchestrator
                     from seahorse_ai.skills.library import registry
@@ -401,10 +409,7 @@ class TelegramAdapter:
                     for t in registry.get_all_tools():
                         tool_registry.register(t)
 
-                    local_planner = HybridOrchestrator(
-                        llm=internal_router,
-                        tools=tool_registry
-                    )
+                    local_planner = HybridOrchestrator(llm=internal_router, tools=tool_registry)
                     response = await local_planner.run(request)
                 finally:
                     tg.cancel_scope.cancel()
@@ -413,90 +418,118 @@ class TelegramAdapter:
             self._history[user_id].append(Message(role="assistant", content=response.content))
 
             content = response.content
-            logger.info("Telegram: Handling message for agent %s. Content length: %d", agent_id, len(content))
-            
+            logger.info(
+                "Telegram: Handling message for agent %s. Content length: %d",
+                agent_id,
+                len(content),
+            )
+
             # ── CONTENT PROCESSING ──
             # Remove any XML-like tags (toolcall, action, etc.) that may leak into final output
-            content = re.sub(r"<(toolcall|action|thought|tool_output).*?>.*?</\1>", "", content, flags=re.DOTALL | re.IGNORECASE)
-            content = re.sub(r"<(toolcall|action|thought|tool_output).*?>", "", content, flags=re.IGNORECASE)
-            
+            content = re.sub(
+                r"<(toolcall|action|thought|tool_output).*?>.*?</\1>",
+                "",
+                content,
+                flags=re.DOTALL | re.IGNORECASE,
+            )
+            content = re.sub(
+                r"<(toolcall|action|thought|tool_output).*?>", "", content, flags=re.IGNORECASE
+            )
+
             # The AI sometimes hallucinations fake URLs like ![chart](https://placeholder...)
             content = re.sub(r"!\[.*?\]\(.*?\)", "", content)
-            
+
             # ── Handle Native ECharts JSON (Robust Strip & Render) ──
             # Supports ECHART_JSON:/path or ECHART_JSON:{"json":...} (case-insensitive)
             # Global strip including surrounding markdown code blocks if present
             pattern = r"ECHART_?JSON\s*:\s*(\{.*?\}|[^\s\n]+)"
-            
+
             # Step 1: Strip the tag globally (including surrounding code blocks)
-            content = re.sub(r"```(?:json)?\s*" + pattern + r"\s*```", "", content, flags=re.IGNORECASE | re.DOTALL)
+            content = re.sub(
+                r"```(?:json)?\s*" + pattern + r"\s*```",
+                "",
+                content,
+                flags=re.IGNORECASE | re.DOTALL,
+            )
             content = re.sub(pattern, "", content, flags=re.IGNORECASE | re.DOTALL).strip()
-            
+
             # Re-search for the first one to render (using a fresh search as content has changed)
-            raw_match = re.search(pattern, update.message.text if update.message else "", re.IGNORECASE | re.DOTALL)
+            raw_match = re.search(
+                pattern, update.message.text if update.message else "", re.IGNORECASE | re.DOTALL
+            )
             if raw_match:
                 try:
                     raw_payload = raw_match.group(1).strip()
                     chart_data = None
-                    
+
                     # 1. Try to parse as raw JSON first
                     if raw_payload.startswith("{"):
                         try:
                             chart_data = json.loads(raw_payload)
                         except json.JSONDecodeError:
                             logger.warning("Telegram: Failed to parse raw ECharts JSON payload")
-                    
+
                     # 2. Treat as path if not JSON
                     if chart_data is None and os.path.exists(raw_payload):
                         try:
                             with open(raw_payload) as f:
                                 chart_data = json.loads(f.read())
                         except Exception as e:
-                            logger.error(f"Telegram: Failed to read ECharts from path {raw_payload}: {e}")
-                    
+                            logger.error(
+                                f"Telegram: Failed to read ECharts from path {raw_payload}: {e}"
+                            )
+
                     # 3. FALLBACK: Scan the whole content for a JSON block if path failed/hallucinated
                     if chart_data is None:
                         # Find all ```json { ... } ``` blocks (Greedy but within backticks)
                         json_blocks = re.findall(r"```(?:json)?\s*(\{[\s\S]*?\})\s*```", content)
                         for block in json_blocks:
-                            if "\"series\"" in block or "'series'" in block: # Clear heuristic
+                            if '"series"' in block or "'series'" in block:  # Clear heuristic
                                 try:
                                     chart_data = json.loads(block)
                                     break
-                                except: continue
+                                except:
+                                    continue
 
                     if chart_data is None:
                         # Find all { ... } blocks (greedy for content, non-greedy for the block itself)
                         json_blocks = re.findall(r"(\{[\s\S]*?\})", content, re.DOTALL)
                         for block in json_blocks:
-                            if "series" in block and "type" in block: # Heuristic for ECharts
+                            if "series" in block and "type" in block:  # Heuristic for ECharts
                                 try:
                                     chart_data = json.loads(block)
                                     break
-                                except: continue
+                                except:
+                                    continue
 
                     if chart_data:
                         chart_title = chart_data.get("title", {}).get("text", "Native Chart")
                         # Phase 2: Convert to PNG via bridge
                         from seahorse_ai.tools.visual.viz import render_echarts_to_png
-                        
+
                         png_path = await render_echarts_to_png(json.dumps(chart_data))
                         if png_path:
                             # Attach to response
                             if getattr(response, "image_paths", None) is None:
                                 response.image_paths = []
                             response.image_paths.append(png_path)
-                            
+
                             if not content:
                                 content = f"📊 **{chart_title}**"
                             # We don't need a summary here as the photo speaks for itself
                         else:
                             content += "\n\n❌ **Error**: Rendering ECharts to PNG failed (Check /tmp/seahorse_render.log)"
                     else:
-                        logger.warning(f"Telegram: ECharts source not found. Payload was: {raw_payload}")
-                        content += f"\n\n⚠️ **Warning**: ECharts source not found ({raw_payload[:20]}...)"
+                        logger.warning(
+                            f"Telegram: ECharts source not found. Payload was: {raw_payload}"
+                        )
+                        content += (
+                            f"\n\n⚠️ **Warning**: ECharts source not found ({raw_payload[:20]}...)"
+                        )
                 except Exception as e:
-                    logger.error("Telegram: ECharts rendering pipeline failed: %s", e, exc_info=True)
+                    logger.error(
+                        "Telegram: ECharts rendering pipeline failed: %s", e, exc_info=True
+                    )
                     content += f"\n\n🚨 **Pipeline Error**: {str(e)}"
 
             choices = _extract_choices(content)
@@ -570,21 +603,21 @@ class TelegramAdapter:
         logger.info("Telegram: Received callback with data: %s", cb_key)
 
         await query.answer()
-        
+
         # ── Handle HITL Approvals ──
         if cb_key.startswith("hitl:"):
             _, action, approval_id = cb_key.split(":")
             from seahorse_ai.core.hitl import approval_manager
-            
-            approved = (action == "approve")
+
+            approved = action == "approve"
             success = approval_manager.resolve_approval(approval_id, approved)
-            
+
             status = "✅ APPROVED" if approved else "❌ REJECTED"
             if success:
                 new_text = f"{query.message.text}\n\n**Result:** {status} by User."
             else:
                 new_text = f"{query.message.text}\n\n**Result:** Request {approval_id} expired or already resolved."
-                
+
             try:
                 await query.edit_message_text(new_text, parse_mode=ParseMode.MARKDOWN)
             except Exception as e:
@@ -704,23 +737,26 @@ def main() -> None:
     )
 
     # ── Register HITL Notifier ──
-    from seahorse_ai.core.hitl import approval_manager
     import json
-    
-    async def on_hitl_approval(approval_id: str, tool_name: str, kwargs: dict, agent_id: str | None) -> None:
+
+    from seahorse_ai.core.hitl import approval_manager
+
+    async def on_hitl_approval(
+        approval_id: str, tool_name: str, kwargs: dict, agent_id: str | None
+    ) -> None:
         logger.info("Telegram: HITL requested for %s (tool: %s)", agent_id, tool_name)
         # Handle both simple (telegram_123) and hybrid (telegram_123:sub_t1) IDs
         main_part = agent_id.split(":")[0]
         chat_id = int(main_part.split("_")[1])
-        
+
         keyboard = [
             [
                 InlineKeyboardButton("✅ Approve", callback_data=f"hitl:approve:{approval_id}"),
-                InlineKeyboardButton("❌ Reject", callback_data=f"hitl:reject:{approval_id}")
+                InlineKeyboardButton("❌ Reject", callback_data=f"hitl:reject:{approval_id}"),
             ]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
-        
+
         message_text = (
             f"🚨 **HIGH RISK ACTION DETECTED** 🚨\n\n"
             f"**Tool:** `{tool_name}`\n"
@@ -733,11 +769,11 @@ def main() -> None:
                 chat_id=chat_id,
                 text=message_text,
                 reply_markup=reply_markup,
-                parse_mode=ParseMode.MARKDOWN
+                parse_mode=ParseMode.MARKDOWN,
             )
         except Exception as e:
             logger.error("Failed to send HITL approval message: %s", e)
-            
+
     approval_manager.register_notifier(on_hitl_approval)
 
     app.add_handler(TypeHandler(Update, adapter.handle_update), group=-1)

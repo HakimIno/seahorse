@@ -14,8 +14,6 @@ import sys
 import tempfile
 import textwrap
 
-import anyio
-
 from seahorse_ai.tools.base import tool
 
 logger = logging.getLogger(__name__)
@@ -123,8 +121,10 @@ async def python_interpreter(code: str) -> str:
         }
 
         import asyncio
+
         process = await asyncio.create_subprocess_exec(
-            _get_python_executable(), tmp_path,
+            _get_python_executable(),
+            tmp_path,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             env=safe_env,
@@ -136,7 +136,7 @@ async def python_interpreter(code: str) -> str:
             stdout = stdout_bytes.decode().strip()
             stderr = stderr_bytes.decode().strip()
             returncode = process.returncode
-        except asyncio.TimeoutError:
+        except TimeoutError:
             process.kill()
             logger.warning("python_interpreter: code timed out after %ds", _TIMEOUT_SECONDS)
             return f"Error: Code execution timed out after {_TIMEOUT_SECONDS} seconds."
