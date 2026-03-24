@@ -133,31 +133,26 @@ def reason_node(state_json: str) -> str:
     messages = _deserialize_messages(msgs_data)
     messages = _prune_messages(messages, max_chars=30_000)
 
-    # Ensure a system prompt exists for the autonomous loop
-    has_system = any(m.role == "system" for m in messages)
-    if not has_system:
+    # Ensure the core Seahorse persona and tool rules are present
+    has_persona = any("Seahorse Agent" in (m.content or "") for m in messages if m.role == "system")
+    if not has_persona:
         from seahorse_ai.prompts.core import build_system_prompt
-
-        # Default to DATABASE intent for autonomous tasks to trigger deeper reasoning
+        # Force DATABASE intent to enable thorough reasoning and tool rules
         sys_prompt = build_system_prompt(intent="DATABASE")
-
-        # Dynamic Context: List files in workspace
-        workspace_dir = "workspace"
+        
+        # Add workspace context if available
+        workspace_dir = "."
         files_hint = ""
         if os.path.exists(workspace_dir):
-            files = [
-                f
-                for f in os.listdir(workspace_dir)
-                if f.endswith((".parquet", ".csv", ".json", ".ndjson"))
-            ]
-            if files:
-                files_hint = "\n\n## Available Workfiles (in `workspace/`):"
-                for f in files:
-                    files_hint += f"\n- `{f}`"
-
+            try:
+                files = [f for f in os.listdir(workspace_dir) if not f.startswith(".")]
+                if files:
+                    files_hint = "\n\n## Local Workspace Files:\n" + ", ".join(files[:20])
+            except Exception:
+                pass
         sys_prompt += files_hint
-        sys_prompt += "\n\n## Strict Rules:\n- The `python_interpreter` CANNOT import `polars` or `pandas`. Use `polars_query` for ALL data analysis."
-        sys_prompt += "\n- DATA VOLUME: If a dataset is very large, ALWAYS use `df.sample(n=5000)` for Scatter plots and visualizations. Do NOT refuse to generate charts. Just sample the data."
+        
+        # Insert at the beginning or after welcome
         messages.insert(0, Message(role="system", content=sys_prompt))
 
     router = SeahorseGraphManager.get_router()

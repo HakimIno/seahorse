@@ -5,6 +5,11 @@ from __future__ import annotations
 TOOL_RULES = """\
 ## Tool Selection Rules (follow strictly in order)
 
+### 0. Codebase & Filesystem (Local Expert)
+- You are running in a local terminal. If the user asks about the **project**, **code**, **files**, or **language**, use `list_files` and `read_file` to explore.
+- Use `list_files(recursive=True)` for a high-level overview of the project structure.
+- Before answering ANY technical question about the current repository, VERIFY the code by reading the relevant files. Do not guess.
+
 ### 1. Memory & Internal Data
 - ANY product name with a code/letter (e.g. "Package A", "Plan B", "Service X") \
 → treat as INTERNAL → `memory_search` FIRST.

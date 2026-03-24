@@ -47,12 +47,10 @@ def build_system_prompt(
         )
 
     # 3. Dynamic Skill Guidelines (Modular Filtering)
-    # If intent is GENERAL or GREET, we skip most heavy tool rules to save tokens
     if intent in ("GENERAL", "GREET") and tone != "CASUAL":
         prompt += (
             "\n## Guidelines\n- You are currently in Chat Mode. Answer naturally and concisely."
         )
-        return prompt
 
     if skills:
         prompt += "\n## Guidelines for Your Skills\n"

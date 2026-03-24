@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cargo build:*)",
+      "Bash(./target/debug/seahorse index:*)",
+      "Bash(./target/debug/seahorse search:*)",
+      "Bash(cargo check:*)",
+      "Bash(uv run:*)"
+    ]
+  }
+}

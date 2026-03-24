@@ -4,6 +4,7 @@ members = [
     "crates/seahorse-core",
     "crates/seahorse-router",
     "crates/seahorse-ffi",
+    "crates/seahorse-cli",
     "seahorse-desktop/src-tauri",
 ]
 
@@ -46,7 +47,7 @@ dotenvy     = "0.15"
 # HTTP Client
 reqwest     = { version = "0.11", features = ["json"] }
 # PyO3 (FFI)
-pyo3        = { version = "0.21", features = ["abi3-py311", "auto-initialize"] }
+pyo3        = { version = "0.21", features = ["abi3-py39", "auto-initialize"] }
 # Vector search
 hnsw_rs     = "0.3"
 # WASM sandbox
@@ -64,6 +65,13 @@ governor = "0.6"
 async-trait = "0.1"
 # SQLite Database
 rusqlite    = { version = "0.31", features = ["bundled"] }
+# CLI dependencies
+clap        = { version = "4.5", features = ["derive"] }
+ratatui     = "0.26"
+crossterm   = "0.27"
+ansi-to-tui = "6.0"
+tui-widgets = "0.3"
+color-eyre  = "0.6"
 
 [workspace.lints.clippy]
 all       = "warn"
@@ -75,7 +83,13 @@ missing_errors_doc         = "allow"
 missing_panics_doc         = "allow"
 
 [profile.dev]
-incremental = false
+incremental = true   # ✅ เปิด incremental compilation (เร็วขึ้น 10-100x)
+codegen-units = 256 # ✅ Parallel codegen (dev only)
+
+[profile.dev.package."*"]
+opt-level = 0       # ✅ Dependencies ไม่ optimize (เร็วขึ้น)
 
 [profile.release]
 incremental = false
+lto = "thin"         # ✅ Thin LTO - สมดุลระหว่าง size และ speed
+codegen-units = 1    # Release: optimize for speed

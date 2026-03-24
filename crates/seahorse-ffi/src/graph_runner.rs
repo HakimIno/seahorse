@@ -74,10 +74,10 @@ pub fn build_react_graph() -> Graph {
     let mut graph = Graph::new();
     
     // Add Reason Node (calls LLM)
-    graph.add_node(PyNode::new("reason", "seahorse_ai.nodes", "reason_node"));
+    graph.add_node(PyNode::new("reason", "seahorse_ai.core.nodes", "reason_node"));
     
     // Add Action Node (executes tools)
-    graph.add_node(PyNode::new("action", "seahorse_ai.nodes", "action_node"));
+    graph.add_node(PyNode::new("action", "seahorse_ai.core.nodes", "action_node"));
     
     graph.set_entry_point("reason");
     
@@ -108,7 +108,7 @@ pub fn build_react_graph() -> Graph {
 
 use seahorse_core::worker::PythonRunner;
 use tokio::sync::mpsc;
-use tracing::{error, info, warn};
+use tracing::{error, info};
 
 pub struct PyGraphRunner {
     pub model: String,
@@ -166,7 +166,6 @@ impl PythonRunner for PyGraphRunner {
                     "Graph returned empty messages.".to_string()
                 };
                 
-                let _ = token_tx.send(format!("[DONE] Graph steps completed")).await;
                 Ok(response)
             }
             Err(e) => {
@@ -232,14 +231,7 @@ pub fn init_python_env() -> anyhow::Result<()> {
             }
         }
         
-        // Warm up common heavy imports to prevent circular threading issues
-        if let Err(e) = py.import_bound("tiktoken") {
-            warn!("Optional: could not pre-load tiktoken: {}", e);
-        }
-        if let Err(e) = py.import_bound("litellm") {
-            warn!("Optional: could not pre-load litellm: {}", e);
-        }
-        
+        // Path setup complete
         Ok::<(), PyErr>(())
     }).map_err(|e| anyhow::anyhow!("Python init failed: {}", e))?;
     

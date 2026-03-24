@@ -1,3 +1,8 @@
+# Build optimizations for all platforms
+[build]
+# Use more parallel jobs (default = num_cpus)
+jobs = 8  # ปรับตาม CPU cores
+
 [target.x86_64-unknown-linux-gnu]
 linker    = "clang"
 rustflags = ["-C", "link-arg=-fuse-ld=mold"]
@@ -6,5 +11,11 @@ rustflags = ["-C", "link-arg=-fuse-ld=mold"]
 linker    = "clang"
 rustflags = ["-C", "link-arg=-fuse-ld=mold"]
 
-# macOS: use default system linker (ld64) — mold/lld not supported on macOS
+# macOS optimizations
+[target.x86_64-apple-darwin]
+rustflags = ["-C", "link-arg=-ld64"]
+# หรือใช้ lld ถ้าติดตั้ง: rustflags = ["-C", "link-arg=-fuse-ld=lld"]
+
+[target.aarch64-apple-darwin]
+rustflags = ["-C", "link-arg=-ld64"]
 

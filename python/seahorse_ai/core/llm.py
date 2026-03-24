@@ -7,11 +7,11 @@ Phase 3 improvements:
 """
 
 from __future__ import annotations
+from collections.abc import AsyncIterator
 
 import json
 import logging
 import random
-from collections.abc import AsyncIterator
 
 import anyio
 import litellm
@@ -21,26 +21,26 @@ from seahorse_ai.core.schemas import LLMConfig, Message
 
 logger = logging.getLogger(__name__)
 
-# Register common models to suppress LiteLLM mapping warnings and provide metadata
-litellm.register_model(
-    {
-        "openrouter/baai/bge-m3": {
-            "max_tokens": 8192,
-            "input_cost_per_token": 0.00000001,
-            "output_cost_per_token": 0.00000001,
-            "lite_llm_model_name": "baai/bge-m3",
-            "model_info": {"db_model": False},
-        }
-    }
-)
+def _get_retryable_errors():
+    """Get LiteLLM errors for retry logic."""
+    return (
+        litellm.ServiceUnavailableError,
+        litellm.Timeout,
+        litellm.RateLimitError,
+    )
 
-# Transient errors that are safe to retry
-_RETRYABLE = (
-    litellm.ServiceUnavailableError,
-    litellm.Timeout,
-    litellm.RateLimitError,
-)
-
+def register_litellm_models():
+    """Register common models to LiteLLM registry."""
+    try:
+        litellm.register_model({
+            "openrouter/baai/bge-m3": {
+                "max_tokens": 8192,
+                "input_cost_per_token": 1e-8,
+                "output_cost_per_token": 1e-8,
+            }
+        })
+    except Exception:
+        pass
 
 class LLMClient:
     """Async LLM client wrapping LiteLLM for provider-agnostic access."""
@@ -92,7 +92,7 @@ class LLMClient:
                         yield delta
                 return  # success — exit generator
 
-            except _RETRYABLE as exc:
+            except _get_retryable_errors() as exc:
                 if attempt < retries:
                     jitter = random.random()
                     total_backoff = backoff * (0.5 + jitter)
@@ -160,7 +160,7 @@ class LLMClient:
             # Fallback to standard dict conversion (may not be deep)
             return dict(message)
 
-        except _RETRYABLE as exc:
+        except _get_retryable_errors() as exc:
             if retries > 0:
                 jitter = random.random()
                 total_backoff = backoff * (0.5 + jitter)

@@ -15,7 +15,7 @@ from seahorse_ai.tools.base import tool
 logger = logging.getLogger(__name__)
 
 # Default workspace — relative to CWD; can be overridden via env var
-_WORKSPACE_ROOT = Path(os.environ.get("SEAHORSE_WORKSPACE", "./workspace")).resolve()
+_WORKSPACE_ROOT = Path(os.environ.get("SEAHORSE_WORKSPACE", ".")).resolve()
 
 
 def _resolve_safe(rel_path: str) -> Path:

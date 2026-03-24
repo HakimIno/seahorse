@@ -1,0 +1,53 @@
+[package]
+name        = "seahorse-cli"
+version     = "0.1.0"
+edition     = "2021"
+authors     = ["Seahorse Team"]
+license     = "MIT"
+repository  = "https://github.com/seahorse/seahorse-agent"
+description = "AI-powered coding assistant CLI - Ultra-fast code understanding and refactoring"
+
+[[bin]]
+name = "seahorse"
+path = "src/main.rs"
+
+[dependencies]
+# Workspace dependencies
+seahorse-core  = { path = "../seahorse-core" }
+seahorse-ffi   = { path = "../seahorse-ffi" }
+pyo3           = { workspace = true, features = ["auto-initialize"] }
+tokio          = { workspace = true }
+serde          = { workspace = true }
+serde_json     = { workspace = true }
+thiserror      = { workspace = true }
+anyhow         = { workspace = true }
+tracing        = { workspace = true }
+tracing-subscriber = { workspace = true }
+reqwest        = { workspace = true, features = ["json", "stream"] }
+uuid           = { workspace = true }
+bytes          = { workspace = true }
+futures-util   = { workspace = true }
+tokio-stream   = { workspace = true }
+dotenvy        = { workspace = true }
+clap           = { workspace = true }
+color-eyre     = { workspace = true }
+
+# CLI-specific dependencies
+ratatui        = "0.26"
+crossterm      = "0.27"
+ansi-to-tui    = "6.0"
+tui-widgets    = "0.3"
+
+# Async traits
+async-trait    = { workspace = true }
+
+# Additional dependencies
+async-stream   = "0.3"
+chrono         = { version = "0.4", features = ["serde"] }
+walkdir        = "2"
+rayon          = "1.10"
+regex          = "1"
+rand           = "0.8"
+
+[dev-dependencies]
+tempfile       = "3"
