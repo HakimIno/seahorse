@@ -1,6 +1,7 @@
 """seahorse_ai.core.router — Semantic routing of LLM requests to specialized models."""
 
 from __future__ import annotations
+from collections.abc import AsyncIterator
 
 import logging
 from typing import Literal
@@ -24,12 +25,13 @@ class ModelRouter:
         strategist_model: str,
         fast_path_model: str | None = None,
     ) -> None:
-        self.worker = LLMClient(config=LLMConfig(model=worker_model))
-        self.thinker = LLMClient(config=LLMConfig(model=thinker_model))
-        self.strategist = LLMClient(config=LLMConfig(model=strategist_model))
+        # Create LLMConfig instances with appropriate model fields
+        self.worker = LLMClient(config=LLMConfig(worker_model=worker_model))
+        self.thinker = LLMClient(config=LLMConfig(thinker_model=thinker_model))
+        self.strategist = LLMClient(config=LLMConfig(strategist_model=strategist_model))
         # Default to worker config if fast_path_model not provided
         self.fast = (
-            LLMClient(config=LLMConfig(model=fast_path_model)) if fast_path_model else self.worker
+            LLMClient(config=LLMConfig(fast_path_model=fast_path_model)) if fast_path_model else self.worker
         )
 
     async def complete(
@@ -37,8 +39,14 @@ class ModelRouter:
     ) -> str | dict[str, object]:
         """Execute a completion using the specified model tier."""
         client = getattr(self, tier)
-        logger.info(f"Routing request to {tier} model: {client._config.model}")
-        return await client.complete(messages, **kwargs)
+        return await client.complete(messages, tier=tier, **kwargs)
+
+    def stream(
+        self, messages: list[Message], tier: ModelTier = "worker", **kwargs: object
+    ) -> AsyncIterator[str]:
+        """Stream tokens from the specified model tier."""
+        client = getattr(self, tier)
+        return client.stream(messages, tier=tier, **kwargs)
 
     async def classify_intent(self, prompt: str) -> ModelTier:
         """Determines the required model tier based on prompt keywords and complexity."""

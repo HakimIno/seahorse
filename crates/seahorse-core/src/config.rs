@@ -30,6 +30,19 @@ pub struct Config {
 impl Config {
     /// Load configuration from environment variables with sane defaults.
     pub fn from_env() -> CoreResult<Self> {
+        // API Key Discovery: Check specific provider keys, then fall back to generic
+        let api_key = std::env::var("OPENROUTER_API_KEY")
+            .or_else(|_| std::env::var("ZHIPUAI_API_KEY"))
+            .or_else(|_| std::env::var("OPENAI_API_KEY"))
+            .or_else(|_| std::env::var("LLM_API_KEY"))
+            .unwrap_or_default();
+
+        // Model Tier Discovery:
+        // We prioritize SEAHORSE_MODEL_WORKER but fallback to variants
+        let worker_model = std::env::var("SEAHORSE_MODEL_WORKER")
+            .or_else(|_| std::env::var("SEAHORSE_LLM_MODEL"))
+            .unwrap_or_else(|_| "openrouter/google/gemini-3-flash-preview".to_string());
+
         Ok(Self {
             worker_threads: env_usize("SEAHORSE_WORKER_THREADS", num_cpus()),
             hnsw_m: env_usize("SEAHORSE_HNSW_M", 16),
@@ -39,9 +52,10 @@ impl Config {
             http_port: env_u16("SEAHORSE_HTTP_PORT", 8080)?,
             wasm_fuel_limit: env_u64("SEAHORSE_WASM_FUEL_LIMIT", 10_000_000),
             wasm_memory_limit: env_usize("SEAHORSE_WASM_MEMORY_LIMIT", 64),
-            fast_path_model: std::env::var("SEAHORSE_FAST_PATH_MODEL")
-                .unwrap_or_else(|_| "google/gemini-3.1-flash-lite-preview".to_string()),
-            openrouter_api_key: std::env::var("OPENROUTER_API_KEY").unwrap_or_default(),
+            fast_path_model: std::env::var("SEAHORSE_MODEL_FAST")
+                .or_else(|_| std::env::var("SEAHORSE_FAST_PATH_MODEL"))
+                .unwrap_or_else(|_| worker_model.clone()),
+            openrouter_api_key: api_key,
             persistence_db: std::env::var("SEAHORSE_PERSISTENCE_DB").ok(),
         })
     }

@@ -17,6 +17,7 @@ pub mod fast_path;
 pub mod graph;
 pub mod memory;
 pub mod scheduler;
+pub mod tasks;
 pub mod viz;
 pub mod wasm;
 pub mod worker;
@@ -32,6 +33,7 @@ pub use fast_path::FastPath;
 pub use scheduler::{AgentScheduler, AgentTask};
 pub use worker::{spawn_worker_loop, PythonRunner};
 pub use viz::ChartGenerator;
+pub use tasks::{Task, TaskStatus, TaskStore, TaskId};
 
 use std::sync::Arc;
 use tracing::info;

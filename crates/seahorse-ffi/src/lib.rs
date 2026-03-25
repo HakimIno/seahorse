@@ -11,6 +11,7 @@ pub mod embeddings;
 pub mod graph_runner;
 pub mod memory;
 pub mod refactor;
+pub mod tasks;
 pub mod viz;
 pub mod wasm;
 pub mod networking;
@@ -31,6 +32,7 @@ fn seahorse_ffi(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<bus::PyMessageReceiver>()?;
     m.add_class::<analysis::PyPolarsAnalyst>()?;
     m.add_class::<viz::PyChartGenerator>()?;
+    m.add_class::<graph_runner::PyTokenStreamer>()?;
     m.add_function(wrap_pyfunction!(networking::fetch_football_data, m)?)?;
     m.add_function(wrap_pyfunction!(optimizer::normalize_text, m)?)?;
     m.add_function(wrap_pyfunction!(optimizer::deduplicate_by_text, m)?)?;
@@ -39,6 +41,8 @@ fn seahorse_ffi(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(embeddings::generate_embeddings_batch, m)?)?;
     m.add_function(wrap_pyfunction!(embeddings::get_embedding_dimension, m)?)?;
     m.add_function(wrap_pyfunction!(refactor::run_refactor_crew_entry, m)?)?;
+    // Tasks module
+    m.add_class::<tasks::PyTaskStore>()?;
     wasm::register(m)?;
     Ok(())
 }

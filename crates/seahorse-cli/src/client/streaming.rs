@@ -36,7 +36,7 @@ impl StreamingClient {
     /// Create new streaming client
     pub fn new(base_url: String, jwt_token: String) -> Result<Self> {
         let http_client = Client::builder()
-            .timeout(Duration::from_secs(30))
+            .timeout(Duration::from_secs(120))  // Increased for complex prompts
             .build()?;
 
         Ok(Self {

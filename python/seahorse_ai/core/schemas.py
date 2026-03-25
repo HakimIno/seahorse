@@ -35,9 +35,9 @@ class Message(Struct, omit_defaults=True):
 class LLMConfig(Struct, omit_defaults=True):
     """LLM provider configuration with tier support."""
 
-    model: str = field(
+    worker_model: str = field(
         default_factory=lambda: os.environ.get(
-            "SEAHORSE_MODEL_WORKER", "openrouter/z-ai/glm-5-turbo"
+            "SEAHORSE_MODEL_WORKER", "openrouter/google/gemini-3-flash-preview"
         )
     )
     thinker_model: str = field(
@@ -45,14 +45,19 @@ class LLMConfig(Struct, omit_defaults=True):
             "SEAHORSE_MODEL_THINKER", "openrouter/google/gemini-3-flash-preview"
         )
     )
+    strategist_model: str = field(
+        default_factory=lambda: os.environ.get(
+            "SEAHORSE_MODEL_STRATEGIST", "openrouter/google/gemini-3-flash-preview"
+        )
+    )
     fast_path_model: str = field(
         default_factory=lambda: os.environ.get(
-            "SEAHORSE_MODEL_FAST", "openrouter/google/gemini-3.1-flash-lite-preview"
+            "SEAHORSE_MODEL_FAST", "openrouter/google/gemini-3-flash-preview"
         )
     )
     extract_model: str = field(
         default_factory=lambda: os.environ.get(
-            "SEAHORSE_MODEL_EXTRACT", "openrouter/google/gemini-3.1-flash-lite-preview"
+            "SEAHORSE_MODEL_EXTRACT", "openrouter/google/gemini-2.0-flash-001"
         )
     )
     temperature: float = 0.7

@@ -318,15 +318,15 @@ class TelegramAdapter:
             from seahorse_ai.core.router import ModelRouter
 
             internal_router = ModelRouter(
-                worker_model=os.environ.get("SEAHORSE_MODEL_WORKER", "openrouter/z-ai/glm-5-turbo"),
+                worker_model=os.environ.get("SEAHORSE_MODEL_WORKER", "openrouter/google/gemini-3-flash-preview"),
                 thinker_model=os.environ.get(
                     "SEAHORSE_MODEL_THINKER", "openrouter/google/gemini-3-flash-preview"
                 ),
                 strategist_model=os.environ.get(
-                    "SEAHORSE_MODEL_STRATEGIST", "openrouter/anthropic/claude-sonnet-4.6"
+                    "SEAHORSE_MODEL_STRATEGIST", "openrouter/google/gemini-3-flash-preview"
                 ),
                 fast_path_model=os.environ.get(
-                    "SEAHORSE_FAST_PATH_MODEL", "openrouter/google/gemini-3.1-flash-lite-preview"
+                    "SEAHORSE_FAST_PATH_MODEL", "openrouter/google/gemini-3-flash-preview"
                 ),
             )
 

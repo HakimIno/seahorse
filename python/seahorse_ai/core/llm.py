@@ -68,12 +68,14 @@ class LLMClient:
                 "Please try again in 1 minute."
             )
 
-        if tier in ("thinker", "strategist"):
+        if tier == "thinker":
             model = self._config.thinker_model
+        elif tier == "strategist":
+            model = self._config.strategist_model
         elif tier == "fast":
             model = self._config.fast_path_model
         else:
-            model = self._config.model
+            model = self._config.worker_model
         timeout_sec = 60.0 if tier in ("thinker", "strategist") else 15.0
         backoff = 1.0
         for attempt in range(retries + 1):
@@ -131,12 +133,14 @@ class LLMClient:
                 "System is temporarily in Safe Mode due to multiple LLM failures. Please try again in 1 minute."
             )
 
-        if tier in ("thinker", "strategist"):
+        if tier == "thinker":
             model = self._config.thinker_model
+        elif tier == "strategist":
+            model = self._config.strategist_model
         elif tier == "fast":
             model = self._config.fast_path_model
         else:
-            model = self._config.model
+            model = self._config.worker_model
         timeout_sec = 180.0 if tier in ("thinker", "strategist", "worker") else 30.0
         kwargs: dict = {
             "model": model,
@@ -228,13 +232,27 @@ def get_llm(tier: str = "worker") -> LLMClient:
 
     # Use environment variables if available, otherwise defaults
     config = LLMConfig()
-    model = config.model
 
+    # Select the appropriate model based on tier
     if tier == "thinker":
         model = config.thinker_model
     elif tier == "fast":
         model = config.fast_path_model
+    elif tier == "strategist":
+        model = config.strategist_model
     elif tier == "extract":
         model = config.extract_model
+    else:
+        model = config.worker_model
 
-    return LLMClient(config=LLMConfig(model=model))
+    # Create LLMConfig with the appropriate model field
+    if tier == "thinker":
+        return LLMClient(config=LLMConfig(thinker_model=model))
+    elif tier == "strategist":
+        return LLMClient(config=LLMConfig(strategist_model=model))
+    elif tier == "fast":
+        return LLMClient(config=LLMConfig(fast_path_model=model))
+    elif tier == "extract":
+        return LLMClient(config=LLMConfig(extract_model=model))
+    else:
+        return LLMClient(config=LLMConfig(worker_model=model))

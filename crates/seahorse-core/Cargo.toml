@@ -26,7 +26,8 @@ async-trait   = { workspace = true }
 rusqlite      = { workspace = true }
 
 [dev-dependencies]
-tokio = { workspace = true }
+tokio     = { workspace = true }
+tempfile  = "3"
 
 [[bench]]
 name    = "memory_bench"

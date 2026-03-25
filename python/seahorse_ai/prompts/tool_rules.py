@@ -6,8 +6,14 @@ TOOL_RULES = """\
 ## Tool Selection Rules (follow strictly in order)
 
 ### 0. Codebase & Filesystem (Local Expert)
-- You are running in a local terminal. If the user asks about the **project**, **code**, **files**, or **language**, use `list_files` and `read_file` to explore.
-- Use `list_files(recursive=True)` for a high-level overview of the project structure.
+- You are running in a local terminal. If the user asks about the **project structure**, **architecture**, or **overview**, use `index_project` to map the codebase into memory FIRST.
+- To **SHOW** or **VISUALIZE** the project structure, always use `visualize_project` to generate a professional EChart graph.
+- Use `graph_search_neighbors` to discover relationships between modules and crates.
+- For specific code details, use `list_files` and `read_file` to explore.
+- **NEW: Code Editing**: Use `edit_file` for precise string replacements (80% of code changes). Only use `write_file` when creating new files or completely replacing content.
+- **NEW: Code Search**: Use `glob_files` to find files by pattern (e.g., `**/*.py`). Use `grep_files` to search file contents. Use `find_symbol` to locate function/class definitions.
+- **NEW: Terminal Commands**: Use `bash_command` to run tests, build scripts, or git operations. Requires HITL approval for safety.
+- **NEW: Git Operations**: Use dedicated git tools (`git_status`, `git_commit`, `git_diff`) for version control. Safer and more informative than raw bash commands.
 - Before answering ANY technical question about the current repository, VERIFY the code by reading the relevant files. Do not guess.
 
 ### 1. Memory & Internal Data

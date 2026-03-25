@@ -11,6 +11,7 @@ mod orchestrator;
 mod tui;
 mod client;
 mod config;
+mod setup;
 
 /// Seahorse CLI - AI-Powered Coding Assistant
 ///
@@ -112,6 +113,12 @@ enum Commands {
         session: Option<String>,
     },
 
+    /// Configure Seahorse CLI
+    Config {
+        #[command(subcommand)]
+        config_cmd: ConfigCommands,
+    },
+
     /// Session management
     Session {
         #[command(subcommand)]
@@ -144,6 +151,18 @@ enum SessionCommands {
 
     /// Clear all sessions
     Clear,
+}
+
+#[derive(Subcommand)]
+enum ConfigCommands {
+    /// Run interactive setup wizard
+    Setup,
+
+    /// Show current configuration
+    Show,
+
+    /// Reset configuration to defaults
+    Reset,
 }
 
 #[derive(Subcommand)]
@@ -218,6 +237,22 @@ async fn main() -> Result<()> {
         Commands::Chat { message, session } => {
             info!("💬 Starting chat mode");
             orchestrator.run_chat(message, session).await?;
+        }
+        Commands::Config { config_cmd } => {
+            match config_cmd {
+                ConfigCommands::Setup => {
+                    setup::SetupWizard::run().await?;
+                }
+                ConfigCommands::Show => {
+                    setup::SetupWizard::show_config().await?;
+                }
+                ConfigCommands::Reset => {
+                    info!("🔄 Resetting configuration to defaults");
+                    let default_config = config::CliConfig::default();
+                    default_config.save().await?;
+                    println!("✅ Configuration reset to defaults");
+                }
+            }
         }
         Commands::Session { session_cmd } => {
             match session_cmd {

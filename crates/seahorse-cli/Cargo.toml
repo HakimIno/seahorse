@@ -37,6 +37,7 @@ ratatui        = "0.26"
 crossterm      = "0.27"
 ansi-to-tui    = "6.0"
 tui-widgets    = "0.3"
+unicode-width  = "0.1"
 
 # Async traits
 async-trait    = { workspace = true }

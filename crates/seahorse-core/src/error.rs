@@ -26,8 +26,17 @@ pub enum CoreError {
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),
 
+    #[error("sqlite error: {0}")]
+    Sqlite(#[from] rusqlite::Error),
+
+    #[error("json error: {0}")]
+    Json(#[from] serde_json::Error),
+
     #[error("graph execution error: {0}")]
     Graph(String),
+
+    #[error("task store error: {0}")]
+    TaskStore(String),
 
     #[error("internal error: {0}")]
     Internal(String),

@@ -7,6 +7,24 @@ use pyo3::types::PyList;
 use seahorse_core::error::{CoreError, CoreResult};
 use seahorse_core::graph::{Graph, GraphState, EdgeDestination, Node, ConditionalEdgeClosure};
 
+/// A simple bridge that allows Python to send tokens back to the Rust channel.
+#[pyclass]
+pub struct PyTokenStreamer {
+    tx: mpsc::Sender<String>,
+}
+
+#[pymethods]
+impl PyTokenStreamer {
+    fn send(&self, token: String) {
+        let tx = self.tx.clone();
+        // Since we are in a sync Python context, we use a block_on or just spawn
+        // to send the token to the async channel.
+        tokio::spawn(async move {
+            let _ = tx.send(token).await;
+        });
+    }
+}
+
 // A generic node that calls a Python function via PyO3.
 pub struct PyNode {
     name: String,
@@ -33,6 +51,7 @@ impl Node for PyNode {
     fn call<'a>(
         &'a self,
         state: &'a GraphState,
+        status_tx: Option<tokio::sync::mpsc::Sender<String>>,
     ) -> Pin<Box<dyn Future<Output = CoreResult<GraphState>> + Send + 'a>> {
         // We clone state to move into spawn_blocking
         let state_clone = state.clone();
@@ -52,8 +71,18 @@ impl Node for PyNode {
                     let func = module.getattr(&*fn_name)
                         .map_err(|e| CoreError::Graph(format!("Getattr {}: {}", fn_name, e)))?;
                     
-                    let result_obj = func.call1((json_str,))
-                        .map_err(|e| CoreError::Graph(format!("Call {}: {}", fn_name, e)))?;
+                    // Create a streamer if we have a sender
+                    let result_obj = if let Some(tx) = status_tx {
+                        let streamer = PyTokenStreamer { tx };
+                        let py_streamer = Py::new(py, streamer)
+                            .map_err(|e| CoreError::Graph(format!("Create streamer: {}", e)))?;
+                        
+                        func.call1((json_str, py_streamer))
+                            .map_err(|e| CoreError::Graph(format!("Call {} with streamer: {}", fn_name, e)))?
+                    } else {
+                        func.call1((json_str,))
+                            .map_err(|e| CoreError::Graph(format!("Call {}: {}", fn_name, e)))?
+                    };
                     
                     let result_str: String = result_obj.extract()
                         .map_err(|e| CoreError::Graph(format!("Extract string: {}", e)))?;
@@ -73,19 +102,17 @@ impl Node for PyNode {
 pub fn build_react_graph() -> Graph {
     let mut graph = Graph::new();
     
-    // Add Reason Node (calls LLM)
-    graph.add_node(PyNode::new("reason", "seahorse_ai.core.nodes", "reason_node"));
+    // Build Nodes
+    graph.add_node(PyNode::new("Reasoning", "seahorse_ai.core.nodes", "reason_node"));
+    graph.add_node(PyNode::new("Acting", "seahorse_ai.core.nodes", "action_node"));
     
-    // Add Action Node (executes tools)
-    graph.add_node(PyNode::new("action", "seahorse_ai.core.nodes", "action_node"));
+    // Define flow
+    graph.set_entry_point("Reasoning");
     
-    graph.set_entry_point("reason");
+    // From Acting -> Reasoning is always direct
+    graph.add_edge("Acting", EdgeDestination::Node("Reasoning".to_string()));
     
-    // Edges
-    // From Action -> Reason is always direct
-    graph.add_edge("action", EdgeDestination::Node("reason".to_string()));
-    
-    // From Reason -> Conditional (End or Action)
+    // From Reasoning -> Conditional (End or Acting)
     let condition: ConditionalEdgeClosure = Arc::new(|state: &GraphState| {
         // If state["next_step"] == "action", go to action, else END
         let next = state.get("next_step")
@@ -93,7 +120,7 @@ pub fn build_react_graph() -> Graph {
             .unwrap_or("end");
             
         let dest = if next == "action" {
-            EdgeDestination::Node("action".to_string())
+            EdgeDestination::Node("Acting".to_string())
         } else {
             EdgeDestination::End
         };
@@ -108,7 +135,7 @@ pub fn build_react_graph() -> Graph {
 
 use seahorse_core::worker::PythonRunner;
 use tokio::sync::mpsc;
-use tracing::{error, info};
+use tracing::{error, info, warn};
 
 pub struct PyGraphRunner {
     pub model: String,
@@ -138,6 +165,7 @@ impl PythonRunner for PyGraphRunner {
         let mut initial_state = GraphState::new();
         initial_state.insert("prompt".to_string(), serde_json::to_value(&prompt).unwrap_or(serde_json::Value::Null));
         initial_state.insert("agent_id".to_string(), serde_json::to_value(&agent_id).unwrap_or(serde_json::Value::Null));
+        initial_state.insert("worker_model".to_string(), serde_json::to_value(&self.model).unwrap_or(serde_json::Value::Null));
         
         let initial_messages = history.iter().map(|m| {
             serde_json::json!({"role": &m.role, "content": &m.content})
@@ -150,7 +178,7 @@ impl PythonRunner for PyGraphRunner {
         
         // Run Graph
         // Now PyGraphRunner::run is async, so we can await the graph execution directly.
-        let exec_result = graph.run(initial_state).await;
+        let exec_result = graph.run(initial_state, Some(token_tx)).await;
         
         match exec_result {
             Ok(execution) => {
@@ -205,30 +233,62 @@ pub fn init_python_env() -> anyhow::Result<()> {
         let sys = py.import_bound("sys")?;
         let version: String = sys.getattr("version")?.extract()?;
         let executable: String = sys.getattr("executable")?.extract()?;
-        info!("Python Version: {}", version);
+        
+        // Extract major.minor (e.g. "3.13")
+        let sysconfig = py.import_bound("sysconfig")?;
+        let pyver: String = sysconfig.call_method0("get_python_version")?.extract()?;
+        
+        info!("Python Version: {} (abi: {})", version, pyver);
         info!("Python Executable: {}", executable);
         
         let path: Bound<'_, PyList> = sys.getattr("path")?.downcast_into()?;
         
-        // Add local python source
-        path.insert(0, "python")?;
+        // Add local python source as absolute path
+        if let Ok(abs_python) = std::fs::canonicalize("python") {
+            if let Some(s) = abs_python.to_str() {
+                path.insert(0, s)?;
+                info!("Added local python source to sys.path: {}", s);
+            }
+        }
         
         // Find .venv site-packages
-        if let Ok(entries) = std::fs::read_dir(".venv/lib") {
+        let mut found_matching_venv = false;
+        let venv_lib = std::path::Path::new(".venv/lib");
+        
+        if let Ok(entries) = std::fs::read_dir(venv_lib) {
             for entry in entries.flatten() {
                 if let Ok(file_type) = entry.file_type() {
                     if file_type.is_dir() {
-                        let mut sp_path = entry.path();
-                        sp_path.push("site-packages");
-                        if sp_path.exists() {
-                            if let Some(s) = sp_path.to_str() {
-                                path.append(s)?;
-                                info!("Added to sys.path: {}", s);
+                        let dir_name = entry.file_name();
+                        let dir_str = dir_name.to_string_lossy();
+                        
+                        // Check if this directory matches the current python version (e.g. "python3.13")
+                        if dir_str.starts_with("python") {
+                            let mut sp_path = entry.path();
+                            sp_path.push("site-packages");
+                            
+                            if sp_path.exists() {
+                                if let Ok(abs_path) = std::fs::canonicalize(&sp_path) {
+                                    if let Some(s) = abs_path.to_str() {
+                                        if dir_str.contains(&pyver) {
+                                            path.append(s)?;
+                                            info!("Added matching site-packages to sys.path: {}", s);
+                                            found_matching_venv = true;
+                                        } else {
+                                            warn!("Ignoring mismatched site-packages: {} (Targeting {})", s, pyver);
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
                 }
             }
+        }
+        
+        if !found_matching_venv && venv_lib.exists() {
+            error!(pyver = %pyver, "❌ NO MATCHING .venv site-packages found");
+            error!(pyver = %pyver, "To fix this, run: uv venv --python {} && uv sync", pyver);
         }
         
         // Path setup complete

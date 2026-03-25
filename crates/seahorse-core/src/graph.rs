@@ -15,6 +15,7 @@ pub trait Node: Send + Sync {
     fn call<'a>(
         &'a self,
         state: &'a GraphState,
+        status_tx: Option<tokio::sync::mpsc::Sender<String>>,
     ) -> Pin<Box<dyn Future<Output = CoreResult<GraphState>> + Send + 'a>>;
 }
 
@@ -82,7 +83,11 @@ impl Graph {
     }
 
     /// Run the graph until completion or pause.
-    pub async fn run(&self, mut state: GraphState) -> CoreResult<GraphExecution> {
+    pub async fn run(
+        &self,
+        mut state: GraphState,
+        status_tx: Option<tokio::sync::mpsc::Sender<String>>,
+    ) -> CoreResult<GraphExecution> {
         let mut curr = match &self.entry_point {
             Some(node) => node.clone(),
             None => return Err(crate::error::CoreError::Graph("No entry point set".into())),
@@ -112,8 +117,15 @@ impl Graph {
                 }
             };
 
+            // Emit status update if channel is provided
+            if let Some(tx) = &status_tx {
+                tracing::info!("Emitting status update: {}", curr);
+                let _ = tx.send(format!("[STATUS]: {}", curr)).await;
+            }
+
             // Execute node logic (e.g. call into Python)
-            let state_update = node.call(&state).await?;
+            // Pass the status_tx to the node to allow it to stream tokens
+            let state_update = node.call(&state, status_tx.clone()).await?;
 
             // Merge update into state
             for (k, v) in state_update {

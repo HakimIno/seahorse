@@ -20,6 +20,7 @@ tracing       = { workspace = true }
 async-trait   = { workspace = true }
 regex         = "1.10"
 unicode-normalization = "0.1"
+chrono        = { workspace = true }
 
 [features]
 extension-module = ["pyo3/extension-module"]

@@ -213,8 +213,13 @@ impl CliOrchestrator {
         initial_message: Option<String>,
         session_id: Option<String>,
     ) -> Result<()> {
+        // Load config to get current model
+        let config = crate::config::CliConfig::load().await?;
+        let model_name = config.llm.model.unwrap_or_else(|| "default".to_string());
+
         let mut tui = ChatTui::new(
             self.router_client.clone(),
+            model_name,
             session_id,
         )?;
 

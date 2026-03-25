@@ -31,6 +31,17 @@ from seahorse_ai.tools.data.polars_analyst import (
 )
 from seahorse_ai.tools.internal.auto_architect import auto_architect
 from seahorse_ai.tools.internal.auto_seahorse import execute_auto_seahorse
+from seahorse_ai.tools.internal.project_indexer import index_project
+from seahorse_ai.tools.internal.tasks import (
+    task_count,
+    task_create,
+    task_delete,
+    task_get,
+    task_get_available,
+    task_list,
+    task_set_dependencies,
+    task_update,
+)
 from seahorse_ai.tools.internal.graph_memory import (
     graph_search_neighbors,
     graph_store_triple,
@@ -49,6 +60,18 @@ from seahorse_ai.tools.system.browser import (
     browser_screenshot,
 )
 from seahorse_ai.tools.system.filesystem import list_files, read_file, write_file
+from seahorse_ai.tools.system.git_tool import (
+    git_blame,
+    git_branch,
+    git_checkout_new,
+    git_commit,
+    git_command,
+    git_diff,
+    git_log,
+    git_remote,
+    git_status,
+    git_switch,
+)
 from seahorse_ai.tools.system.integrations import (
     google_calendar_add_event,
     slack_send_message,
@@ -76,7 +99,21 @@ from seahorse_ai.tools.trading.risk_calculator import (
 from seahorse_ai.tools.visual.echarts_composer import echarts_composer
 from seahorse_ai.tools.visual.echarts_viz import native_echarts_chart
 from seahorse_ai.tools.visual.table_viz import create_table_image
+from seahorse_ai.tools.visual.project_visualizer import visualize_project
 from seahorse_ai.tools.visual.viz import create_custom_chart
+
+from seahorse_ai.tools.system.editor import edit_file, list_backups, restore_backup
+from seahorse_ai.tools.system.glob_tool import count_files_by_type, glob_dirs, glob_files
+from seahorse_ai.tools.system.grep_tool import find_symbol, grep_files
+from seahorse_ai.tools.system.bash_tool import bash_command, check_command, system_info
+from seahorse_ai.tools.system.scheduler import (
+    cron_create,
+    cron_delete,
+    cron_enable,
+    cron_explain,
+    cron_list,
+)
+from seahorse_ai.core.autopilot import autopilot_capabilities, autopilot_execute
 
 __all__ = [
     "SeahorseToolRegistry",
@@ -90,6 +127,42 @@ __all__ = [
     "list_files",
     "read_file",
     "write_file",
+    "edit_file",
+    "list_backups",
+    "restore_backup",
+    "glob_files",
+    "glob_dirs",
+    "count_files_by_type",
+    "grep_files",
+    "find_symbol",
+    "bash_command",
+    "check_command",
+    "system_info",
+    "git_command",
+    "git_status",
+    "git_diff",
+    "git_log",
+    "git_commit",
+    "git_branch",
+    "git_blame",
+    "git_remote",
+    "git_checkout_new",
+    "git_switch",
+    "task_create",
+    "task_list",
+    "task_get",
+    "task_update",
+    "task_delete",
+    "task_count",
+    "task_get_available",
+    "task_set_dependencies",
+    "cron_create",
+    "cron_list",
+    "cron_delete",
+    "cron_enable",
+    "cron_explain",
+    "autopilot_execute",
+    "autopilot_capabilities",
     "memory_store",
     "memory_search",
     "memory_feedback",
@@ -153,12 +226,50 @@ def make_default_registry() -> SeahorseToolRegistry:
     registry = SeahorseToolRegistry()
     for fn in (
         test_high_risk_action,
+        index_project,
+        visualize_project,
         execute_auto_seahorse,
         web_search,
         python_interpreter,
         list_files,
         read_file,
         write_file,
+        edit_file,
+        list_backups,
+        restore_backup,
+        glob_files,
+        glob_dirs,
+        count_files_by_type,
+        grep_files,
+        find_symbol,
+        bash_command,
+        check_command,
+        system_info,
+        git_command,
+        git_status,
+        git_diff,
+        git_log,
+        git_commit,
+        git_branch,
+        git_blame,
+        git_remote,
+        git_checkout_new,
+        git_switch,
+        task_create,
+        task_list,
+        task_get,
+        task_update,
+        task_delete,
+        task_count,
+        task_get_available,
+        task_set_dependencies,
+        cron_create,
+        cron_list,
+        cron_delete,
+        cron_enable,
+        cron_explain,
+        autopilot_execute,
+        autopilot_capabilities,
         memory_store,
         memory_search,
         memory_feedback,

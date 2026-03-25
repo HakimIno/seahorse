@@ -1,21 +1,15 @@
-# Build optimizations for all platforms
+[env]
+# Pin the Python version for PyO3 builds to the Nix store path
+# This ensures that both build-time and runtime use the same 3.12.13 version
+PYO3_PYTHON = "/nix/store/gjw0dj160905a2z35r5pv9gb50mnav7r-python3-3.12.13/bin/python3"
+
 [build]
-# Use more parallel jobs (default = num_cpus)
-jobs = 8  # ปรับตาม CPU cores
+# Use sccache for faster compilation across clean builds
+rustc-wrapper = "sccache"
 
-[target.x86_64-unknown-linux-gnu]
-linker    = "clang"
-rustflags = ["-C", "link-arg=-fuse-ld=mold"]
-
-[target.aarch64-unknown-linux-gnu]
-linker    = "clang"
-rustflags = ["-C", "link-arg=-fuse-ld=mold"]
-
-# macOS optimizations
+# Optimize linker settings for macOS
 [target.x86_64-apple-darwin]
-rustflags = ["-C", "link-arg=-ld64"]
-# หรือใช้ lld ถ้าติดตั้ง: rustflags = ["-C", "link-arg=-fuse-ld=lld"]
+rustflags = ["-C", "link-arg=-undefined", "-C", "link-arg=dynamic_lookup"]
 
 [target.aarch64-apple-darwin]
-rustflags = ["-C", "link-arg=-ld64"]
-
+rustflags = ["-C", "link-arg=-undefined", "-C", "link-arg=dynamic_lookup"]

@@ -1,0 +1,87 @@
+#!/bin/bash
+# Seahorse Agent: Unified Launcher
+
+# Find the project root
+PROJECT_ROOT="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+cd "$PROJECT_ROOT"
+
+# Ensure we use the Python version from the Nix environment or fallback to .venv
+# Better: Detect Nix home from pyvenv.cfg if it exists
+if [ -f "$PROJECT_ROOT/.venv/pyvenv.cfg" ]; then
+    VENV_HOME=$(grep "home =" "$PROJECT_ROOT/.venv/pyvenv.cfg" | cut -d '=' -f2 | xargs)
+    export PYO3_PYTHON="$VENV_HOME/python3"
+    
+    # Derive Nix lib directory for macOS linking
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+        NIX_LIB_DIR="$(dirname "$VENV_HOME")/lib"
+        export DYLD_LIBRARY_PATH="$NIX_LIB_DIR"
+        echo "🍎 macOS: Setting DYLD_LIBRARY_PATH=$DYLD_LIBRARY_PATH"
+    fi
+else
+    export PYO3_PYTHON=$(command -v python3 || command -v python)
+fi
+
+echo "🐍 Using Python: $PYO3_PYTHON"
+
+# Load environment variables from .env if it exists
+if [ -f "$PROJECT_ROOT/.env" ]; then
+    # Filter out comments and empty lines, then export each line
+    set -a
+    source "$PROJECT_ROOT/.env"
+    set +a
+    echo "🔑 Environment variables loaded from .env"
+fi
+
+# 1. Check if Router is already running on port 8000
+ROUTER_PID=""
+if ! lsof -i :8000 > /dev/null; then
+    echo "🚀 Starting Seahorse Router in the background..."
+    
+    # Fix for Mac Python linking (dyld: Library not loaded)
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+        export DYLD_FRAMEWORK_PATH="/Applications/Xcode.app/Contents/Developer/Library/Frameworks"
+    fi
+
+    nohup "$PROJECT_ROOT/target/debug/seahorse-router" > /tmp/seahorse-router.log 2>&1 &
+    ROUTER_PID=$!
+    
+    # Wait for router to be ready
+    echo "⏳ Waiting for router to initialize..."
+    MAX_RETRIES=10
+    COUNT=0
+    while ! lsof -i :8000 > /dev/null; do
+        sleep 1
+        COUNT=$((COUNT + 1))
+        if [ $COUNT -ge $MAX_RETRIES ]; then
+            echo "❌ Router failed to start. Check /tmp/seahorse-router.log"
+            exit 1
+        fi
+    done
+    echo "✅ Router is ready!"
+else
+    # If already running, find the PID to allow cleanup on exit
+    ROUTER_PID=$(lsof -t -i :8000)
+    echo "ℹ️  Router already running (PID: $ROUTER_PID)"
+fi
+
+# Cleanup function to kill router on exit
+cleanup() {
+    if [ -n "$ROUTER_PID" ]; then
+        echo ""
+        echo "🛑 Shutting down Seahorse Router (PID: $ROUTER_PID)..."
+        kill -9 $ROUTER_PID 2>/dev/null || true
+        echo "✅ Cleanup complete."
+    fi
+}
+
+# Trap exit signals
+trap cleanup EXIT INT TERM
+
+# 2. Launch the CLI
+if [ $# -eq 0 ]; then
+    echo "💬 Opening Seahorse Agent Chat..."
+    ./target/debug/seahorse chat
+else
+    # Pass all arguments to the binary
+    ./target/debug/seahorse "$@"
+fi

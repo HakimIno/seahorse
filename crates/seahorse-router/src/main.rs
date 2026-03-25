@@ -28,8 +28,11 @@ async fn main() -> anyhow::Result<()> {
     let core = Arc::new(core);
 
     // ── Spawn worker loop ───────────────────────────────────────────────────
-    let model = std::env::var("SEAHORSE_LLM_MODEL")
-        .unwrap_or_else(|_| "openrouter/google/gemini-3-flash-preview".to_string());
+    let model = std::env::var("SEAHORSE_MODEL_WORKER")
+        .or_else(|_| std::env::var("SEAHORSE_LLM_MODEL"))
+        .unwrap_or_else(|_| "openrouter/google/gemini-2.0-flash-001".to_string());
+    
+    info!(model = %model, "🔥 Seahorse Router using model");
 
     let runner = make_arc_py_graph_runner(&model);
     let _worker_handle = spawn_worker_loop(task_rx, runner);

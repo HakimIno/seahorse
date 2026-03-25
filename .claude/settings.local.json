@@ -5,7 +5,10 @@
       "Bash(./target/debug/seahorse index:*)",
       "Bash(./target/debug/seahorse search:*)",
       "Bash(cargo check:*)",
-      "Bash(uv run:*)"
+      "Bash(uv run:*)",
+      "Bash(chmod +x /Users/weerachit/Documents/seahorse/restart.sh && echo \"✅ Script is now executable\")",
+      "Bash(timeout 60 curl -s -X POST http://localhost:8000/v1/agent/stream \\\\\n  -H \"Content-Type: application/json\" \\\\\n  -H \"Authorization: Bearer test-token\" \\\\\n  -d '{\"agent_id\":\"chat\",\"prompt\":\"ทดสอบ\",\"history\":[]}' 2>&1 | head -50)",
+      "Bash(timeout 90 curl -s -X POST http://localhost:8000/v1/agent/stream \\\\\n  -H \"Content-Type: application/json\" \\\\\n  -H \"Authorization: Bearer test-token\" \\\\\n  -d '{\"agent_id\":\"chat\",\"prompt\":\"อธิบายวิธีการทำงานของ async/await ใน Rust พร้อมตัวอย่างโค้ด\",\"history\":[]}' 2>&1 | head -100)"
     ]
   }
 }
