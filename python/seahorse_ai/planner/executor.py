@@ -75,6 +75,8 @@ class ReActExecutor:
         self._cfg = config or ExecutorConfig()
         self._step_callback = step_callback
         self._total_obs_chars: int = 0
+        self._last_tool_signature: str | None = None
+        self._consecutive_repeats: int = 0
 
     async def run(
         self,
@@ -171,8 +173,22 @@ class ReActExecutor:
                     tool_name = func.get("name")
                     call_id = tool_call.get("id")
 
-                    if tool_name == "create_custom_chart" and not isinstance(result, Exception):
-                        image_paths.append(str(result))
+                    # Loop Guard: Check if AI is repeating the exact same tool call
+                    tool_sig = f"{tool_name}:{func.get('arguments', '')}"
+                    if tool_sig == self._last_tool_signature:
+                        self._consecutive_repeats += 1
+                    else:
+                        self._last_tool_signature = tool_sig
+                        self._consecutive_repeats = 0
+
+                    if self._consecutive_repeats >= 2:
+                        logger.warning("executor: loop detected on tool=%s — forcing termination", tool_name)
+                        return ExecutorResult(
+                            content=f"[TERMINATED] Loop detected. The agent repeated '{tool_name}' too many times. Please check the data.",
+                            steps=step + 1,
+                            terminated=True,
+                            termination_reason="infinite_loop",
+                        )
 
                     is_error = isinstance(result, Exception) or (
                         isinstance(result, str) and result.startswith(("Error", "SYSTEM_CRASH"))
@@ -185,7 +201,7 @@ class ReActExecutor:
                         observation = self._cb.get_nudge(tool_name, str(result))  # type: ignore[union-attr]
                     else:
                         any_success = True
-                        observation = str(result)
+                        observation = self._clean_observation(str(result))
                         # NEW: Truncate massive observations to save tokens limit
                         if len(observation) > 4000:
                             observation = (
@@ -262,13 +278,30 @@ class ReActExecutor:
                     image_paths=image_paths if image_paths else None,
                 )
 
-        # Max steps reached
+    # Max steps reached
         return ExecutorResult(
             content="[Agent reached maximum reasoning steps]",
             steps=self._cfg.max_steps,
             terminated=True,
             termination_reason="max_steps",
         )
+
+    def _clean_observation(self, text: str) -> str:
+        """Strip provider-specific noise (URLs, headers) from tool observations."""
+        if not text:
+            return text
+
+        # Remove LiteLLM / Model Provider noise that often leaks into results
+        noise_patterns = [
+            "Provider List: https://docs.litellm.ai/docs/providers",
+            "https://docs.litellm.ai/docs/providers",
+            "LiteLLM completion()",
+        ]
+        cleaned = text
+        for pattern in noise_patterns:
+            cleaned = cleaned.replace(pattern, "")
+
+        return cleaned.strip()
 
     # ── Private ────────────────────────────────────────────────────────────────
 

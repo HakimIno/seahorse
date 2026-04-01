@@ -300,8 +300,12 @@ class ReActPlanner:
                     ),
                 )
 
-            # 5. Build OpenAI tool definitions
-            openai_tools = getattr(self._tools, "to_openai_tools", lambda: [])()
+            # 5. Build OpenAI tool definitions — filtered by intent
+            openai_tools = getattr(self._tools, "to_openai_tools_for_intent", None)
+            if openai_tools is not None:
+                openai_tools = openai_tools(intent)
+            else:
+                openai_tools = getattr(self._tools, "to_openai_tools", lambda: [])()
 
             # 6. Execute ReAct loop
             try:

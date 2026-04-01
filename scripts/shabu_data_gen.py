@@ -13,7 +13,7 @@ PG_URI = os.getenv(
     "postgresql://seahorse_user:seahorse_password@localhost:5432/seahorse_enterprise",
 )
 
-START_DATE = datetime(2024, 1, 1)
+START_DATE = datetime(2024, 10, 1)
 END_DATE = datetime(2025, 3, 31)
 
 # ---------------------------------------------------------------------------
@@ -241,6 +241,23 @@ CITY_DEMAND = {
 }
 BRANCH_TYPE_LIFT = {"Mall": 1.20, "Standalone": 0.85}
 
+# ---------------------------------------------------------------------------
+# Wages and Rent Calibration (2024-2025 Thailand Rates)
+# ---------------------------------------------------------------------------
+WAGE_BASE = {
+    "Bangkok": 16500,
+    "Phuket": 16500,
+    "Chonburi": 14500,
+    "Chiang Mai": 14000,
+    "Khon Kaen": 13500,
+    "Nakhon Ratchasima": 13500,
+}
+RENT_SQM_RATE = {
+    "Bangkok": {"Mall": 1200, "Standalone": 800},
+    "Others": {"Mall": 600, "Standalone": 400},
+}
+# ---------------------------------------------------------------------------
+
 TH_HOLIDAYS = {
     # 2024
     date(2024, 1, 1),  # New Year
@@ -365,7 +382,7 @@ def build_order(cust_count: int) -> list[dict]:
 
 async def setup_db(conn):
     print("Dropping & recreating tables...")
-    for t in ["sales_details", "sales", "menu", "branches"]:
+    for t in ["inventory_logs", "branch_inventory", "expenses", "sales_details", "sales", "menu", "branches"]:
         await conn.execute(f"DROP TABLE IF EXISTS {t} CASCADE")
 
     await conn.execute("""
@@ -415,6 +432,36 @@ async def setup_db(conn):
             subtotal     DECIMAL(12,2)
         )
     """)
+    await conn.execute("""
+        CREATE TABLE branch_inventory (
+            id             SERIAL PRIMARY KEY,
+            branch_id      INTEGER REFERENCES branches(id),
+            menu_item_id   INTEGER REFERENCES menu(id),
+            stock_quantity INTEGER NOT NULL DEFAULT 0,
+            last_updated   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE (branch_id, menu_item_id)
+        )
+    """)
+    await conn.execute("""
+        CREATE TABLE inventory_logs (
+            id           SERIAL PRIMARY KEY,
+            branch_id    INTEGER REFERENCES branches(id),
+            menu_item_id INTEGER REFERENCES menu(id),
+            change_qty   INTEGER NOT NULL,
+            reason       TEXT NOT NULL, -- 'SALE', 'RESTOCK', 'WASTE'
+            timestamp    TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    await conn.execute("""
+        CREATE TABLE expenses (
+            id          SERIAL PRIMARY KEY,
+            branch_id   INTEGER REFERENCES branches(id),
+            category    TEXT NOT NULL, -- 'RENT', 'SALARY', 'UTILITIES', 'MARKETING', 'PO'
+            amount      DECIMAL(12,2) NOT NULL,
+            expense_date DATE NOT NULL,
+            description TEXT
+        )
+    """)
 
 
 async def generate_data():
@@ -452,6 +499,7 @@ async def generate_data():
     # --- Menu ---
     print("Inserting menu...")
     menu_id_map = {}
+    menu_cost_map = {}
     for item in MENU_ITEMS:
         m_id = await conn.fetchval(
             """
@@ -464,16 +512,74 @@ async def generate_data():
             item["cost"],
         )
         menu_id_map[item["name"]] = m_id
+        menu_cost_map[m_id] = float(item["cost"])
 
-    # --- Sales ---
-    print("Generating sales...")
+    # --- Initialize Inventory ---
+    print("Initializing inventory for each branch...")
+    inventory_state = {}  # (branch_id, menu_item_id) -> quantity
+    init_inv_rows = []
+    for b in branch_meta:
+        for m_name, m_id in menu_id_map.items():
+            qty = random.randint(300, 700)
+            inventory_state[(b["id"], m_id)] = qty
+            init_inv_rows.append((b["id"], m_id, qty))
+
+    await conn.executemany(
+        "INSERT INTO branch_inventory (branch_id, menu_item_id, stock_quantity) VALUES ($1, $2, $3)",
+        init_inv_rows,
+    )
+
+    # --- Sales & Expenses ---
+    print("Generating sales and expenses...")
     current_date = START_DATE
+    branch_monthly_revenue = {b["id"]: 0.0 for b in branch_meta}
 
     while current_date <= END_DATE:
         day_rows = []
         day_details = []
+        inv_logs = []
+        daily_expenses = []
+
+        is_first_of_month = current_date.day == 1
+        is_monday = current_date.weekday() == 0
+        is_last_of_month = (current_date + timedelta(days=1)).month != current_date.month
 
         for branch in branch_meta:
+            # 1. Monthly Fixed Costs (Rent & Salary)
+            if is_first_of_month:
+                # Rent
+                city_key = "Bangkok" if branch["city"] == "Bangkok" else "Others"
+                rent_rate = RENT_SQM_RATE[city_key][branch["type"]]
+                rent_amount = branch["sqm"] * rent_rate
+                daily_expenses.append(
+                    (branch["id"], "RENT", rent_amount, current_date.date(), f"Monthly Rent - {branch['sqm']} sqm")
+                )
+
+                # Salary (1 staff per 4 tables)
+                staff_count = max(4, branch["tables"] // 4)
+                wage_base = WAGE_BASE.get(branch["city"], 13500)
+                salary_amount = staff_count * (wage_base + 750)  # Base + Social Security
+                daily_expenses.append(
+                    (branch["id"], "SALARY", salary_amount, current_date.date(), f"Staff Salary - {staff_count} heads")
+                )
+
+            # 2. Weekly Restock (PO)
+            if is_monday:
+                po_total = 0.0
+                for m_name, m_id in menu_id_map.items():
+                    current_stock = inventory_state[(branch["id"], m_id)]
+                    if current_stock < 150:
+                        restock_qty = 500 - current_stock
+                        inventory_state[(branch["id"], m_id)] += restock_qty
+                        po_total += restock_qty * menu_cost_map[m_id]
+                        inv_logs.append((branch["id"], m_id, restock_qty, "RESTOCK", current_date))
+                
+                if po_total > 0:
+                    daily_expenses.append(
+                        (branch["id"], "PO", po_total, current_date.date(), "Weekly Raw Material Procurement")
+                    )
+
+            # 3. Daily Sales
             mult = get_day_multiplier(current_date, branch["city"], branch["type"])
             n_orders = max(1, int(base_orders(branch["sqm"]) * mult * random.uniform(0.8, 1.2)))
             is_hol = current_date.date() in TH_HOLIDAYS
@@ -494,51 +600,100 @@ async def generate_data():
                     else 0.0
                 )
                 total = max(0.0, raw - discount)
+                branch_monthly_revenue[branch["id"]] += total
 
                 day_rows.append((branch["id"], ts, cc, tbl, dur, total, discount, payment, is_hol))
                 day_details.append(ordered)
 
-        # Bulk insert
-        sale_ids = await conn.fetch(
-            """
-            INSERT INTO sales
-                (branch_id,timestamp,customer_count,table_number,
-                 duration_mins,total_amount,discount_amount,payment_method,is_holiday)
-            SELECT b,ts,cc,tn,dm,ta,da,pm,ih
-            FROM UNNEST($1::int[],$2::timestamp[],$3::int[],$4::int[],
-                        $5::int[],$6::float[],$7::float[],$8::text[],$9::bool[])
-                 AS t(b,ts,cc,tn,dm,ta,da,pm,ih)
-            RETURNING id
-        """,
-            [r[0] for r in day_rows],
-            [r[1] for r in day_rows],
-            [r[2] for r in day_rows],
-            [r[3] for r in day_rows],
-            [r[4] for r in day_rows],
-            [float(r[5]) for r in day_rows],
-            [float(r[6]) for r in day_rows],
-            [r[7] for r in day_rows],
-            [r[8] for r in day_rows],
-        )
+                # Deduct Inventory
+                for it in ordered:
+                    m_id = menu_id_map[it["name"]]
+                    qty = it["qty"]
+                    inventory_state[(branch["id"], m_id)] -= qty
+                    inv_logs.append((branch["id"], m_id, -qty, "SALE", ts))
 
-        detail_rows = []
-        for rec, ordered in zip(sale_ids, day_details, strict=True):
-            for it in ordered:
-                qty = it["qty"]
-                price = float(it["price"])
-                detail_rows.append((rec["id"], menu_id_map[it["name"]], qty, price, price * qty))
+            # 4. Monthly Variable Costs (Utilities & Marketing)
+            if is_last_of_month:
+                rev = branch_monthly_revenue[branch["id"]]
+                # Utilities (Base + 3% Rev)
+                util_amount = (branch["sqm"] * 50) + (rev * 0.03)
+                daily_expenses.append(
+                    (branch["id"], "UTILITIES", util_amount, current_date.date(), "Monthly Electricity & Water")
+                )
+                # Marketing (2-5% Rev)
+                mkt_amount = rev * random.uniform(0.02, 0.05)
+                daily_expenses.append(
+                    (branch["id"], "MARKETING", mkt_amount, current_date.date(), "Monthly Marketing & Promotion")
+                )
+                # Reset for next month
+                branch_monthly_revenue[branch["id"]] = 0.0
 
-        if detail_rows:
+        # --- Bulk Inserts for the day ---
+        
+        # Expenses
+        if daily_expenses:
             await conn.executemany(
-                """
-                INSERT INTO sales_details (sale_id,menu_item_id,quantity,unit_price,subtotal)
-                VALUES ($1,$2,$3,$4,$5)
-            """,
-                detail_rows,
+                "INSERT INTO expenses (branch_id, category, amount, expense_date, description) VALUES ($1, $2, $3, $4, $5)",
+                daily_expenses
             )
 
-        print(f"  {current_date.date()} — {len(day_rows):,} orders")
+        # Sales
+        if day_rows:
+            sale_ids = await conn.fetch(
+                """
+                INSERT INTO sales
+                    (branch_id,timestamp,customer_count,table_number,
+                     duration_mins,total_amount,discount_amount,payment_method,is_holiday)
+                SELECT b,ts,cc,tn,dm,ta,da,pm,ih
+                FROM UNNEST($1::int[],$2::timestamp[],$3::int[],$4::int[],
+                            $5::int[],$6::float[],$7::float[],$8::text[],$9::bool[])
+                     AS t(b,ts,cc,tn,dm,ta,da,pm,ih)
+                RETURNING id
+            """,
+                [r[0] for r in day_rows],
+                [r[1] for r in day_rows],
+                [r[2] for r in day_rows],
+                [r[3] for r in day_rows],
+                [r[4] for r in day_rows],
+                [float(r[5]) for r in day_rows],
+                [float(r[6]) for r in day_rows],
+                [r[7] for r in day_rows],
+                [r[8] for r in day_rows],
+            )
+
+            detail_rows = []
+            for rec, ordered in zip(sale_ids, day_details, strict=True):
+                for it in ordered:
+                    qty = it["qty"]
+                    price = float(it["price"])
+                    detail_rows.append((rec["id"], menu_id_map[it["name"]], qty, price, price * qty))
+
+            if detail_rows:
+                await conn.executemany(
+                    "INSERT INTO sales_details (sale_id,menu_item_id,quantity,unit_price,subtotal) VALUES ($1,$2,$3,$4,$5)",
+                    detail_rows,
+                )
+
+        # Inventory Logs
+        if inv_logs:
+            await conn.executemany(
+                "INSERT INTO inventory_logs (branch_id, menu_item_id, change_qty, reason, timestamp) VALUES ($1, $2, $3, $4, $5)",
+                inv_logs
+            )
+
+        print(f"  {current_date.date()} — {len(day_rows):,} orders, {len(daily_expenses)} expenses")
         current_date += timedelta(days=1)
+
+    # Final Sync Branch Inventory
+    print("Syncing final inventory levels...")
+    sync_rows = []
+    for (b_id, m_id), qty in inventory_state.items():
+        sync_rows.append((qty, b_id, m_id))
+    
+    await conn.executemany(
+        "UPDATE branch_inventory SET stock_quantity = $1, last_updated = CURRENT_TIMESTAMP WHERE branch_id = $2 AND menu_item_id = $3",
+        sync_rows
+    )
 
     await conn.close()
     print("\nDone.")

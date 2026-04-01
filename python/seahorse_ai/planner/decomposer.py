@@ -58,11 +58,14 @@ class TaskDecomposer:
         For simple goals (complexity <= 2) a single-node graph is returned
         without calling the LLM, saving ~1-3k tokens.
         """
-        # Fast-Path: Skip LLM for simple or common trading checks
+        # Fast-Path: Skip LLM for simple data visualization or common trading checks
+        is_simple_viz = complexity == 3 and any(
+            w in goal.lower() for w in ["chart", "graph", "plot", "กราฟ", "แผนภูมิ"]
+        )
         is_simple_trading = complexity == 3 and any(
             w in goal.lower() for w in ["ยอดเงิน", "balance", "price", "ราคา", "quote"]
         )
-        if complexity <= 2 or is_simple_trading:
+        if complexity <= 2 or is_simple_viz or is_simple_trading:
             return self._single_node_graph(goal)
 
         try:

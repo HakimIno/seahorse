@@ -443,6 +443,11 @@ class TelegramAdapter:
             # Global strip including surrounding markdown code blocks if present
             pattern = r"ECHART_?JSON\s*:\s*(\{.*?\}|[^\s\n]+)"
 
+            # Re-search for the first one to render BEFORE we strip it!
+            raw_match = re.search(
+                pattern, content, re.IGNORECASE | re.DOTALL
+            )
+
             # Step 1: Strip the tag globally (including surrounding code blocks)
             content = re.sub(
                 r"```(?:json)?\s*" + pattern + r"\s*```",
@@ -452,10 +457,6 @@ class TelegramAdapter:
             )
             content = re.sub(pattern, "", content, flags=re.IGNORECASE | re.DOTALL).strip()
 
-            # Re-search for the first one to render (using a fresh search as content has changed)
-            raw_match = re.search(
-                pattern, update.message.text if update.message else "", re.IGNORECASE | re.DOTALL
-            )
             if raw_match:
                 try:
                     raw_payload = raw_match.group(1).strip()

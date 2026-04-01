@@ -82,18 +82,22 @@ class CriticAgent:
             with anyio.fail_after(30):
                 return await self._llm_evaluate(goal, success_criteria, subtask_results)
         except TimeoutError:
-            logger.warning("critic: LLM timed out — falling back to rule-based pass")
+            logger.warning("critic: LLM timed out — returning partial verdict for safety")
             return CriticVerdict(
-                verdict="pass",
-                passed_criteria=success_criteria,
-                reason="Critic LLM timed out; rule-based fallback pass.",
+                verdict="partial",
+                passed_criteria=[],
+                failed_criteria=success_criteria,
+                failed_subtasks=[r.subtask_id for r in subtask_results],
+                reason="Critic LLM timed out; marking as partial to trigger re-evaluation.",
             )
         except Exception as exc:
             logger.error("critic: LLM failed: %s", exc)
             return CriticVerdict(
-                verdict="pass",
-                passed_criteria=success_criteria,
-                reason=f"Critic error ({exc}); defaulting to pass.",
+                verdict="partial",
+                passed_criteria=[],
+                failed_criteria=success_criteria,
+                failed_subtasks=[r.subtask_id for r in subtask_results],
+                reason=f"Critic error ({exc}); marking as partial for safety.",
             )
 
     def _rule_based_check(

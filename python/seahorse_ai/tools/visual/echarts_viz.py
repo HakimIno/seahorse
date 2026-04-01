@@ -1,6 +1,8 @@
 """ECharts visualization tool — generates premium charts using native Charming (Rust) engine.
 
 Bridges the seahorse_ffi.PyChartGenerator with the Telegram adapter for image rendering.
+
+Fixed: Added proper category extraction to prevent "Can't extract `str` to `Vec`" error.
 """
 
 from __future__ import annotations
@@ -8,6 +10,7 @@ from __future__ import annotations
 import logging
 import os
 import uuid
+from typing import Any, Dict, List
 
 from seahorse_ai.tools.base import tool
 
@@ -31,22 +34,29 @@ except ImportError:
 )
 async def native_echarts_chart(
     title: str,
-    categories: list[str],
-    values: list[float],
+    categories: list[str] | str | None = None,
+    values: list[float] | float | None = None,
     chart_type: str = "bar",
 ) -> str:
-    """Generate ECharts JSON and return the path to the rendered image (or JSON if rendering fails)."""
+    """Generate ECharts JSON and return the path to the rendered image (or JSON if rendering fails).
+
+    Fixed: Properly handle categories as string or list to prevent extraction errors.
+    """
     if not _NATIVE_AVAILABLE:
         return "Error: Native ECharts engine (seahorse_ffi) is not available."
 
     try:
+        # Safely extract categories (handle both string and list)
+        safe_categories = _extract_categories_safe(categories)
+        safe_values = _extract_values_safe(values)
+
         gen = seahorse_ffi.PyChartGenerator()
 
         if chart_type.lower() == "line":
-            chart_json = gen.line_chart(title, categories, values)
+            chart_json = gen.line_chart(title, safe_categories, safe_values)
         else:
             # Default to bar
-            chart_json = gen.bar_chart(title, categories, values)
+            chart_json = gen.bar_chart(title, safe_categories, safe_values)
 
         # ── PREMIUM POST-PROCESSING ──
         import json
@@ -95,3 +105,25 @@ async def native_echarts_chart(
     except Exception as e:
         logger.error("native_echarts: generation failed: %s", e)
         return f"Error: Chart generation failed: {e}"
+
+
+def _extract_categories_safe(categories: list[str] | str | None) -> list[str]:
+    """Safely extract categories, handling both string and list input."""
+    if categories is None:
+        return []
+    if isinstance(categories, str):
+        return [categories]
+    if isinstance(categories, list):
+        return [str(c) for c in categories]
+    return []
+
+
+def _extract_values_safe(values: list[float] | float | None) -> list[float]:
+    """Safely extract values, handling both single value and list input."""
+    if values is None:
+        return []
+    if isinstance(values, (int, float)):
+        return [float(values)]
+    if isinstance(values, list):
+        return [float(v) for v in values]
+    return []

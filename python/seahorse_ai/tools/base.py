@@ -98,6 +98,29 @@ class SeahorseToolRegistry:
             for spec in self.specs
         ]
 
+    def to_openai_tools_for_intent(self, intent: str) -> list[dict[str, Any]]:
+        """Return filtered OpenAI tool definitions relevant to the given intent.
+
+        Uses the TOOL_GROUPS and INTENT_TO_GROUPS mappings from the tools
+        package to select only the tools that are likely needed for this
+        type of request. Falls back to all tools for unknown intents.
+        """
+        from seahorse_ai.tools import get_tools_for_intent
+
+        allowed_names = set(get_tools_for_intent(intent))
+        return [
+            {
+                "type": "function",
+                "function": {
+                    "name": spec.name,
+                    "description": spec.description,
+                    "parameters": spec.parameters,
+                },
+            }
+            for spec in self.specs
+            if spec.name in allowed_names
+        ]
+
     async def call(self, name: str, args: dict[str, object], agent_id: str | None = None) -> str:
         """Call a tool by name with the given arguments."""
         if name not in self._tools:

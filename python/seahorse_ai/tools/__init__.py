@@ -141,6 +141,118 @@ __all__ = [
     "fetch_cot_report",
 ]
 
+# ── Tool Groups for Dynamic Filtering ─────────────────────────────────────────
+# Maps logical groups → tool function names. CORE is always included.
+
+TOOL_GROUPS: dict[str, list[str]] = {
+    "CORE": [
+        "web_search",
+        "python_interpreter",
+        "memory_search",
+        "memory_store",
+        "memory_feedback",
+        "memory_delete",
+        "memory_clear",
+        "list_files",
+        "read_file",
+        "write_file",
+    ],
+    "DATABASE": [
+        "database_query",
+        "database_schema",
+        "polars_query",
+        "polars_profile",
+        "polars_inspect_join",
+        "native_polars_aggregate",
+        "duckdb_sql",
+        "duckdb_query_json",
+        "sql_to_polars",
+        "data_profile",
+    ],
+    "VISUAL": [
+        "echarts_composer",
+        "native_echarts_chart",
+        "create_custom_chart",
+        "create_table_image",
+    ],
+    "TRADING": [
+        "get_futures_live_price",
+        "get_futures_market_depth",
+        "get_stock_live_price",
+        "get_forex_live_price",
+        "get_ibkr_account_summary",
+        "get_ibkr_open_positions",
+        "place_ibkr_order",
+        "calculate_position_size",
+        "calculate_risk_of_ruin",
+        "evaluate_kelly_criterion",
+        "fetch_cme_fedwatch_data",
+        "fetch_cot_report",
+    ],
+    "BUSINESS": [
+        "calculate_promo_impact",
+        "calculate_margin",
+        "calculate_break_even",
+        "scenario_analysis",
+        "forecast_sales",
+        "competitor_radar",
+        "war_room",
+    ],
+    "BROWSER": [
+        "browser_scan",
+        "browser_scrape",
+        "browser_screenshot",
+        "browser_close",
+    ],
+    "DATA_ENGINEERING": [
+        "convert_to_parquet",
+        "extract_sql_to_parquet",
+        "load_to_sql",
+    ],
+    "GRAPH": [
+        "graph_store_triple",
+        "graph_search_neighbors",
+    ],
+    "INTEGRATION": [
+        "slack_send_message",
+        "google_calendar_add_event",
+    ],
+    "INTERNAL": [
+        "auto_architect",
+        "execute_auto_seahorse",
+    ],
+}
+
+# Maps classified intent → which tool groups to include (CORE is always added)
+INTENT_TO_GROUPS: dict[str, list[str]] = {
+    "GENERAL": [],  # CORE only
+    "PUBLIC_REALTIME": ["BROWSER"],
+    "PRIVATE_MEMORY": ["GRAPH"],
+    "DATABASE": ["DATABASE", "VISUAL", "DATA_ENGINEERING"],
+    "STORY": ["DATABASE", "VISUAL", "BUSINESS", "BROWSER"],
+    "POLARS": ["DATABASE", "VISUAL"],
+    "TRADING": ["TRADING", "VISUAL"],
+}
+
+
+def get_tools_for_intent(intent: str) -> list[str]:
+    """Return the list of tool names relevant to the given intent.
+
+    Always includes CORE tools. Returns ALL tools for unknown intents.
+    """
+    if intent not in INTENT_TO_GROUPS:
+        # Unknown intent → include everything (safe fallback)
+        all_tools: list[str] = []
+        for group in TOOL_GROUPS.values():
+            all_tools.extend(group)
+        return list(dict.fromkeys(all_tools))  # dedupe preserving order
+
+    groups = ["CORE"] + INTENT_TO_GROUPS[intent]
+    tools: list[str] = []
+    for g in groups:
+        tools.extend(TOOL_GROUPS.get(g, []))
+    return list(dict.fromkeys(tools))  # dedupe preserving order
+
 
 @tool("คำสั่งทดสอบที่มีความเสี่ยงสูง (HITL)", risk_level="high")
 async def test_high_risk_action(reason: str) -> str:

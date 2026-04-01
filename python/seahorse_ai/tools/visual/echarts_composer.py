@@ -26,7 +26,8 @@ os.makedirs(CHART_DIR, exist_ok=True)
     "3. BARS: Use rounded corners: itemStyle: { borderRadius: [10, 10, 0, 0] }.\n"
     "4. LINES: Use smooth curves: series: { smooth: true, lineStyle: { width: 3 } }.\n"
     "5. GRID: Use containLabel: true and generous padding.\n"
-    "6. Use only JSON-serializable structures (no JS functions)."
+    "6. Use only JSON-serializable structures (no JS functions).\n"
+    "7. MANDATORY OUTPUT: To display the generated chart to the user, you MUST include the exact return string from this tool (e.g., ECHART_JSON:/tmp/...) in your final text response."
 )
 async def echarts_composer(option: dict[str, Any]) -> str:
     """Save the ECharts option as JSON and return the ECHART_JSON prefix for rendering."""

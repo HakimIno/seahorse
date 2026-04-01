@@ -43,14 +43,37 @@ def _deserialize_messages(msgs_data: list[dict]) -> list[Message]:
     return [Message(**m) for m in msgs_data]
 
 
-def _prune_messages(messages: list[Message], max_chars: int = 20_000) -> list[Message]:
-    """Sliding-window context pruning: keep system messages, first user message, and recent history.
+def _estimate_tokens(text: str) -> int:
+    """Estimate token count from text length.
 
-    Ensures no LLM context overflow by dropping the oldest non-system messages first.
-    The first user message is always preserved for context anchoring.
+    Thai text averages ~3.5 chars per token, English ~4 chars per token.
+    We use 3.5 as a conservative estimate to handle mixed content.
+    """
+    return max(1, int(len(text) / 3.5))
+
+
+def _prune_messages(
+    messages: list[Message],
+    max_context_tokens: int = 12_000,
+    tool_tokens_budget: int = 3_000,
+    response_reserve: int = 2_000,
+) -> list[Message]:
+    """Token-aware sliding-window context pruning.
+
+    Keeps system messages, first user message, and recent history within
+    the available token budget after reserving space for tool definitions
+    and the model's response.
+
+    Args:
+        messages: Full message history.
+        max_context_tokens: Max tokens available for messages (model context - overhead).
+        tool_tokens_budget: Estimated tokens consumed by tool definitions.
+        response_reserve: Tokens reserved for the model's response.
     """
     if not messages:
         return messages
+
+    available_tokens = max_context_tokens - tool_tokens_budget - response_reserve
 
     system_msgs = [m for m in messages if m.role == "system"]
     other_msgs = [m for m in messages if m.role != "system"]
@@ -60,17 +83,17 @@ def _prune_messages(messages: list[Message], max_chars: int = 20_000) -> list[Me
 
     first_msg = other_msgs[0]
     kept_other: list[Message] = []
-    current_chars = sum(len(str(m.content or "")) for m in system_msgs) + len(
+    current_tokens = sum(_estimate_tokens(str(m.content or "")) for m in system_msgs) + _estimate_tokens(
         str(first_msg.content or "")
     )
 
     for msg in reversed(other_msgs[1:]):
-        msg_len = len(str(msg.content or ""))
+        msg_tokens = _estimate_tokens(str(msg.content or ""))
         # Always keep at least the most recent message, even if it alone exceeds limit
-        if current_chars + msg_len > max_chars and kept_other:
+        if current_tokens + msg_tokens > available_tokens and kept_other:
             break
         kept_other.insert(0, msg)
-        current_chars += msg_len
+        current_tokens += msg_tokens
 
     return system_msgs + [first_msg] + kept_other
 
@@ -131,7 +154,7 @@ def reason_node(state_json: str) -> str:
     state = json.loads(state_json)
     msgs_data = state.get("messages", [])
     messages = _deserialize_messages(msgs_data)
-    messages = _prune_messages(messages, max_chars=30_000)
+    messages = _prune_messages(messages, max_context_tokens=12_000, tool_tokens_budget=3_000)
 
     # Ensure a system prompt exists for the autonomous loop
     has_system = any(m.role == "system" for m in messages)
@@ -189,24 +212,9 @@ def reason_node(state_json: str) -> str:
         if has_tools:
             state["next_step"] = "action"
         else:
-            # Final synthesis step for the autonomous loop to ensure charts are included
-            # and a high-quality human-friendly response is generated.
-            logger.info("nodes.reason_node: performing final synthesis via strategist")
-            synth_prompt = (
-                "You are the Strategist. Summarize the findings and research steps performed above. "
-                "CRITICAL: If an EChart JSON was generated in the conversation history, you MUST include it "
-                "VERBATIM in your response using the tag ECHART_JSON: <path_or_json>. "
-                "Do NOT modify the JSON. Do NOT omit it. Keep the language professional and helpful."
-            )
-            messages.append(Message(role="system", content=synth_prompt))
-            synth_resp = asyncio.run(router.complete(messages, tier="strategist"))
-            if isinstance(synth_resp, dict):
-                filtered_response["content"] = synth_resp.get(
-                    "content", filtered_response.get("content", "")
-                )
-            else:
-                filtered_response["content"] = str(synth_resp)
-
+            # No tool calls → this is the final answer.
+            # NOTE: Strategist synthesis is handled by the planner layer
+            # (ReActPlanner._synthesize), so we do NOT duplicate it here.
             state["next_step"] = "end"
 
         # Append to message history

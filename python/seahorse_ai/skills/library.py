@@ -74,6 +74,7 @@ advanced_analysis_skill = SeahorseSkill(
     rules=[
         "Use `native_echarts_chart` for quick Bar/Line charts.",
         "Use `echarts_composer` (ECharts) for ANY complex or premium visuals (Scatter, Heatmap, etc.).",
+        "**ONCE SUCCESSFUL**: If you have the `ECHART_JSON:` path, you are DONE with visualization. Answer the user.",
         "**DEPRECATED**: Only use `create_custom_chart` (Matplotlib) if ECharts is impossible.",
         "Use `forecast_sales` when the user asks about future trends or predictions.",
         "Ensure charts use a modern color palette to look premium.",
@@ -122,6 +123,7 @@ bi_analyst_skill = SeahorseSkill(
         "When plotting Scatter charts for large datasets (>1000 rows): Use a representative sample.",
         "NEVER 'guess' or 'approximate' statistical values. ALL numbers MUST match tool outputs.",
         "CHART TAG: You MUST include the `ECHART_JSON:/path/to/file.json` string on its own line.",
+        "**TERMINATION**: Once you receive the `ECHART_JSON:` path, you have SUCCEEDED. Do NOT call the tool again for the same data.",
         "Provide a clear, strategic interpretation of the visual findings.",
     ],
     tools=[

@@ -84,11 +84,14 @@ class HybridOrchestrator:
         )
 
         # ── 1. Classify intent (reuse existing fast_path for complexity) ─────
-        complexity = await self._classify_complexity(request)
+        si = await self._classify_intent(request)
+        complexity = si.complexity
+        intent = si.intent
         logger.info(
-            "hybrid.run agent_id=%s complexity=%d session=%s",
+            "hybrid.run agent_id=%s complexity=%d intent=%s session=%s",
             request.agent_id,
             complexity,
+            intent,
             session_id,
         )
 
@@ -142,7 +145,7 @@ class HybridOrchestrator:
                     results: list[SubtaskResult] = batch_results,
                 ) -> None:
                     results[idx] = await self._execute_subtask(
-                        node, graph, memory, request, skill_snippet
+                        node, graph, memory, request, intent, skill_snippet
                     )
 
                 async with anyio.create_task_group() as tg:
@@ -256,6 +259,7 @@ class HybridOrchestrator:
         graph: DecompositionGraph,
         memory: SessionMemory,
         request: AgentRequest,
+        intent: str = "GENERAL",
         skill_context: str = "",
     ) -> SubtaskResult:
         """Run a single subtask in an isolated context window."""
@@ -268,7 +272,7 @@ class HybridOrchestrator:
             tier3_results=tier3 if tier3 else None,
         )
 
-        sys_prompt = build_system_prompt()
+        sys_prompt = build_system_prompt(intent=intent)
         if self._identity_prompt:
             sys_prompt += f"\n\n{self._identity_prompt}"
 
@@ -286,7 +290,12 @@ class HybridOrchestrator:
             max_steps=8,
             step_timeout_seconds=self._cfg.step_timeout_seconds,
         )
-        openai_tools = getattr(self._tools, "to_openai_tools", lambda: [])()
+
+        # Use intent-specific tool filtering to save tokens
+        if hasattr(self._tools, "to_openai_tools_for_intent"):
+            openai_tools = self._tools.to_openai_tools_for_intent(intent)
+        else:
+            openai_tools = getattr(self._tools, "to_openai_tools", lambda: [])()
 
         executor = ReActExecutor(
             llm=self._llm,
@@ -410,24 +419,24 @@ class HybridOrchestrator:
             return skill_registry.get(best_name)
         return None
 
-    async def _classify_complexity(self, request: AgentRequest) -> int:
-        """Quick complexity classification — reuse FastPath if available. Caches results."""
+    async def _classify_intent(self, request: AgentRequest) -> Any:
+        """Quick complexity/intent classification — reuse FastPath if available. Caches results."""
         if request.prompt in self._complexity_cache:
             return self._complexity_cache[request.prompt]
 
         try:
             from seahorse_ai.planner.fast_path import classify_structured_intent
 
-            with anyio.fail_after(10):
-                si = await classify_structured_intent(
-                    request.prompt, self._llm, request.history or []
-                )
-                self._complexity_cache[request.prompt] = si.complexity
-                return si.complexity
+            si = await classify_structured_intent(
+                request.prompt, self._llm, request.history or []
+            )
+            self._complexity_cache[request.prompt] = si
+            return si
         except Exception:
-            # Fallback to default
-            return 3
-            return 3
+            # Fallback
+            from seahorse_ai.planner.fast_path import StructuredIntent
+
+            return StructuredIntent(intent="GENERAL", complexity=3)
 
     def _merge_results(self, results: list[SubtaskResult]) -> str:
         """Merge non-terminated subtask results into a single response."""
