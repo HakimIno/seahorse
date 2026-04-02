@@ -375,7 +375,19 @@ class RAGPipeline:
         logger.info("rag.clear: memory wiped")
 
     async def _embed(self, text: str) -> np.ndarray:
-        """Call LiteLLM embedding API and return a numpy float32 array."""
+        """Generate embeddings natively via Rust FastEmbed if available, else fallback to LiteLLM."""
+        if self._use_rust and self._memory is not None:
+            if hasattr(self._memory, "embed_text"):
+                import anyio
+                try:
+                    # Run the heavy native inference block in a background thread (GIL is released in Rust)
+                    raw_vec = await anyio.to_thread.run_sync(
+                        self._memory.embed_text, text
+                    )
+                    return np.array(raw_vec, dtype=np.float32)
+                except Exception as e:
+                    logger.warning("Native FastEmbed inference failed: %s. Falling back to LiteLLM.", e)
+
         import anyio
         import litellm  # local import to avoid top-level cost
 

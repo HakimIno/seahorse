@@ -24,6 +24,11 @@ charming      = { workspace = true }
 governor      = { workspace = true }
 async-trait   = { workspace = true }
 rusqlite      = { workspace = true }
+candle-core   = "0.8.2"
+candle-nn     = "0.8.2"
+candle-transformers = "0.8.2"
+tokenizers    = "0.21.0"
+hf-hub        = "0.3.2"
 
 [dev-dependencies]
 tokio = { workspace = true }

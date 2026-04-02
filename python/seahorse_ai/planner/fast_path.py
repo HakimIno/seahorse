@@ -15,17 +15,13 @@ from __future__ import annotations
 import logging
 import re
 import time
-from typing import TYPE_CHECKING, Any, Callable, Coroutine, Optional
-from functools import lru_cache
-
+from typing import TYPE_CHECKING
 from msgspec import Struct
-
-from seahorse_ai.core.schemas import AgentRequest, AgentResponse, Message
+from seahorse_ai.core.schemas import AgentResponse, Message
 from seahorse_ai.planner.fast_utils import robust_json_load
 from seahorse_ai.planner.handlers.entity import EntityHandler
 from seahorse_ai.planner.handlers.polars import PolarsHandler
 from seahorse_ai.planner.handlers.story import StoryHandler
-from seahorse_ai.planner.memory_recorder import MemoryRecorder
 
 if TYPE_CHECKING:
     from seahorse_ai.core.router import ModelRouter
@@ -83,7 +79,25 @@ Return ONLY valid JSON: {"intent":"...","action":"...","entity":"...or null","co
 async def classify_structured_intent(
     prompt: str, llm: ModelRouter, history: list[Message] | None = None
 ) -> StructuredIntent:
-    """Classify the user's intent into a structured format for routing."""
+    """Classify the user's intent into a structured format for routing.
+    
+    ULTRA-FAST PATH: Uses regex for greetings and simple acknowledgments (0ms LLM cost).
+    """
+    p = prompt.strip().lower()
+    
+    # 1. Ultra-Fast Regex Patterns (Greetings & Acknowledgments)
+    greetings = r"^(hi|hello|hey|สวัสดี|หวัดดี|ดีครับ|ดีค่ะ|ฮัลโหล|sup|yo|hola)$"
+    thanks = r"^(thanks|thank you|ขอบคุณ|แต๊งกิ้ว|ขอบใจ|ok|okay|โอเค|ตกลง|affirmative|yes|no|ใช่|ไม่ใช่)$"
+    identity = r"^(who are you|คุณคือใคร|what is your name|ทำอะไรได้บ้าง|help|ช่วยเหลือ)$"
+    
+    if re.match(greetings, p):
+        return StructuredIntent(intent="GENERAL", action="CHAT", complexity=1, tone="casual")
+    if re.match(thanks, p):
+        return StructuredIntent(intent="GENERAL", action="CHAT", complexity=1, tone="professional")
+    if re.match(identity, p):
+        return StructuredIntent(intent="GENERAL", action="CHAT", complexity=1, tone="professional")
+
+    # 2. Standard Fast Path (LLM-based)
     msgs = [Message(role="system", content=_CLASSIFY_SYSTEM_PROMPT)]
     if history:
         msgs.extend(history[-2:])

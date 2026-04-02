@@ -147,6 +147,20 @@ impl PyAgentMemory {
         Ok(result)
     }
 
+    /// Generate an embedding vector natively using pure Candle (BGE-Large-En model).
+    /// This bypasses pure Python latency and Python's GIL.
+    pub fn embed_text(&self, py: Python<'_>, text: String) -> PyResult<Vec<f32>> {
+        let embedder_mutex = seahorse_core::memory::embedding::Embedder::get_or_init()
+            .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!("Embedder init error: {e}")))?;
+            
+        let vec = py.allow_threads(|| {
+            let mut embedder = embedder_mutex.lock().unwrap();
+            embedder.embed(&text)
+        }).map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!("Inference error: {e}")))?;
+            
+        Ok(vec)
+    }
+
     pub fn __repr__(&self) -> String {
         format!("PyAgentMemory(dim={})", self.inner.dim())
     }

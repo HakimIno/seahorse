@@ -2,6 +2,7 @@ mod io;
 #[cfg(test)]
 mod tests;
 pub mod graph;
+pub mod embedding;
 
 use dashmap::DashMap;
 use hnsw_rs::prelude::*;

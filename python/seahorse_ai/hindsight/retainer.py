@@ -22,30 +22,16 @@ from .models import Entity, HindsightRecord, MemoryCategory, Relation
 logger = logging.getLogger(__name__)
 
 _RETAIN_PROMPT = """\
-<system>
-You are a Hindsight Memory Extractor. Extract structured facts from the <input_text>.
-</system>
-
-<instructions>
-1. Identify entities (People, Places, Objects) and their relationships.
-2. Determine if the fact is a WORLD truth (general knowledge) or an EXPERIENCE (specific event/interaction).
-3. Extract temporal context (e.g., "yesterday", "5 years ago").
-4. Return a JSON array of records.
-</instructions>
-
-<input_text>
-{text}
-</input_text>
-
+<system>Extract structured facts from <input_text>. Skip if no facts found.</system>
+<input_text>{text}</input_text>
 <output_format>
 [
   {{
-    "text": "Self-contained fact sentence",
+    "text": "Fact sentence",
     "category": "WORLD|EXPERIENCE|MENTAL_MODEL",
     "importance": 1-5,
-    "entities": [{{ "name": "Alice", "type": "PERSON" }}],
-    "relations": [{{ "subject": "Alice", "predicate": "likes", "object": "Sushi" }}],
-    "temporal": {{ "relative_description": "yesterday" }}
+    "entities": [{{ "name": "...", "type": "..." }}],
+    "relations": [{{ "subject": "...", "predicate": "...", "object": "..." }}]
   }}
 ]
 </output_format>
@@ -93,11 +79,12 @@ class HindsightRetainer:
     async def _retain_internal(
         self, text: str, agent_id: str | None = None, importance: int | None = None
     ) -> list[HindsightRecord]:
-        """The core retention logic, now called via retain() with semaphore control."""
+        """The core retention logic with high-performance Tiered Processing."""
 
-        # 1. Fast Path Optimization: For very short/trivial text, avoid LLM call
-        if len(text.strip()) < 25:
-            logger.info("Hindsight: Fast Path Retain (text too short for deep extraction)")
+        # Tier 1: Fast Path Optimization (Threshold: 150 chars)
+        # Avoid LLM for short facts / simple key-values
+        if len(text.strip()) < 150:
+            logger.info("Hindsight: Fast Path Retain (Short text)")
             record = HindsightRecord(
                 text=text.strip(),
                 category=MemoryCategory.EXPERIENCE,
@@ -113,7 +100,16 @@ class HindsightRetainer:
             )
             return [record]
 
-        # 2. Deep Path: Extraction
+        # Tier 2: Pre-Extraction Semantic Deduplication
+        # Skip LLM call if we already know this or something very similar (>0.95 similarity)
+        existing = await self.pipeline.search(
+            text, k=1, filter_metadata={"agent_id": agent_id} if agent_id else None
+        )
+        if existing and existing[0].get("distance", 1.0) < 0.05:
+            logger.info("Hindsight: Skipping redundant retention (Semantic Match dist=%.4f)", existing[0]["distance"])
+            return []
+
+        # Tier 3: Deep Path (LLM Extraction)
         prompt = _RETAIN_PROMPT.format(text=text)
 
         try:
@@ -206,16 +202,8 @@ class HindsightRetainer:
 
                 records.append(record)
 
-                # 3. Persistence with Semantic Deduplication
-                existing = await self.pipeline.search(
-                    record.text, k=1, filter_metadata={"agent_id": agent_id} if agent_id else None
-                )
-
-                if existing and existing[0].get("distance", 1.0) < 0.05:
-                    logger.info(
-                        "Hindsight: Skipping redundant record (dist=%.4f)", existing[0]["distance"]
-                    )
-                    continue
+                # 3. Persistence
+                # (Semantic Deduplication already performed in Tier 2 at start)
 
                 # 3a. Vector Store
                 await self.pipeline.store(
