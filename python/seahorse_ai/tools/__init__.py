@@ -20,6 +20,7 @@ from seahorse_ai.tools.business.forecaster import forecast_sales
 from seahorse_ai.tools.business.strategy_engine import war_room
 from seahorse_ai.tools.data.data_connectors import extract_sql_to_parquet, load_to_sql
 from seahorse_ai.tools.data.data_profiler import data_profile
+from seahorse_ai.tools.data.anomaly_detector import detect_numeric_anomalies, detect_timeseries_anomalies
 from seahorse_ai.tools.data.db import database_query, database_schema
 from seahorse_ai.tools.data.duckdb_analyst import duckdb_query_json, duckdb_sql, sql_to_polars
 from seahorse_ai.tools.data.polars_analyst import (
@@ -236,6 +237,8 @@ def make_default_registry() -> SeahorseToolRegistry:
         graph_store_triple,
         graph_search_neighbors,
         data_profile,
+        detect_numeric_anomalies,
+        detect_timeseries_anomalies,
         extract_sql_to_parquet,
         load_to_sql,
         echarts_composer,

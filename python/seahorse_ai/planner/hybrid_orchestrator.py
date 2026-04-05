@@ -300,7 +300,7 @@ class HybridOrchestrator:
 
         cb = CircuitBreaker()
         cfg = ExecutorConfig(
-            max_steps=2,
+            max_steps=5,
             step_timeout_seconds=self._cfg.step_timeout_seconds,
             token_burn_warn_chars=10_000,
             token_burn_hard_chars=20_000,
@@ -325,6 +325,8 @@ class HybridOrchestrator:
                         role="system",
                         content=f"## Live Search Results (use this data to answer)\n{search_result}",
                     ))
+                    # Prevent LLM from searching again to save time and tokens
+                    openai_tools = [t for t in openai_tools if t["function"]["name"] != "web_search"]
             except Exception as exc:
                 logger.warning("hybrid: auto-search failed: %s", exc)
 

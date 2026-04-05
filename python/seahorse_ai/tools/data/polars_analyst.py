@@ -62,7 +62,7 @@ def _scan(path: str) -> pl.LazyFrame:
     if effective_path.endswith(".parquet"):
         return pl.scan_parquet(effective_path)
     elif effective_path.endswith(".csv"):
-        return pl.scan_csv(effective_path, try_parse_dates=True)
+        return pl.scan_csv(effective_path, try_parse_dates=True, infer_schema_length=2000000)
     elif effective_path.endswith(".json") or effective_path.endswith(".ndjson"):
         return pl.scan_ndjson(effective_path)
     else:

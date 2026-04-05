@@ -12,11 +12,13 @@ Usage:
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import os
 import re
 import sys
+import time
 import uuid
 from collections import defaultdict, deque
 
@@ -361,22 +363,53 @@ class TelegramAdapter:
                             else list(cleaned_history)
                         )
 
-                        resp = await client.post(
-                            f"{self.router_url}/v1/agent/run",
+                        # Create a status message to stream text into
+                        status_msg = await context.bot.send_message(
+                            chat_id=chat_id, text="⏳ _กำลังวิเคราะห์..._", parse_mode=ParseMode.MARKDOWN
+                        )
+                        
+                        full_content = ""
+                        last_edit_time = time.monotonic()
+
+                        async with client.stream(
+                            "POST",
+                            f"{self.router_url}/v1/agent/stream",
                             json={
                                 "prompt": final_prompt,
                                 "agent_id": agent_id,
                                 "history": [msgspec.to_builtins(m) for m in fast_path_history],
                             },
-                        )
-                        resp.raise_for_status()
-                        data = resp.json()
+                            headers={"Accept": "text/event-stream"}
+                        ) as resp:
+                            if resp.status_code == 200:
+                                async for line in resp.aiter_lines():
+                                    if line.startswith("data: "):
+                                        chunk = line[6:]
+                                        if chunk == "[DONE]":
+                                            break
+                                        if chunk.startswith("[ERROR]"):
+                                            raise Exception(chunk)
+                                        
+                                        full_content += chunk
+                                        
+                                        # Edit message every 1.5 seconds to avoid rate limits
+                                        now = time.monotonic()
+                                        if now - last_edit_time > 1.5:
+                                            try:
+                                                await status_msg.edit_text(full_content + " ▌", parse_mode=None)
+                                                last_edit_time = now
+                                            except Exception:
+                                                pass
 
-                        if data.get("status") == "completed" and data.get("content"):
+                        if full_content.strip() and full_content.strip() != "[FALLBACK]":
+                            with contextlib.suppress(Exception):
+                                await status_msg.delete()
                             response = AgentResponse(
-                                content=data["content"], steps=0, agent_id=agent_id, elapsed_ms=0
+                                content=full_content, steps=0, agent_id=agent_id, elapsed_ms=0
                             )
                         else:
+                            with contextlib.suppress(Exception):
+                                await status_msg.delete()
                             logger.info(
                                 "FastPath: [FALLBACK] or Queued. Using local HybridOrchestrator."
                             )

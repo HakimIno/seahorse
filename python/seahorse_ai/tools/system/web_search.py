@@ -50,14 +50,7 @@ def _score_domain(url: str) -> float:
 
 
 async def _fast_scrape(url: str) -> str | None:
-    """Attempt a fast HTTP fetch for static-heavy domains to bypass browser overhead."""
-    static_domains = [
-        "wikipedia.org", "github.com", "arxiv.org", "python.org", "w3schools.com",
-        "reuters.com", "bbc.com", "apnews.com", "medium.com", "docs.", "blog.",
-        "nasa.gov", "spacex.com", "nytimes.com",
-    ]
-    if not any(d in url.lower() for d in static_domains):
-        return None
+    # Try fast HTTP fetch for all domains, avoiding Playwright overhead where possible.
         
     try:
         async with httpx.AsyncClient(timeout=8.0, follow_redirects=True) as client:
@@ -88,6 +81,12 @@ async def _fast_scrape(url: str) -> str | None:
                 parser = _SimpleTextExtractor()
                 parser.feed(res.text)
                 content = " ".join(" ".join(parser.text).split())
+                
+                # If too short, it's likely a JS-rendered page (e.g., React, Next.js) or a paywall block
+                if len(content) < 250:
+                    logger.info("fast_scrape: content too short (%d chars). Falling back to Playwright for %s", len(content), url)
+                    return None
+                    
                 return f"URL: {url} (Static)\n\nContent:\n{content[:10000]}"
     except Exception as e:
         logger.debug("fast_scrape failed for %s: %s", url, e)

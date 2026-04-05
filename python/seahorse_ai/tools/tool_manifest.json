@@ -4,7 +4,7 @@
       "web_search", "python_interpreter", "memory_search", "memory_store", "memory_feedback", "memory_delete", "memory_clear", "list_files", "read_file", "write_file"
     ],
     "DATABASE": [
-      "database_query", "database_schema", "polars_query", "polars_profile", "polars_inspect_join", "native_polars_aggregate", "duckdb_sql", "duckdb_query_json", "sql_to_polars", "data_profile"
+      "database_query", "database_schema", "polars_query", "polars_profile", "polars_inspect_join", "native_polars_aggregate", "duckdb_sql", "duckdb_query_json", "sql_to_polars", "data_profile", "detect_numeric_anomalies", "detect_timeseries_anomalies"
     ],
     "VISUAL": [
       "echarts_composer", "native_echarts_chart", "create_custom_chart", "create_table_image"

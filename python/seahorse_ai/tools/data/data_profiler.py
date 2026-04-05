@@ -83,6 +83,14 @@ async def data_profile(source_path: str) -> str:
                     ]
                 ).to_dicts()[0]
                 stats_line = f"   └ Mean: {_fmt(res['mean'])} | Min: {_fmt(res['min'])} | Max: {_fmt(res['max'])} | Std: {_fmt(res['std'])}"
+                
+                # Heuristic Alert for apparent anomalies (Max > 3 stdev from Mean)
+                mean_v = res.get('mean')
+                std_v = res.get('std')
+                max_v = res.get('max')
+                min_v = res.get('min')
+                if mean_v is not None and std_v and std_v > 0 and max_v is not None and min_v is not None and (abs(max_v - mean_v) > 3 * std_v or abs(min_v - mean_v) > 3 * std_v):
+                    stats_line += "\n   🚨 [ALERT] Extreme values detected (>3 StdDev). Use 'detect_numeric_anomalies' for details."
 
             elif series.dtype in (pl.Utf8, pl.String):
                 top_v = series.drop_nulls().value_counts(sort=True).head(3)
