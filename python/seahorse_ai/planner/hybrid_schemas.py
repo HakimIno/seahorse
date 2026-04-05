@@ -73,6 +73,7 @@ class SubtaskResult(Struct, omit_defaults=True):
 
     subtask_id: str
     content: str
+    evidence: list[str] = field(default_factory=list)
     steps: int = 0
     terminated: bool = False
     termination_reason: str | None = None

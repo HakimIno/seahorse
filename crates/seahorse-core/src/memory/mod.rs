@@ -53,7 +53,9 @@ impl AgentMemory {
                 embedding.len()
             )));
         }
-        let index = self.index.write().expect("HNSW lock poisoned");
+        let index = self.index.write().map_err(|e| {
+            crate::error::CoreError::LockPoisoned(e.to_string())
+        })?;
         // NOTE: .to_vec() is an allocation hot spot, but required by hnsw_rs::Hnsw::insert API
         index.insert((&embedding.to_vec(), id));
         self.metadata.insert(id, (text, meta));
@@ -73,7 +75,9 @@ impl AgentMemory {
                 query.len()
             )));
         }
-        let index = self.index.read().expect("HNSW lock poisoned");
+        let index = self.index.read().map_err(|e| {
+            crate::error::CoreError::LockPoisoned(e.to_string())
+        })?;
         // Phase 1: Over-fetch
         let expanded_k = k * 5;
         let raw_results = index.search(query, expanded_k, ef);

@@ -29,7 +29,7 @@ from seahorse_ai.core.schemas import AgentRequest, AgentResponse, Message
 from seahorse_ai.planner.circuit_breaker import CircuitBreaker
 from seahorse_ai.planner.critic import CriticAgent
 from seahorse_ai.planner.decomposer import TaskDecomposer
-from seahorse_ai.planner.executor import ExecutorConfig, ExecutorResult, ReActExecutor
+from seahorse_ai.planner.executor import ExecutorConfig, ReActExecutor
 from seahorse_ai.planner.hybrid_schemas import (
     CriticVerdict,
     DecompositionGraph,
@@ -73,6 +73,15 @@ class HybridOrchestrator:
         self._critic = CriticAgent(llm, use_llm=self._cfg.use_llm_critic)
         self._complexity_cache: dict[str, int] = {}
 
+        # ── Load Dynamic Skills ───────────────────────────────────────────────
+        from seahorse_ai.skills.base import registry as skill_registry
+        from seahorse_ai.tools import make_default_registry
+
+        skill_registry.load_plugins("python/seahorse_ai/skills/manifests")
+        # Resolve against the provided tools registry, falling back to default
+        target_registry = self._tools or make_default_registry()
+        skill_registry.resolve_tools(target_registry)
+
     async def run(self, request: AgentRequest) -> AgentResponse:
         """Execute the full hybrid loop and return a single AgentResponse."""
         wall_start = time.monotonic()
@@ -96,7 +105,7 @@ class HybridOrchestrator:
         )
 
         # ── 1b. Auto Skill Selection ─────────────────────────────────────────
-        matched_skill = self._match_skill(request.prompt)
+        matched_skill = await self._match_skill(request.prompt)
         skill_snippet = ""
         if matched_skill:
             skill_snippet = matched_skill.get_prompt_snippet()
@@ -303,121 +312,27 @@ class HybridOrchestrator:
             circuit_breaker=cb,
             config=cfg,
         )
-
-        try:
-            result: ExecutorResult = await executor.run(
-                messages, openai_tools, agent_id=f"{request.agent_id}:sub_{node.id}"
-            )
-        except Exception as exc:
-            logger.error("hybrid subtask %s failed: %s", node.id, exc)
-            return SubtaskResult(
-                subtask_id=node.id,
-                content=f"Error: {exc}",
-                terminated=True,
-                termination_reason="exception",
-            )
-
-        tool_names = self._extract_tool_names(messages)
-
+        
+        res = await executor.run(messages, openai_tools, agent_id=node.assigned_agent)
+        
+        # 3. Save to Tier 2 memory
         return SubtaskResult(
             subtask_id=node.id,
-            content=result.content,
-            steps=result.steps,
-            terminated=result.terminated,
-            termination_reason=result.termination_reason,
-            tool_names_used=tool_names,
+            content=res.content,
+            evidence=res.evidence,  # Pass evidence from ReActExecutor
+            steps=res.steps,
+            terminated=res.terminated,
+            termination_reason=res.termination_reason,
+            tool_names_used=[t.get("function", {}).get("name") for t in messages if t.role == "tool"],
         )
 
     # ── Helpers ───────────────────────────────────────────────────────────────
 
-    _SKILL_KEYWORDS: dict[str, list[str]] = {
-        "DATA_ENGINEERING": [
-            "etl",
-            "extract",
-            "transform",
-            "load",
-            "parquet",
-            "pipeline",
-            "data quality",
-            "clean",
-            "null",
-            "schema",
-            "migrate",
-            "ingest",
-        ],
-        "TRADING_GUARDIAN": [
-            "forex",
-            "trade",
-            "lot size",
-            "stop loss",
-            "risk",
-            "ruin",
-            "kelly",
-            "eurusd",
-            "gbpusd",
-            "gold",
-            "xauusd",
-            "trading",
-            "futures",
-            "พอร์ต",
-            "ยอดเงิน",
-            "เทรด",
-            "เงินทุน",
-            "พอร์ตแตก",
-            "บริหารความเสี่ยง",
-        ],
-        "BI_ANALYST": [
-            "dashboard",
-            "chart",
-            "graph",
-            "visual",
-            "scatter",
-            "heatmap",
-            "radar",
-            "pie",
-            "correlation",
-            "trend",
-            "report",
-            "insight",
-            "plot",
-            "show me a",
-            "draw",
-        ],
-        "DATABASE_ACCESS": [
-            "sql",
-            "query",
-            "database",
-            "table",
-            "select",
-            "join",
-        ],
-        "DATA_ANALYSIS": [
-            "polars",
-            "aggregate",
-            "group",
-            "filter",
-            "sort",
-            "analyze",
-        ],
-    }
-
-    def _match_skill(self, prompt: str) -> Any:
-        """Match the user prompt to the best skill using keyword scoring."""
+    async def _match_skill(self, prompt: str) -> Any:
+        """Match the user prompt to the best skill using semantic discovery (LLM)."""
         from seahorse_ai.skills.base import registry as skill_registry
 
-        prompt_lower = prompt.lower()
-        best_name: str | None = None
-        best_score = 0
-
-        for skill_name, keywords in self._SKILL_KEYWORDS.items():
-            score = sum(1 for kw in keywords if kw in prompt_lower)
-            if score > best_score:
-                best_score = score
-                best_name = skill_name
-
-        if best_name and best_score >= 1:
-            return skill_registry.get(best_name)
-        return None
+        return await skill_registry.find_best_match(prompt, self._llm)
 
     async def _classify_intent(self, request: AgentRequest) -> Any:
         """Quick complexity/intent classification — reuse FastPath if available. Caches results."""

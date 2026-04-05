@@ -76,6 +76,12 @@ class SeahorseToolRegistry:
     def __init__(self) -> None:
         self._tools: dict[str, tuple[Callable[..., Any], ToolSpec]] = {}
 
+    def get(self, name: str) -> Callable[..., Any] | None:
+        """Get a tool function by name."""
+        if name in self._tools:
+            return self._tools[name][0]
+        return None
+
     def register(self, fn: Callable[..., Any]) -> None:
         """Register a function decorated with @tool."""
         spec: ToolSpec = getattr(fn, "_tool_spec", None)  # type: ignore[assignment]

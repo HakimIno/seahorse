@@ -8,126 +8,43 @@ Intent Categories:
   GENERAL           → Greetings, simple chat, coding, math, writing
   PUBLIC_REALTIME   → Market data, news, weather, live scores
   PRIVATE_MEMORY    → Internal products, past conversations, personal data
-  DATABASE          → Corporate database queries
+  DATABASE          → Corporate database
 """
 
 from __future__ import annotations
 
-# ── Tier 0: Greeting / chit-chat fast-path ────────────────────────────────────
-# These must be checked FIRST — before REALTIME — to prevent false positives.
-# "Hi", "Hello" etc. are pure greetings, never real-time data requests.
+import json
+import os
+from functools import lru_cache
 
-GREETING_PATTERNS: tuple[str, ...] = (
-    "hi",
-    "hello",
-    "hey",
-    "howdy",
-    "greetings",
-    "สวัสดี",
-    "หวัดดี",
-    "ดีจ้า",
-    "ดีครับ",
-    "ดีค่ะ",
-    "ขอบคุณ",
-    "thank you",
-    "thanks",
-    "good morning",
-    "good afternoon",
-    "good evening",
-    "good night",
-    "ลาก่อน",
-    "bye",
-    "goodbye",
-    "see you",
-    "เป็นยังไงบ้าง",
-    "how are you",
-    "what's up",
-)
+@lru_cache(maxsize=1)
+def load_intent_config():
+    """Load intent configuration from JSON manifest."""
+    config_path = os.path.join(os.path.dirname(__file__), "intent_config.json")
+    try:
+        with open(config_path, encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        # Fallback empty config if loading fails
+        return {
+            "GREETING_PATTERNS": [],
+            "REALTIME_KEYWORDS": [],
+            "MEMORY_KEYWORDS": [],
+            "NUDGES": {}
+        }
 
-# ── Tier 1: Fast keyword pre-screening ────────────────────────────────────────
-# HIGH CONFIDENCE signals — no ambiguity expected.
+def get_intent_patterns():
+    config = load_intent_config()
+    return (
+        tuple(config.get("GREETING_PATTERNS", [])),
+        tuple(config.get("REALTIME_KEYWORDS", [])),
+        tuple(config.get("MEMORY_KEYWORDS", [])),
+        config.get("NUDGES", {})
+    )
 
-REALTIME_KEYWORDS: tuple[str, ...] = (
-    # Thai — unambiguously public real-time data
-    "ข่าว",
-    "ราคาหุ้น",
-    "ดัชนีหุ้น",
-    "อากาศ",
-    "ล่าสุด",
-    "บิทคอยน์",
-    "คริปโต",
-    "ดัชนี",
-    "ทองคำวันนี้",
-    "น้ำมันวันนี้",
-    "ทองวันนี้",
-    "หุ้นวันนี้",
-    # English — unambiguously public real-time data
-    "breaking news",
-    "stock price",
-    "market price",
-    "weather forecast",
-    "cryptocurrency",
-    "bitcoin price",
-    "nba score",
-    "premier league",
-    "today's news",
-    "latest news",
-    "stock market",
-    "stock performance",
-)
-
-# Note: "วันนี้" removed — too ambiguous ("วันนี้ฉันมีนัด" is NOT realtime)
-
-MEMORY_KEYWORDS: tuple[str, ...] = (
-    # Thai — clearly referring to private/stored context
-    "ที่เคยคุย",
-    "ที่บอกไป",
-    "ก่อนหน้า",
-    "ครั้งที่แล้ว",
-    "จำได้ไหม",
-    "ที่เก็บไว้",
-    "เดิม",
-    "แก้ไข",
-    "อัปเดต",
-    "เปลี่ยนข้อมูล",
-    "เมื่อวาน",
-    "ที่เราคุย",
-    "เปลี่ยนราคา",
-    "เปลี่ยน",
-    "จำไว้",
-    # English — clearly referring to private/stored context
-    "we discussed",
-    "you remember",
-    "last time",
-    "previously discussed",
-    "stored memory",
-    "update the price",
-    "change the record",
-    "update price",
-    "change price",
-    "internal",
-)
-
-# ── Tier 2: LLM Semantic Intent Classification (DEPRECATED) ───────────────────
-#
-# NOTE: Semantic intent classification has been moved to the Structured Intent
-# pipeline in `seahorse_ai.planner.fast_path`. This module now only handles
-# low-latency keyword pattern matching.
-# ─────────────────────────────────────────────────────────────────────────────
-
-# ── Nudge messages injected into the conversation ─────────────────────────────
-
-REALTIME_NUDGE = (
-    "[SYSTEM] This query requires current public data. "
-    "Your training data is outdated. "
-    "You MUST call `web_search` NOW before answering."
-)
-
-MEMORY_NUDGE = (
-    "[SYSTEM] This query refers to previously stored information. "
-    "You MUST call `memory_search` NOW before checking the web. "
-    "If memory is insufficient or empty, feel free to use `web_search` or `database_query` to provide a complete answer."
-)
+GREETING_PATTERNS, REALTIME_KEYWORDS, MEMORY_KEYWORDS, NUDGES = get_intent_patterns()
+REALTIME_NUDGE = NUDGES.get("PUBLIC_REALTIME", "")
+MEMORY_NUDGE = NUDGES.get("PRIVATE_MEMORY", "")
 
 
 async def classify_intent(query: str, llm_backend: object | None = None) -> str:

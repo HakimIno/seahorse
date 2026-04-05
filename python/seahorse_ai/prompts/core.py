@@ -8,14 +8,22 @@ from __future__ import annotations
 
 import datetime
 import os
+from functools import lru_cache
 from typing import TYPE_CHECKING
-
-from seahorse_ai.prompts.confidence import CONFIDENCE_RULES, SELF_CHECK_PROMPT
-from seahorse_ai.prompts.few_shot import FEW_SHOT_TOOL_EXAMPLES
 
 if TYPE_CHECKING:
     from seahorse_ai.skills.base import SeahorseSkill
 
+@lru_cache(maxsize=10)
+def _load_manifest(name: str) -> str:
+    """Load a prompt manifest from the manifests/ directory."""
+    manifest_path = os.path.join(os.path.dirname(__file__), "manifests", f"{name}.md")
+    try:
+        with open(manifest_path, encoding="utf-8") as f:
+            return f.read().strip()
+    except Exception:
+        # Fallback empty string if loading fails
+        return ""
 
 def build_system_prompt(
     skills: list[SeahorseSkill] | None = None, tone: str = "PROFESSIONAL", intent: str = "GENERAL"
@@ -35,7 +43,11 @@ def build_system_prompt(
     db_type = os.getenv("SEAHORSE_DB_TYPE", "sqlite")
 
     # 1. Base Identity & Tone
-    base_persona = _CASUAL_PERSONA if tone == "CASUAL" else _CORE_PERSONA
+    if tone == "CASUAL":
+        base_persona = _load_manifest("casual_identity") or _CASUAL_FALLBACK
+    else:
+        base_persona = _load_manifest("identity") or _CORE_FALLBACK
+        
     prompt = base_persona.format(today=today, db_type=db_type)
 
     # 2. Intent-specific expansion
@@ -47,7 +59,6 @@ def build_system_prompt(
         )
 
     # 3. Dynamic Skill Guidelines (Modular Filtering)
-    # If intent is GENERAL or GREET, we skip most heavy tool rules to save tokens
     if intent in ("GENERAL", "GREET") and tone != "CASUAL":
         prompt += (
             "\n## Guidelines\n- You are currently in Chat Mode. Answer naturally and concisely."
@@ -57,51 +68,35 @@ def build_system_prompt(
     if skills:
         prompt += "\n## Guidelines for Your Skills\n"
         for skill in skills:
-            # Future: add skill.is_relevant(intent)
             prompt += skill.get_prompt_snippet() + "\n"
     else:
         # Fallback to legacy tool rules if no skills provided
-        from seahorse_ai.prompts.tool_rules import TOOL_RULES
-
-        prompt += "\n" + TOOL_RULES
+        prompt += "\n" + _load_manifest("tool_rules")
 
     # 3. Static Layers (Confidence, Examples, Quality)
     prompt += (
-        "\n\n" + FEW_SHOT_TOOL_EXAMPLES + "\n\n" + CONFIDENCE_RULES + "\n\n" + SELF_CHECK_PROMPT
+        "\n\n" + _load_manifest("few_shot") + 
+        "\n\n" + _load_manifest("confidence")
     )
 
     return prompt
 
 
-# ── Core Persona (kept short — ≤30 lines) ─────────────────────────────────────
-_CORE_PERSONA = """\
-You are Seahorse Agent — a high-performance AI with real-time web access, \
+# ── Fallback Personas ────────────────────────────────────────────────────────
+_CORE_FALLBACK = """\
+You are Seahorse Agent — a high-performance AI with real-time web access, \\
 long-term memory, and corporate database connectivity.
 
 Today's date: {today}
 Environment: Connected to a **{db_type}** corporate database.
 
 ## Core Principles
-1. **Absolute Data Fidelity**: NEVER fabricate data, dates, or results. Use the provided tool results EXACTLY as they are. If a tool fails, report the failure; do not invent "sample" data.
-2. **No Image Hallucination**: NEVER generate markdown image links (e.g., `![chart](...)`). The system handles image delivery. Just describe the results in text.
-3. **Tool-first**: Always use the right tool before answering. Do not guess.
-4. **Memory before Web**: For internal/private data, check memory BEFORE searching the web.
-5. **Strategy Adherence**: If a [STRATEGY PLAN] is in context, follow its steps.
-6. **Intellectual Honesty & Truth-Seeking**: You are a deeply analytical, highly intelligent agent. DO NOT be a "yes-man". If the user states something factually incorrect or illogical, politely but firmly correct them with facts and reasoning. Do not agree just to be polite.
-7. **Objective Truth**: Prioritize objective truth over user appeasement. If you disagree with the premise of a question, state your reasoning clearly.
+1. **Absolute Data Fidelity**: NEVER fabricate data.
+2. **Tool-first**: Always use the right tool before answering.
 """
 
-# ── Alternate Personas ────────────────────────────────────────────────────────
-
-_CASUAL_PERSONA = """\
+_CASUAL_FALLBACK = """\
 You are Seahorse Agent, but currently in a **Friendly & Casual** mode. 
-While you still have access to your tools, your tone is warm, relaxed, and conversational.
-
+Tone is warm, relaxed, and conversational.
 Today's date: {today}
-
-## Casual Principles
-1. **Be Warm**: Use emojis (😊, 👋, ✨) naturally. Be helpful but approachable.
-2. **Contextual Intelligence**: If the user wants to chat or play, engage with them.
-3. **Implicit Tooling**: You can still use tools (memory/web) but report findings in a less rigid way.
-4. **Language**: Match the user's language (Thai/English) and slang.
 """

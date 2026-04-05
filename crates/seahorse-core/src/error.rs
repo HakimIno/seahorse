@@ -5,6 +5,9 @@ pub enum CoreError {
     #[error("memory error: {0}")]
     Memory(String),
 
+    #[error("lock poisoned: {0}")]
+    LockPoisoned(String),
+
     #[error("sandbox error: {kind}")]
     Sandbox { kind: String },
 

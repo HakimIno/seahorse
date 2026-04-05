@@ -46,6 +46,7 @@ class ExecutorResult:
 
     content: str
     steps: int
+    evidence: list[str] = field(default_factory=list)
     terminated: bool = False
     termination_reason: str | None = None
     total_ms: int = field(default=0)
@@ -90,6 +91,7 @@ class ReActExecutor:
         wall_start = time.monotonic()
         self._total_obs_chars = 0
         image_paths = []
+        evidence = []
 
         for step in range(self._cfg.max_steps):
             # Global timeout guard
@@ -208,6 +210,8 @@ class ReActExecutor:
                                 observation[:4000]
                                 + "\n\n...[TRUNCATED: Output too long. Please act on the current data or use narrower search.]"
                             )
+                        # NEW: Add successful observations to evidence for the Critic
+                        evidence.append(f"Tool {tool_name} returned: {observation[:1000]}")
 
                     self._total_obs_chars += len(observation)
 
@@ -274,6 +278,7 @@ class ReActExecutor:
                 return ExecutorResult(
                     content=content,
                     steps=step + 1,
+                    evidence=evidence,
                     total_ms=total_ms,
                     image_paths=image_paths if image_paths else None,
                 )
