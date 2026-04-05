@@ -33,11 +33,11 @@ logger = logging.getLogger(__name__)
 class ExecutorConfig:
     """Configuration for the ReAct execution loop."""
 
-    max_steps: int = 15
-    step_timeout_seconds: int = 180
-    global_timeout_seconds: int = 600
-    token_burn_warn_chars: int = 30_000
-    token_burn_hard_chars: int = 50_000
+    max_steps: int = 6
+    step_timeout_seconds: int = 120
+    global_timeout_seconds: int = 300
+    token_burn_warn_chars: int = 10_000
+    token_burn_hard_chars: int = 20_000
 
 
 @dataclass
@@ -314,8 +314,8 @@ class ReActExecutor:
         self, messages: list[Message], tools: list[dict], step: int
     ) -> tuple[dict, int]:
         t0 = time.monotonic()
-        # Escalate tier after 3 steps
-        tier = "thinker" if step >= 3 else "worker"
+        # Stay on worker tier for all steps — cheaper and sufficient for tool-calling
+        tier = "worker"
         result = await self._llm.complete(messages, tools=tools, tier=tier)  # type: ignore[union-attr]
         return result, int((time.monotonic() - t0) * 1000)
 

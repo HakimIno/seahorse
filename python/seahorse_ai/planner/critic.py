@@ -29,28 +29,21 @@ from seahorse_ai.planner.hybrid_schemas import (
 logger = logging.getLogger(__name__)
 
 CRITIC_SYSTEM_PROMPT = """\
-You are a strict Truth & Logic Evaluator. Your goal is to ensure the final output is factually grounded and logically sound.
+You are a quality evaluator. Assess whether the subtask results adequately answer the user's goal.
 
-You receive:
-- GOAL: The user's original request.
-- CRITERIA: Success criteria for the goal.
-- SUBTASK_RESULTS: Final answers and EVIDENCE (raw tool snippets) from each subtask.
+## Evaluate by Asking
+1. **Is every factual claim backed by evidence?** If an agent states a number or fact, can you trace it to the tool output?
+2. **Are the results consistent?** Do subtask answers contradict each other?
+3. **Did tool failures get acknowledged?** If a tool returned an error, did the agent honestly report it instead of making up data?
+4. **Is the answer complete enough?** Does it address the user's core question?
 
-TRUTH VERIFICATION PROTOCOL:
-1. **Evidence Grounding**: Every factual claim in the final answer MUST be supported by at least one snippet in the evidence. If an agent claims a number/fact not found in evidence, REJECT.
-2. **Logical Consistency**: Check for contradictions BETWEEN subtasks. If Subtask A and Subtask B provide conflicting data, REJECT.
-3. **Negative Result Handling**: If evidence shows "No data found" or a tool error, the final answer MUST reflect this limitation. REJECT if the agent "hallucinates" a successful result from a failed tool.
-4. **No Fluff**: Reject over-explanations or AI apologies. Focus purely on data accuracy.
+## Verdicts
+- "pass": The answer is good enough to show the user.
+- "partial": Some parts are okay but specific subtasks need rework. Specify which ones.
+- "reject": The answer is fundamentally wrong or fabricated.
 
 Return ONLY valid JSON:
-
-{
-  "verdict": "pass" | "partial" | "reject",
-  "passed_criteria": ["<criteria met>"],
-  "failed_criteria": ["<criteria failed or factually unsupported>"],
-  "failed_subtasks": ["<ids requiring rework>"],
-  "reason": "<Specific reason - e.g., 'Claim X is not supported by evidence' or 'Subtask A and B contradict on Y'>"
-}
+{"verdict":"pass|partial|reject", "passed_criteria":[], "failed_criteria":[], "failed_subtasks":[], "reason":"why"}
 """
 
 
@@ -126,7 +119,7 @@ class CriticAgent:
         all_have_content = all(
             r.content and len(r.content.strip()) > 10 and not r.terminated for r in results
         )
-        if all_have_content and len(results) == 1 and len(criteria) <= 1:
+        if all_have_content and len(results) <= 2:
             return CriticVerdict(
                 verdict="pass",
                 passed_criteria=criteria,
@@ -162,7 +155,7 @@ class CriticAgent:
             Message(role="user", content=user_msg),
         ]
 
-        raw_result = await self._llm.complete(messages, tier="worker")
+        raw_result = await self._llm.complete(messages, tier="thinker")
         raw = str(
             raw_result.get("content", raw_result) if isinstance(raw_result, dict) else raw_result
         )

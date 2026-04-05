@@ -42,7 +42,12 @@ class LLMConfig(Struct, omit_defaults=True):
     )
     thinker_model: str = field(
         default_factory=lambda: os.environ.get(
-            "SEAHORSE_MODEL_THINKER", "openrouter/google/gemini-3-flash-preview"
+            "SEAHORSE_MODEL_THINKER", "openrouter/google/gemini-3.1-pro-preview"
+        )
+    )
+    strategist_model: str = field(
+        default_factory=lambda: os.environ.get(
+            "SEAHORSE_MODEL_STRATEGIST", "openrouter/anthropic/claude-3.5-sonnet"
         )
     )
     fast_path_model: str = field(

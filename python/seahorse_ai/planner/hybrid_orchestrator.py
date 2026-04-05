@@ -64,13 +64,17 @@ class HybridOrchestrator:
         config: HybridConfig | None = None,
         identity_prompt: str | None = None,
     ) -> None:
-        self._llm = llm
+        from seahorse_ai.core.llm import get_llm
+        self._llm = llm # worker
+        self._thinker_llm = get_llm(tier="thinker")
+        self._strategist_llm = get_llm(tier="strategist")
+        
         self._tools = tools
         self._cfg = config or HybridConfig()
         self._identity_prompt = identity_prompt
 
-        self._decomposer = TaskDecomposer(llm)
-        self._critic = CriticAgent(llm, use_llm=self._cfg.use_llm_critic)
+        self._decomposer = TaskDecomposer(self._thinker_llm)
+        self._critic = CriticAgent(self._thinker_llm, use_llm=self._cfg.use_llm_critic)
         self._complexity_cache: dict[str, int] = {}
 
         # ── Load Dynamic Skills ───────────────────────────────────────────────
@@ -226,7 +230,7 @@ class HybridOrchestrator:
             # Pull the late verdict and artifacts to explain 'why'
             last_verdict = verdict.reason if "verdict" in locals() else "Budget exhausted"
 
-            # Simple synthesis prompt for the main planner
+            # Use Strategist tier for final synthesis
             final_prompt = [
                 Message(
                     role="system",
@@ -241,7 +245,7 @@ class HybridOrchestrator:
                 Message(role="user", content="Explain why the task could not be completed."),
             ]
             try:
-                final_res = await self._llm.complete(final_prompt, tier="worker")
+                final_res = await self._strategist_llm.complete(final_prompt, tier="strategist")
                 best_content = str(
                     final_res.get("content", final_res)
                     if isinstance(final_res, dict)
@@ -296,8 +300,10 @@ class HybridOrchestrator:
 
         cb = CircuitBreaker()
         cfg = ExecutorConfig(
-            max_steps=8,
+            max_steps=2,
             step_timeout_seconds=self._cfg.step_timeout_seconds,
+            token_burn_warn_chars=10_000,
+            token_burn_hard_chars=20_000,
         )
 
         # Use intent-specific tool filtering to save tokens
@@ -305,6 +311,22 @@ class HybridOrchestrator:
             openai_tools = self._tools.to_openai_tools_for_intent(intent)
         else:
             openai_tools = getattr(self._tools, "to_openai_tools", lambda: [])()
+
+        # AUTO-SEARCH: For PUBLIC_REALTIME, pre-fetch web data so the AI has
+        # current facts. This bypasses the worker model's tendency to answer
+        # from stale training data without calling tools.
+        if intent == "PUBLIC_REALTIME":
+            try:
+                search_fn = self._tools.get("web_search")
+                if search_fn:
+                    logger.info("hybrid: auto-search for PUBLIC_REALTIME: %s", node.description)
+                    search_result = await search_fn(query=node.description)
+                    messages.append(Message(
+                        role="system",
+                        content=f"## Live Search Results (use this data to answer)\n{search_result}",
+                    ))
+            except Exception as exc:
+                logger.warning("hybrid: auto-search failed: %s", exc)
 
         executor = ReActExecutor(
             llm=self._llm,
@@ -323,7 +345,7 @@ class HybridOrchestrator:
             steps=res.steps,
             terminated=res.terminated,
             termination_reason=res.termination_reason,
-            tool_names_used=[t.get("function", {}).get("name") for t in messages if t.role == "tool"],
+            tool_names_used=[t.name for t in messages if t.role == "tool" and t.name],
         )
 
     # ── Helpers ───────────────────────────────────────────────────────────────

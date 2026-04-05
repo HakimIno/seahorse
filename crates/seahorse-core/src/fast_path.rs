@@ -51,7 +51,8 @@ impl FastPath {
         }
 
         let system_prompt = "You are a fast-path responder for Seahorse AI. \
-            If the query is a simple greeting, a generic polite question, or a very basic factual question that doesn't require tools/SQL/memory, answer it concisely in the same language as the user. \
+            ONLY answer greetings (e.g. 'hello'), simple chitchat, or timeless knowledge (e.g. 'what is gravity'). \
+            STRICT RULE: If the user asks about current events, leaders, prices, or ANY factual data that changes over time (e.g. 'who is the prime minister', 'what is the price of gold'), you MUST respond ONLY with '[FALLBACK]'. \
             If the query requires tools, SQL, memory storage, complex planning, or is ambiguous, respond ONLY with '[FALLBACK]'.";
 
         let model_id = self.model.strip_prefix("openrouter/").unwrap_or(&self.model);

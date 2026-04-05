@@ -26,17 +26,20 @@ from seahorse_ai.planner.hybrid_schemas import (
 logger = logging.getLogger(__name__)
 
 DECOMPOSE_SYSTEM_PROMPT = """\
-Decompose the user goal into independent subtasks (dependency graph).
-Output ONLY JSON matching:
+You are a task planner. Decompose the user's goal into a dependency graph of subtasks.
+
+## Think Before Splitting
+Ask yourself: "Does splitting this into multiple subtasks ACTUALLY help, or will one focused subtask get the same result faster?"
+- If a single search or query can answer the entire goal → use 1 node.
+- Only split when subtasks are genuinely INDEPENDENT and cover DIFFERENT data sources.
+- Merging related work into fewer nodes is almost always better than splitting.
+
+Output ONLY valid JSON:
 {
   "goal": "string",
-  "success_criteria": ["string"],
+  "success_criteria": ["what defines a good answer"],
   "nodes": [{"id": "t1", "description": "string", "assigned_agent": "worker", "depends_on": []}]
 }
-Rules:
-- Use [] for parallel tasks.
-- Keep subtasks atomic.
-- If simple, return exactly 1 node.
 """
 
 
@@ -58,14 +61,8 @@ class TaskDecomposer:
         For simple goals (complexity <= 2) a single-node graph is returned
         without calling the LLM, saving ~1-3k tokens.
         """
-        # Fast-Path: Skip LLM for simple data visualization or common trading checks
-        is_simple_viz = complexity == 3 and any(
-            w in goal.lower() for w in ["chart", "graph", "plot", "กราฟ", "แผนภูมิ"]
-        )
-        is_simple_trading = complexity == 3 and any(
-            w in goal.lower() for w in ["ยอดเงิน", "balance", "price", "ราคา", "quote"]
-        )
-        if complexity <= 2 or is_simple_viz or is_simple_trading:
+        # Fast-Path: Skip LLM for most queries — single node is sufficient
+        if complexity <= 3:
             return self._single_node_graph(goal)
 
         try:
@@ -119,8 +116,8 @@ class TaskDecomposer:
             Message(role="user", content=user_msg),
         ]
 
-        # Smart tier: strategist for complex (≥4), thinker for medium (3)
-        tier = "strategist" if complexity >= 4 else "thinker"
+        # Use fast tier — decomposition doesn't need expensive models
+        tier = "fast"
         logger.info("decomposer: using tier=%s for complexity=%d", tier, complexity)
         result = await self._llm.complete(messages, tier=tier)
         raw = str(result.get("content", result) if isinstance(result, dict) else result)

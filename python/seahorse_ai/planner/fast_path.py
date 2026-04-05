@@ -16,7 +16,9 @@ import logging
 import re
 import time
 from typing import TYPE_CHECKING
+
 from msgspec import Struct
+
 from seahorse_ai.core.schemas import AgentResponse, Message
 from seahorse_ai.planner.fast_utils import robust_json_load
 from seahorse_ai.planner.handlers.entity import EntityHandler
@@ -43,36 +45,24 @@ class StructuredIntent(Struct, omit_defaults=True):
 
 
 _CLASSIFY_SYSTEM_PROMPT = """\
-You are an intent classifier for an AI agent. Classify the user's request into ONE category and assess complexity.
+You are an intelligent request analyzer for Seahorse AI. REASON about what the user needs, then classify.
 
-## Categories
-- **DATABASE**: Queries about corporate data, sales, orders, customers, SQL, database tables.
-- **PUBLIC_REALTIME**: Market prices, news, weather, sports scores, cryptocurrency — any LIVE public data.
-- **PRIVATE_MEMORY**: Refers to previously stored info, past conversations, internal products, "remember X".
-- **STORY**: Complex professional analysis requiring multiple steps — comparisons, forecasts, deep insights, reports.
-- **POLARS**: Simple data lookups, single-metric trends, quick charts from existing files.
-- **GENERAL**: Greetings, chitchat, coding help, math, writing, simple factual questions.
+## Think Step-by-Step
 
-## Complexity Scale
-- **1**: Trivial — greeting, yes/no, single fact ("สวัสดี", "What is 2+2?")
-- **2**: Simple — one tool call ("ราคาทองวันนี้", "search for X")
-- **3**: Medium — 2-3 tool calls, basic analysis ("ยอดขายเดือนนี้", "show me a chart of X")
-- **4**: Complex — multi-step analysis, comparisons, joins ("เปรียบเทียบยอดขาย Q1 vs Q2 พร้อมกราฟ")
-- **5**: Expert — end-to-end research, strategy, multi-source synthesis ("วิเคราะห์แนวโน้มตลาดทองคำ 6 เดือนพร้อม forecast")
+1. **Greeting or social?** → GENERAL, complexity=1
+2. **Needs CURRENT or REAL-TIME data?** Ask: "Could this answer have changed in the last year?" If yes → PUBLIC_REALTIME
+3. **Refers to PRIVATE/INTERNAL data?** (stored products, past conversations, packages) → PRIVATE_MEMORY
+4. **Needs CORPORATE DATABASE?** (sales, orders, customers, business metrics) → DATABASE
+5. **Complex multi-step analysis or deep research?** (comparisons, forecasts, reports) → STORY
+6. **Simple data lookup or chart from files?** → POLARS
+7. **Everything else** (timeless knowledge, coding, math, creative writing) → GENERAL
 
-## Tone
-- "professional" for business/data/analysis queries
-- "casual" for chitchat/greetings/fun
+## Key Principle
+Your training data has a cutoff. ANY factual question where the real-world answer MIGHT have changed → PUBLIC_REALTIME. When in doubt, prefer PUBLIC_REALTIME over GENERAL.
 
-## Examples
-User: "สวัสดีครับ" → {"intent":"GENERAL","action":"CHAT","complexity":1,"tone":"casual"}
-User: "ราคาทองคำวันนี้" → {"intent":"PUBLIC_REALTIME","action":"SEARCH_WEB","complexity":2,"tone":"professional"}
-User: "ยอดขายเดือนนี้เท่าไหร่" → {"intent":"DATABASE","action":"QUERY_DB","complexity":3,"tone":"professional"}
-User: "Package A ราคาเท่าไหร่" → {"intent":"PRIVATE_MEMORY","action":"SEARCH_MEMORY","complexity":2,"tone":"professional"}
-User: "วิเคราะห์ยอดขาย 3 เดือนย้อนหลัง เปรียบเทียบแต่ละสาขา พร้อมกราฟ" → {"intent":"STORY","action":"ANALYZE","complexity":5,"tone":"professional"}
-User: "show me the revenue trend chart" → {"intent":"POLARS","action":"CHART","complexity":3,"tone":"professional"}
+## Complexity: 1=no tools, 2=one tool, 3=2-3 tools, 4=multi-step, 5=deep research
 
-Return ONLY valid JSON: {"intent":"...","action":"...","entity":"...or null","complexity":1-5,"tone":"..."}
+Return ONLY valid JSON: {"intent":"...","action":"...","entity":"...or null","complexity":1-5,"tone":"professional|casual"}
 """
 
 

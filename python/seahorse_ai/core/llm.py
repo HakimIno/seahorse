@@ -1,9 +1,9 @@
 """LiteLLM-backed LLM client with async complete and stream support.
 
 Phase 3 improvements:
-- stream() now uses exclude_none=True for consistency with complete()
-- stream() has exponential backoff retry on transient LLM errors
-- All imports at top-level (no inline imports)
+- strategist tier support (Claude Sonnet 4.6)
+- extract/fast tier support
+- All imports at top-level
 """
 
 from __future__ import annotations
@@ -68,12 +68,17 @@ class LLMClient:
                 "Please try again in 1 minute."
             )
 
-        if tier in ("thinker", "strategist"):
+        if tier == "thinker":
             model = self._config.thinker_model
+        elif tier == "strategist":
+            model = self._config.strategist_model
         elif tier == "fast":
             model = self._config.fast_path_model
+        elif tier == "extract":
+            model = self._config.extract_model
         else:
             model = self._config.model
+
         timeout_sec = 60.0 if tier in ("thinker", "strategist") else 15.0
         backoff = 1.0
         for attempt in range(retries + 1):
@@ -131,12 +136,17 @@ class LLMClient:
                 "System is temporarily in Safe Mode due to multiple LLM failures. Please try again in 1 minute."
             )
 
-        if tier in ("thinker", "strategist"):
+        if tier == "thinker":
             model = self._config.thinker_model
+        elif tier == "strategist":
+            model = self._config.strategist_model
         elif tier == "fast":
             model = self._config.fast_path_model
+        elif tier == "extract":
+            model = self._config.extract_model
         else:
             model = self._config.model
+
         timeout_sec = 180.0 if tier in ("thinker", "strategist", "worker") else 30.0
         kwargs: dict = {
             "model": model,
@@ -151,13 +161,10 @@ class LLMClient:
         try:
             response = await litellm.acompletion(**kwargs)
             message = response.choices[0].message
-            # LiteLLM message objects often contain nested Pydantic models (like tool_calls).
-            # We MUST perform a deep conversion to plain dicts for msgspec compatibility.
             if hasattr(message, "model_dump_json"):  # Pydantic v2
                 return json.loads(message.model_dump_json(exclude_none=True))
             if hasattr(message, "json"):  # Pydantic v1 / Legacy LiteLLM
                 return json.loads(message.json())
-            # Fallback to standard dict conversion (may not be deep)
             return dict(message)
 
         except _RETRYABLE as exc:
@@ -172,7 +179,7 @@ class LLMClient:
                 )
                 await anyio.sleep(total_backoff)
                 return await self._complete_with_retry(
-                    messages, tools=tools, retries=retries - 1, backoff=backoff * 2
+                    messages, tools=tools, retries=retries - 1, backoff=backoff * 2, tier=tier
                 )
             raise
 
@@ -188,16 +195,12 @@ class LLMClient:
         cleaned = []
         for m in messages:
             built = msgspec.to_builtins(m)
-
-            # Preserve message if it has content OR tool_calls
             has_content = bool(built.get("content"))
             has_tools = bool(built.get("tool_calls"))
             has_tool_id = bool(built.get("tool_call_id"))
 
             if not (has_content or has_tools or has_tool_id):
                 continue
-
-            # Gemini-specific: Ensure content is never None if tool_calls are present
             if has_tools and not built.get("content"):
                 built["content"] = ""
 
@@ -207,34 +210,27 @@ class LLMClient:
                 and built["role"] in ("user", "system")
                 and not (has_tools or has_tool_id or cleaned[-1].get("tool_calls"))
             ):
-                # Assistant/Tool roles should NOT be merged if they have tool_calls/ids.
                 cleaned[-1]["content"] += f"\n\n{built['content']}"
                 continue
 
             cleaned.append(built)
-
         return cleaned
 
 
 def get_llm(tier: str = "worker") -> LLMClient:
-    """Helper to get a default LLM client for this tier.
-
-    Reads from environment variables:
-    - SEAHORSE_WORKER_MODEL
-    - SEAHORSE_THINKER_MODEL
-    """
-
+    """Helper to get a default LLM client for this tier."""
     from seahorse_ai.core.schemas import LLMConfig
-
-    # Use environment variables if available, otherwise defaults
     config = LLMConfig()
-    model = config.model
-
+    
     if tier == "thinker":
         model = config.thinker_model
+    elif tier == "strategist":
+        model = config.strategist_model
     elif tier == "fast":
         model = config.fast_path_model
     elif tier == "extract":
         model = config.extract_model
+    else:
+        model = config.model
 
     return LLMClient(config=LLMConfig(model=model))

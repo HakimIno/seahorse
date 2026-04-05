@@ -161,17 +161,28 @@ async def browser_scrape(
                 await page.wait_for_selector(wait_for, timeout=10_000)
 
             title = await page.title()
-            # ดึงเฉพาะ text — ตัด script/style noise ออก
-            text = await page.evaluate("""() => {
-                const remove = document.querySelectorAll(
-                    'script, style, nav, footer, header, aside, [aria-hidden="true"]'
-                );
-                remove.forEach(el => el.remove());
-                return document.body?.innerText?.trim() ?? '';
+            # ดึงเฉพาะเนื้อหาหลัก — ตัด Noise (header, footer, nav, ads)
+            text = await page.evaluate(r"""() => {
+                const selectors = [
+                    'script', 'style', 'nav', 'footer', 'header', 'aside', 
+                    'noscript', '[aria-hidden="true"]', '.ad', '.ads', 
+                    '.social-share', '.menu', '.sidebar'
+                ];
+                selectors.forEach(s => {
+                    document.querySelectorAll(s).forEach(el => el.remove());
+                });
+                
+                // Get innerText but normalize whitespace
+                let content = document.body?.innerText || '';
+                return content
+                    .replace(/\t/g, ' ')
+                    .replace(/ +/g, ' ')
+                    .replace(/\n\s*\n+/g, '\n\n')
+                    .trim();
             }""")
 
-            # ตัด whitespace ซ้อน
-            text = " ".join(text.split())[:8000]  # cap ที่ 8k chars
+            # Cap content to 10k chars for safety
+            text = text[:10000]
 
             if screenshot_path:
                 await page.screenshot(path=screenshot_path, full_page=True)

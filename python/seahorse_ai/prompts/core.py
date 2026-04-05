@@ -50,30 +50,23 @@ def build_system_prompt(
         
     prompt = base_persona.format(today=today, db_type=db_type)
 
-    # 2. Intent-specific expansion
-    if intent in ("DATABASE", "PRIVATE_MEMORY"):
-        prompt += (
-            "\n## Deep Analysis Mode\n"
-            "- You are in Thorough Expert mode. Prioritize depth, accuracy, and immediate action over redundant explanations.\n"
-            "- Do NOT narrate your planning or research steps to the user. Just execute and provide the final result."
-        )
+    # 2. Efficiency nudge — universal, not intent-specific
+    prompt += (
+        "\n## Efficiency"
+        "\n- Use the minimum number of tool calls needed. Don't over-research."
+        "\n- After getting good data from tools, synthesize and respond immediately."
+        "\n- Only create charts or visualizations when explicitly requested."
+    )
 
-    # 3. Dynamic Skill Guidelines (Modular Filtering)
-    if intent in ("GENERAL", "GREET") and tone != "CASUAL":
-        prompt += (
-            "\n## Guidelines\n- You are currently in Chat Mode. Answer naturally and concisely."
-        )
-        return prompt
-
+    # 3. Dynamic Skill Guidelines
     if skills:
-        prompt += "\n## Guidelines for Your Skills\n"
+        prompt += "\n## Your Active Skills\n"
         for skill in skills:
             prompt += skill.get_prompt_snippet() + "\n"
     else:
-        # Fallback to legacy tool rules if no skills provided
         prompt += "\n" + _load_manifest("tool_rules")
 
-    # 3. Static Layers (Confidence, Examples, Quality)
+    # 4. Quality layers
     prompt += (
         "\n\n" + _load_manifest("few_shot") + 
         "\n\n" + _load_manifest("confidence")
